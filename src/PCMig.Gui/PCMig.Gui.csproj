@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>PCMig</AssemblyName>
+    <RootNamespace>PCMig.Gui</RootNamespace>
+    <Version>0.2.5</Version>
+    <Description>PCMig 图形界面：企业内网 Windows 数据/环境迁移</Description>
+    <Authors>郑子轩 (Axuanbest)</Authors>
+    <Company>Axuanbest</Company>
+    <Copyright>© 2026 郑子轩 (Axuanbest). Crafted with care.</Copyright>
+    <ApplicationIcon>Assets\pcmig.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PCMig.Core\PCMig.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\pcmig.ico" />
+    <None Include="..\..\matrix\migration-matrix.yaml">
+      <Link>matrix\migration-matrix.yaml</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

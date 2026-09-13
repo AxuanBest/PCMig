@@ -1,0 +1,51 @@
+# ============================================================
+# PCMig 迁移策略矩阵 v1
+# 扫描 / 传输 / 验证 三方统一使用本名单，保证口径一致。
+# 修改后无需重启：每个 Job 启动时读取。
+# ============================================================
+schemaVersion: "1.0"
+
+# 大文件阈值：≥ 该值的文件走 /Z 单线程可续传通道（断网/断电后可从文件内部续传）
+largeFileThresholdMB: 512
+
+# 云占位符（OneDrive 等）策略：Warn = 记录警告仍继续；后续版本支持 Skip
+cloudPlaceholderPolicy: Warn
+
+# 全局排除目录（robocopy /XD，任意深度生效）
+excludedDirectoryNames:
+  - "$RECYCLE.BIN"
+  - RECYCLER
+  - "System Volume Information"
+  - Recovery
+  - Config.Msi
+  - "$Windows.~BT"
+  - "$Windows.~WS"
+  - Windows.old
+  - PerfLogs
+
+# 全局排除文件（robocopy /XF）
+excludedFileNames:
+  - pagefile.sys
+  - hiberfil.sys
+  - swapfile.sys
+  - DumpStack.log.tmp
+  - desktop.ini
+  - Thumbs.db
+
+# 凭据/安全边界：永不迁移（DPAPI 绑定源机+源用户，搬过去也解不开）
+securityBlockedFileNames:
+  - "Login Data"
+  - "Login Data-journal"
+  - Cookies
+  - "Cookies-journal"
+  - "Web Data"
+  - "Web Data-journal"
+
+# ------------------------------------------------------------
+# 应用 Recipe 扩展点（V1 预留，V1.5 落地）：
+# recipes:
+#   chrome:
+#     mode: InstallAndRestore
+#     include: ["AppData/Local/Google/Chrome/User Data"]
+#     exclude: ["Cache", "GPUCache", "Code Cache"]
+# ------------------------------------------------------------

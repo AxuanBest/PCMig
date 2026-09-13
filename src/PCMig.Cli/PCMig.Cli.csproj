@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>pcmig</AssemblyName>
+    <RootNamespace>PCMig.Cli</RootNamespace>
+    <Version>0.2.5</Version>
+    <Description>PCMig 命令行：内网 Windows 用户环境/数据迁移</Description>
+    <Authors>郑子轩 (Axuanbest)</Authors>
+    <Company>Axuanbest</Company>
+    <Copyright>© 2026 郑子轩 (Axuanbest). Crafted with care.</Copyright>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PCMig.Core\PCMig.Core.csproj" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\matrix\migration-matrix.yaml">
+      <Link>matrix\migration-matrix.yaml</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
+
+
+
+

@@ -1,0 +1,31 @@
+# 构建产物
+dist/
+*.exe
+*.dll
+*.pdb
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# .NET
+**/bin/
+**/obj/
+
+# 测试 VM 产物（含实验数据，不入仓库）
+lab/answer/answer.iso
+lab/*.txt
+lab/*.png
+lab/vm-*.ps1
+lab/fill-*.ps1
+lab/make-*.ps1
+lab/unlock.ps1
+lab/repair-src.ps1
+
+# 运行时生成的 Job 数据
+jobs/
+
+# 截图（按需手动加入）
+docs/screenshots/*.png
