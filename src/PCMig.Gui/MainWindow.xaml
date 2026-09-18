@@ -738,7 +738,13 @@
             <RowDefinition Height="Auto"/>   <!-- 底部状态栏 -->
         </Grid.RowDefinitions>
         <!-- 白洗层：系统亚克力自带深色 tint，垫一层半透明白保证可读、又保留 30% 实时模糊 -->
-        <Border Grid.RowSpan="3" Background="{DynamicResource GlassWashBg}" IsHitTestVisible="False"/>
+        <!-- ══ Layer 0：Root Background 承载层 ══
+             这一层 RowSpan=3 铺满整个窗口客户区，是真正决定「模块之间缝隙 / 窗口四周留白」
+             显示什么的那一层。此前它用的是不透明的 GlassWashBg，把 Window 上的
+             AppBackgroundBrush 完全盖住，所以无论怎么改 Window.Background 留白都是纯白。
+             现在它直接承载 Root Background 的浅蓝→浅红→浅橙环境渐变。
+             上层所有 Surface 仍然完全不透明，不会透出这层颜色。 -->
+        <Border Grid.RowSpan="3" Background="{DynamicResource AppBackgroundBrush}" IsHitTestVisible="False"/>
         <!-- 苹果风底景：内置柔色块光晕（mockup 的壁纸透色感，自绘、不依赖 OS 模糊） -->
         
 
@@ -870,11 +876,11 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
-                        <!-- Inner Edge：极细内缘光学，与其他 Surface 同一套；不参与命中测试，不影响交互 -->
-                        <Border Grid.RowSpan="3" Margin="1" BorderThickness="1"
-                                BorderBrush="{DynamicResource InnerEdge}"
-                                CornerRadius="{DynamicResource RadiusCard}"
-                                IsHitTestVisible="False" Panel.ZIndex="99"/>
+                        <!-- 注：此面板只保留「一套」边缘结构 —— 由外层 Border 的
+                             ErrorEdgeLight + ContactShadow 承担 Surface / Edge Lighting / 接触阴影。
+                             曾在此加过一层 Margin=1 的 InnerEdge 覆盖 Border，它会与主边框
+                             形成明显的「套娃式双层框」，已移除。Inner Edge 的空间感由
+                             ErrorEdgeLight 自身的径向渐变（左上亮→右下暗）表达。 -->
                         <TextBlock Grid.Row="0" Text="{Binding ErrorHeader}" Margin="16,0,14,5"
                                    FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource GlassErrorText}">
                             <TextBlock.Style>
