@@ -218,13 +218,16 @@
                 </Setter.Value>
             </Setter>
         </Style>
-        <!-- ══════════ 日志查看器专用（只读内容展示，与输入框共用样式是爆白的根因）══════════
-             背景：实时日志此前直接使用上面的隐式 TextBox 样式。那个样式是给「表单输入框」设计的，
-             模板里带 IsMouseOver → bd.Background = GlassHoverBg（浅色）的"Hover 亮起"触发器。
-             ControlTemplate.Triggers 的优先级高于 TemplateBinding，所以鼠标一进入日志区，
-             整块只读内容的背景就被换成浅色，表现为大面积爆白。
-             ControlTemplate.Triggers 高于 TemplateBinding，改局部无法压住，因此这里给日志一个
-             独立模板：Hover 只增强「边缘光」，绝不改大面积背景，符合"内容 Surface 不做 Button 级 Hover"。 -->
+        <!-- ══════════ 日志查看器专用（只读内容展示）══════════
+             为什么不能复用上面的隐式 TextBox 样式：
+             那个样式是给「表单输入框」设计的，模板里带 IsMouseOver → bd.Background = GlassHoverBg
+             的"Hover 亮起"触发器。ControlTemplate.Triggers 的优先级高于 TemplateBinding，
+             所以鼠标一进入日志区，整块只读内容的背景就被换成浅色，表现为大面积爆白。
+             为什么这里不再画 edge 描边：
+             日志外壳（GlassContentSurface）已经提供了唯一的那一圈 Liquid Glass 边缘光。
+             内层再加一圈描边就会变成"套娃双框"——与之前红色报错栏出现过的缺陷同类。
+             日志底本身已是统一的深色，层次由「外壳边缘光 + 深色底 + 文字」表达即可，
+             内容区不需要自己的边框，也不需要任何 Hover 高亮。 -->
         <Style x:Key="LogViewer" TargetType="TextBox">
             <Setter Property="Padding" Value="0"/>
             <Setter Property="Background" Value="{DynamicResource GlassLogBg}"/>
@@ -237,19 +240,11 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
                         <Grid>
+                            <!-- 只有背景与内容宿主：不画描边，也不随 Hover 改变任何视觉 -->
                             <Border x:Name="bd" Background="{TemplateBinding Background}"
                                     CornerRadius="{DynamicResource RadiusControl}"/>
-                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}"
-                                    BorderBrush="{DynamicResource EdgeHighlight}" BorderThickness="1"
-                                    IsHitTestVisible="False"/>
                             <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False"/>
                         </Grid>
-                        <ControlTemplate.Triggers>
-                            <!-- 内容区 Hover：只让边缘光增强一档，背景保持不变 -->
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightStrong}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
