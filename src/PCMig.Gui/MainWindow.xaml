@@ -1516,7 +1516,7 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Row="4" Style="{StaticResource Card}" Background="{DynamicResource GlassLogBg}" BorderBrush="{DynamicResource GlassLogBg}">
+                    <Border Grid.Row="4" Style="{StaticResource GlassContentSurface}">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/><RowDefinition Height="*"/>

@@ -204,6 +204,19 @@
         </Style>
 
         <!-- ══════════ 容器：静态 Surface，只有方向性边缘光 + 极轻接触阴影（不参与 Hover 浮动）══════════ -->
+        <!-- 内容展示 Surface：只承载内容（日志、长文本、只读区域），
+             与 Card 的区别是「不参与交互」——
+             不带 Effect（不需要悬浮感）、不带任何 IsMouseOver 触发器，
+             因此鼠标进入内容区不会产生任何大面积高亮。
+             交互卡片请用 Card；纯内容请用这个。 -->
+        <Style x:Key="GlassContentSurface" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource GlassLogBg}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource EdgeHighlight}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{StaticResource RadiusCard}"/>
+            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource SurfaceColor}"/>
             <Setter Property="BorderBrush" Value="{StaticResource EdgeHighlight}"/>
