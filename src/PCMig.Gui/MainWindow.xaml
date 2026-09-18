@@ -218,6 +218,43 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- ══════════ 日志查看器专用（只读内容展示，与输入框共用样式是爆白的根因）══════════
+             背景：实时日志此前直接使用上面的隐式 TextBox 样式。那个样式是给「表单输入框」设计的，
+             模板里带 IsMouseOver → bd.Background = GlassHoverBg（浅色）的"Hover 亮起"触发器。
+             ControlTemplate.Triggers 的优先级高于 TemplateBinding，所以鼠标一进入日志区，
+             整块只读内容的背景就被换成浅色，表现为大面积爆白。
+             ControlTemplate.Triggers 高于 TemplateBinding，改局部无法压住，因此这里给日志一个
+             独立模板：Hover 只增强「边缘光」，绝不改大面积背景，符合"内容 Surface 不做 Button 级 Hover"。 -->
+        <Style x:Key="LogViewer" TargetType="TextBox">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Background" Value="{DynamicResource GlassLogBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassLogText}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource GlassLogText}"/>
+            <Setter Property="SelectionBrush" Value="{DynamicResource GlassAccentGlow}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Grid>
+                            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                    CornerRadius="{DynamicResource RadiusControl}"/>
+                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}"
+                                    BorderBrush="{DynamicResource EdgeHighlight}" BorderThickness="1"
+                                    IsHitTestVisible="False"/>
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <!-- 内容区 Hover：只让边缘光增强一档，背景保持不变 -->
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightStrong}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="PasswordBox">
             <Setter Property="Padding" Value="9,6"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
@@ -1524,6 +1561,7 @@
                             <TextBlock Text="实时日志（完整日志见 %ProgramData%\PCMig\Logs 与任务目录）"
                                        Foreground="{DynamicResource GlassFaintTextBrush}" FontSize="11"/>
                             <TextBox Grid.Row="1" Margin="0,8,0,0" Text="{Binding LogText, Mode=OneWay}" IsReadOnly="True"
+                                     Style="{StaticResource LogViewer}"
                                      TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
                                      FontFamily="Consolas" FontSize="11" BorderThickness="0"
                                      Background="{DynamicResource GlassLogBg}" Foreground="{DynamicResource GlassLogText}" CaretBrush="{DynamicResource GlassLogText}"/>
