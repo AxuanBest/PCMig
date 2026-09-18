@@ -219,14 +219,14 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="ProgressBar">
                         <Grid>
-                            <Border CornerRadius="8" Background="{StaticResource GlassSecondaryBg}"/>
-                            <Border x:Name="PART_Track" CornerRadius="8" ClipToBounds="True">
-                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="8">
+                            <Border CornerRadius="{StaticResource RadiusProgress}" Background="{StaticResource GlassInnerDeepBg}"/>
+                            <Border x:Name="PART_Track" CornerRadius="{StaticResource RadiusProgress}" ClipToBounds="True">
+                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="{StaticResource RadiusProgress}">
                                     <Border.Background>
                                         <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                            <GradientStop Color="#60A5FA" Offset="0"/>
-                                            <GradientStop Color="#2563EB" Offset="0.55"/>
-                                            <GradientStop Color="#1D4ED8" Offset="1"/>
+                                            <GradientStop Color="{DynamicResource AccentSoftColor}" Offset="0"/>
+                                            <GradientStop Color="{DynamicResource AccentColor}" Offset="0.55"/>
+                                            <GradientStop Color="{DynamicResource AccentDeepColor}" Offset="1"/>
                                         </LinearGradientBrush>
                                     </Border.Background>
                                     <Grid ClipToBounds="True">
@@ -279,13 +279,13 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="ProgressBar">
                         <Grid>
-                            <Border CornerRadius="6" Background="{StaticResource GlassSecondaryBg}"/>
-                            <Border x:Name="PART_Track" CornerRadius="6" ClipToBounds="True">
-                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="6">
+                            <Border CornerRadius="{StaticResource RadiusProgress}" Background="{StaticResource GlassInnerDeepBg}"/>
+                            <Border x:Name="PART_Track" CornerRadius="{StaticResource RadiusProgress}" ClipToBounds="True">
+                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="{StaticResource RadiusProgress}">
                                     <Border.Background>
                                         <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                            <GradientStop Color="#60A5FA" Offset="0"/>
-                                            <GradientStop Color="#2563EB" Offset="1"/>
+                                            <GradientStop Color="{DynamicResource AccentSoftColor}" Offset="0"/>
+                                            <GradientStop Color="{DynamicResource AccentColor}" Offset="1"/>
                                         </LinearGradientBrush>
                                     </Border.Background>
                                 </Border>
@@ -401,7 +401,7 @@
                                 <Setter TargetName="edge" Property="BorderThickness" Value="1.4"/>
                                 <Setter TargetName="bd" Property="Effect">
                                     <Setter.Value>
-                                        <DropShadowEffect BlurRadius="9" ShadowDepth="0" Opacity="0.40" Color="#0A84FF"/>
+                                        <DropShadowEffect BlurRadius="9" ShadowDepth="0" Opacity="0.40" Color="{DynamicResource AccentColor}"/>
                                     </Setter.Value>
                                 </Setter>
                             </Trigger>
@@ -446,7 +446,7 @@
                                 <Setter TargetName="edge" Property="BorderThickness" Value="1.4"/>
                                 <Setter TargetName="bd" Property="Effect">
                                     <Setter.Value>
-                                        <DropShadowEffect BlurRadius="9" ShadowDepth="0" Opacity="0.40" Color="#0A84FF"/>
+                                        <DropShadowEffect BlurRadius="9" ShadowDepth="0" Opacity="0.40" Color="{DynamicResource AccentColor}"/>
                                     </Setter.Value>
                                 </Setter>
                             </Trigger>
@@ -962,7 +962,7 @@
         </Canvas>
 
         <!-- ══════════ 顶栏：标题 + 源→目标 ═══════════ -->
-        <Border Grid.Row="0" Background="{StaticResource GlassPanelBg}" BorderBrush="{StaticResource GlassBorderBrush}" BorderThickness="0,0,0,1" Padding="18,12">
+        <Border Grid.Row="0" Margin="14,14,14,0" Background="{StaticResource GlassRailBg}" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,12">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -1016,7 +1016,7 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Background="{StaticResource GlassRailBg}" BorderBrush="{StaticResource GlassBorderBrush}" BorderThickness="0,0,1,0">
+            <Border Grid.Column="0" Margin="14,12,0,0" Background="{StaticResource GlassRailBg}" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}">
               <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
@@ -1204,7 +1204,7 @@
               </Grid>
             </Border>
 
-            <Grid Grid.Column="1" Margin="14,12,14,10">
+            <Grid Grid.Column="1" Margin="12,12,14,0">
 
                 <!-- ══════ ① 连接源电脑 ══════ -->
                 <Grid x:Name="PageConnect" Visibility="{Binding IsStepConnect, Converter={StaticResource BoolVis}}" Style="{StaticResource PageFade}">
@@ -1728,7 +1728,7 @@
         </Grid>
 
         <!-- ═══════════ 底部状态栏（常驻） ═══════════ -->
-        <Border Grid.Row="2" Background="{StaticResource GlassPanelBg}" BorderBrush="{StaticResource GlassBorderBrush}" BorderThickness="0,1,0,0" Padding="18,10">
+        <Border Grid.Row="2" Margin="14,12,14,14" Background="{StaticResource GlassRailBg}" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,10">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>

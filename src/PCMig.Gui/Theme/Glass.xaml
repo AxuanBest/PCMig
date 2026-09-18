@@ -21,8 +21,8 @@
     <SolidColorBrush x:Key="GlassWashBg" Color="#14FFFFFF"/>
 
     <!-- ══ 2. 表面材质（高度分层：越靠前越实、越亮） ══ -->
-    <SolidColorBrush x:Key="GlassRailBg" Color="#8CFFFFFF"/>
-    <SolidColorBrush x:Key="GlassPanelBg" Color="#80FFFFFF"/>
+    <SolidColorBrush x:Key="GlassRailBg" Color="#7AFFFFFF"/>
+    <SolidColorBrush x:Key="GlassPanelBg" Color="#6EFFFFFF"/>
     <SolidColorBrush x:Key="GlassCardBg" Color="#A6FFFFFF"/>
     <SolidColorBrush x:Key="GlassSecondaryBg" Color="#66FFFFFF"/>
     <!-- InnerSurface：卡片内部凹面（比卡片略深、更透，形成"嵌进材质"的观感） -->
@@ -58,6 +58,9 @@
     <SolidColorBrush x:Key="GlassAccentDeep" Color="#0069D9"/>
     <SolidColorBrush x:Key="GlassAccentSoft" Color="#2E0A84FF"/>
     <SolidColorBrush x:Key="GlassAccentSofter" Color="#1A0A84FF"/>
+    <Color x:Key="AccentSoftColor">#7FBFFF</Color>
+    <Color x:Key="AccentColor">#0A84FF</Color>
+    <Color x:Key="AccentDeepColor">#0069D9</Color>
     <SolidColorBrush x:Key="GlassAccentGlow" Color="#4D0A84FF"/>
     <SolidColorBrush x:Key="GlassAccentText" Color="#0A5FD0"/>
     <SolidColorBrush x:Key="GlassFocusRing" Color="#660A84FF"/>

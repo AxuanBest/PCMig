@@ -52,6 +52,9 @@
     <SolidColorBrush x:Key="GlassAccentDeep" Color="#3D9BFF"/>
     <SolidColorBrush x:Key="GlassAccentSoft" Color="#382F8CFF"/>
     <SolidColorBrush x:Key="GlassAccentSofter" Color="#1F2F8CFF"/>
+    <Color x:Key="AccentSoftColor">#66B2FF</Color>
+    <Color x:Key="AccentColor">#0A84FF</Color>
+    <Color x:Key="AccentDeepColor">#3D9BFF</Color>
     <SolidColorBrush x:Key="GlassAccentGlow" Color="#5C0A84FF"/>
     <SolidColorBrush x:Key="GlassAccentText" Color="#7FB6FF"/>
     <SolidColorBrush x:Key="GlassFocusRing" Color="#800A84FF"/>
