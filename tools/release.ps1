@@ -163,7 +163,9 @@ foreach ($p in $pairs) {
   if ((Get-FileHash $p.Src).Hash -ne (Get-FileHash $p.Dst).Hash) { Abort ('哈希不一致：' + $p.Dst) }
   Write-Output ('   MATCH ' + (Split-Path $p.Dst -Leaf) + '  ' + $p.Dst)
 }
-Get-ChildItem (Join-Path $delivery 'PCMigSetup-*.exe') | Where-Object { $_.Name -ne ('PCMigSetup-' + $Version + '.exe') } | ForEach-Object { Write-Output ('   清理旧安装包 ' + $_.Name); Remove-Item $_.FullName -Force }
+# 历史安装包一律保留：交付区按「各版本并列存放」使用（用户明确要求），全量存档在 dist\。
+# 此处只列出并列版本，绝不删除。曾因自动清理删掉交付区 4 个历史包，已逐文件 SHA256 校验后恢复。
+Get-ChildItem (Join-Path $delivery 'PCMigSetup-*.exe') | Sort-Object Name | ForEach-Object { Write-Output ('   并列版本 ' + $_.Name) }
 if ($mirror) {
   robocopy $repo $mirror /MIR /XD bin obj dist /XF *.user /NFL /NDL /NP /R:0 /W:0 | Select-Object -Last 1
 } else {
