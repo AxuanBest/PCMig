@@ -96,7 +96,7 @@ public partial class App : Application
             var tail = fatal
                 ? "程序可能即将退出。已完成的数据不受影响，重新打开后可用「恢复任务」从中断处继续（已传部分不会重传）。"
                 : "本次操作已中止，已完成的数据不受影响，可以直接重试。";
-            MessageBox.Show(Current?.MainWindow,
+            AppDialog.Show(Current?.MainWindow,
                 $"PCMig 遇到一个未处理的错误。\n\n位置：{where}\n错误：{ex?.GetType().Name} {ex?.Message}\n\n{tail}\n\n" +
                 (crashFile != null ? "崩溃记录：" + crashFile + "\n" : "") +
                 "应用日志目录：" + LogBootstrap.AppLogDir + "\n\n请把上面这个目录（或那份崩溃记录）发给我们，可直接定位。",

@@ -1,0 +1,398 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- ══════════════════════════════════════════════════════════════════════════════
+         PCMig Design System · Controls（跨窗口共享控件样式）
+         ──────────────────────────────────────────────────────────────────────────────
+         放在 App 级合并字典里（在主题 token 之后加载），因此【主窗口 / 更新日志窗口 /
+         任何未来的 Dialog、Secondary Window】都自动继承同一套按钮、容器与弹窗层级。
+         改一个规则 = 全应用同步；每个窗口不需要、也不允许再单独设计一套按钮。
+         ══════════════════════════════════════════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════════════════════════════════
+             按钮体系 · Edge Lighting（取代上一版厚重浮雕）
+             ──────────────────────────────────────────────────────────────────────────────
+             每个按钮 4 层，空间感只来自边缘光学与接触阴影，主体保持干净的不透明 Surface：
+               ① cast      主体 + 极轻接触阴影（只表达"略高于背景"，快速衰减）
+               ② edge      方向性边缘光：45° 渐变 1px 描边，左上最亮 → 右下最暗
+               ③ innerEdge 内部边缘：距轮廓 1px 的极弱明暗，暗示表面厚度（不是 Bevel）
+               ④ 内容
+             没有粗白描边、没有大面积渐变、没有大黑阴影。
+             ══════════════════════════════════════════════════════════════════════════════ -->
+        <Style x:Key="PrimaryButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource TypographyOnAccent}"/>
+            <Setter Property="Background" Value="{DynamicResource AccentColorBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="cast" CornerRadius="{DynamicResource RadiusControl}"
+                                    Background="{TemplateBinding Background}"
+                                    Effect="{DynamicResource ContactShadow}" SnapsToDevicePixels="True"/>
+                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}" BorderThickness="1"
+                                    BorderBrush="{DynamicResource EdgeHighlight}" IsHitTestVisible="False"/>
+                            <Border x:Name="innerEdge" CornerRadius="{DynamicResource RadiusControl}" Margin="1"
+                                    BorderThickness="1" BorderBrush="{DynamicResource InnerEdge}"
+                                    IsHitTestVisible="False"/>
+                            <Border CornerRadius="{DynamicResource RadiusControl}" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True"/>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation1}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightStrong}"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="-1"/></Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource AccentColorText}"/>
+                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation0}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightPressed}"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="1"/></Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="edge" Property="BorderThickness" Value="1.6"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfaceSunken}"/>
+                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation0}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource DividerColor}"/>
+                                <Setter TargetName="innerEdge" Property="Opacity" Value="0"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TypographyDisabled}"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="NormalButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource TypographyPrimary}"/>
+            <Setter Property="Background" Value="{DynamicResource SurfaceColor}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="cast" CornerRadius="{DynamicResource RadiusControl}"
+                                    Background="{TemplateBinding Background}"
+                                    Effect="{DynamicResource ContactShadow}" SnapsToDevicePixels="True"/>
+                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}" BorderThickness="1"
+                                    BorderBrush="{DynamicResource EdgeHighlight}" IsHitTestVisible="False"/>
+                            <Border x:Name="innerEdge" CornerRadius="{DynamicResource RadiusControl}" Margin="1"
+                                    BorderThickness="1" BorderBrush="{DynamicResource InnerEdge}"
+                                    IsHitTestVisible="False"/>
+                            <Border CornerRadius="{DynamicResource RadiusControl}" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True"/>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation1}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightStrong}"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="-1"/></Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfacePressed}"/>
+                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation0}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightPressed}"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="1"/></Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource AccentColorBrush}"/>
+                                <Setter TargetName="edge" Property="BorderThickness" Value="1.6"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfaceSunken}"/>
+                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation0}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource DividerColor}"/>
+                                <Setter TargetName="innerEdge" Property="Opacity" Value="0"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TypographyDisabled}"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource NormalButton}">
+            <Setter Property="Foreground" Value="{DynamicResource ErrorTextColor}"/>
+            <Setter Property="Background" Value="{DynamicResource ErrorSurface}"/>
+        </Style>
+
+        <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource NormalButton}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource TypographySecondary}"/>
+        </Style>
+
+        <Style x:Key="IconButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource TypographyPrimary}"/>
+            <Setter Property="Background" Value="{DynamicResource SurfaceColor}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="cast" CornerRadius="{DynamicResource RadiusItem}"
+                                    Background="{TemplateBinding Background}"
+                                    Effect="{DynamicResource ContactShadow}" SnapsToDevicePixels="True"/>
+                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusItem}" BorderThickness="1"
+                                    BorderBrush="{DynamicResource EdgeHighlight}" IsHitTestVisible="False"/>
+                            <Border x:Name="innerEdge" CornerRadius="{DynamicResource RadiusItem}" Margin="1"
+                                    BorderThickness="1" BorderBrush="{DynamicResource InnerEdge}"
+                                    IsHitTestVisible="False"/>
+                            <Border CornerRadius="{DynamicResource RadiusItem}" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True"/>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation1}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightStrong}"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="-1"/></Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfacePressed}"/>
+                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation0}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightPressed}"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="1"/></Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource AccentColorBrush}"/>
+                                <Setter TargetName="edge" Property="BorderThickness" Value="1.6"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfaceSunken}"/>
+                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation0}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource DividerColor}"/>
+                                <Setter TargetName="innerEdge" Property="Opacity" Value="0"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TypographyDisabled}"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ══════════ 容器：静态 Surface，只有方向性边缘光 + 极轻接触阴影（不参与 Hover 浮动）══════════ -->
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource SurfaceColor}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource EdgeHighlight}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{StaticResource RadiusCard}"/>
+            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="Effect" Value="{StaticResource GlassCardShadow}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
+
+        <Style x:Key="GlassInnerSurface" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSunken}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource InnerEdge}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusInner}"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
+
+        <Style x:Key="GlassStatusSurface" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSecondary}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource EdgeHighlight}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusCard}"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
+
+        <!-- ══════════ 弹窗层级（Dialog / Secondary Window 共用，禁止各窗单独设计）══════════
+             窗口外框：不透明 Surface + 方向性边缘光 + 极轻外阴影；内部再叠一层 InnerEdge 暗示厚度。
+             参考它的窗口只需：Background="{StaticResource SurfaceDialog}"，内容套 Style="{StaticResource DialogSurface}" -->
+        <Style x:Key="DialogSurface" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource SurfaceDialog}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource EdgeHighlight}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{StaticResource CornerRadiusWindow}"/>
+            <Setter Property="Effect" Value="{StaticResource DialogShadow}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
+
+        <Style x:Key="DialogInnerSurface" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSunken}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource InnerEdge}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusInner}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
+
+        <Style x:Key="DialogTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{DynamicResource TypographyPrimary}"/>
+        </Style>
+
+        <Style x:Key="DialogCaption" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Foreground" Value="{DynamicResource TypographySecondary}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+
+        <!-- ══════════ 弹窗内的列表项：整行可点 + 与主窗同一套 Hover/Selected 语义 ══════════ -->
+        <Style x:Key="DialogListItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="Margin" Value="0,0,0,2"/>
+            <!-- ★ 必须 Focusable=True，否则 WPF 跳过鼠标选择（与主导航同一个坑） -->
+            <Setter Property="Focusable" Value="True"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="{DynamicResource RadiusItem}"
+                                Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Stretch"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SurfaceSelected}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+<Style x:Key="StepRail" TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ListBoxItem">
+                        <!-- ★ 四个导航是四个独立 UI Object：靠 8px 垂直间距分开，绝不共用一条边 -->
+                        <Setter Property="Margin" Value="0,0,0,8"/>
+                        <Setter Property="Padding" Value="12,10"/>
+                        <!-- ★ 必须 Focusable=True：WPF 的 ListBoxItem 在 Focusable=False 时会跳过鼠标选择逻辑，
+                             导致「hover 有反馈、点击不切换」——这是导航失灵的真实原因 -->
+                        <Setter Property="Focusable" Value="True"/>
+                        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="Cursor" Value="Hand"/>
+                        <Setter Property="SnapsToDevicePixels" Value="True"/>
+                        <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Grid x:Name="shift" RenderTransformOrigin="0.5,0.5">
+                                        <Grid.RenderTransform>
+                                            <TranslateTransform Y="0"/>
+                                        </Grid.RenderTransform>
+                                        <!-- ① 主体 + 极轻接触阴影 -->
+                                        <Border x:Name="cast" CornerRadius="{DynamicResource RadiusControl}"
+                                                Background="{DynamicResource SurfaceColor}"
+                                                Effect="{DynamicResource ContactShadow}" SnapsToDevicePixels="True"/>
+                                        <!-- ② 方向性边缘光（左上亮 → 右下暗，1px） -->
+                                        <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}" BorderThickness="1"
+                                                BorderBrush="{DynamicResource EdgeHighlight}" IsHitTestVisible="False"/>
+                                        <!-- ③ 内部边缘（inset 1px，极弱） -->
+                                        <Border x:Name="innerEdge" CornerRadius="{DynamicResource RadiusControl}" Margin="1"
+                                                BorderThickness="1" BorderBrush="{DynamicResource InnerEdge}"
+                                                IsHitTestVisible="False"/>
+                                        <!-- ④ 按下时的内暗层（用透明度动画驱动，不换颜色） -->
+                                        <Border x:Name="pressShade" CornerRadius="{DynamicResource RadiusControl}"
+                                                Background="#14000000" Opacity="0" IsHitTestVisible="False"/>
+                                        <!-- ⑤ 选中态：内侧细强调条（很弱，不是"一大块蓝色"） -->
+                                        <Border x:Name="accentBar" Width="3" Height="18" CornerRadius="1.5"
+                                                HorizontalAlignment="Left" VerticalAlignment="Center" Margin="4,0,0,0"
+                                                Background="{DynamicResource AccentColorBrush}" Opacity="0"
+                                                IsHitTestVisible="False"/>
+                                        <Border Padding="{TemplateBinding Padding}" CornerRadius="{DynamicResource RadiusControl}">
+                                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                                        </Border>
+                                    </Grid>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                                            <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation1}"/>
+                                            <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightStrong}"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfaceSelected}"/>
+                                            <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation1}"/>
+                                            <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightStrong}"/>
+                                            <Setter TargetName="accentBar" Property="Opacity" Value="1"/>
+                                        </Trigger>
+                                        <MultiTrigger>
+                                            <MultiTrigger.Conditions>
+                                                <Condition Property="IsSelected" Value="True"/>
+                                                <Condition Property="IsMouseOver" Value="True"/>
+                                            </MultiTrigger.Conditions>
+                                            <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                                        </MultiTrigger>
+                                        <!-- ★ Pressed：ListBoxItem 按下时不捕获鼠标（IsMouseCaptured 永不成立），
+                                             故用 EventTrigger 驱动：内暗浮现 + 下沉 1px -->
+                                        <EventTrigger RoutedEvent="PreviewMouseLeftButtonDown">
+                                            <BeginStoryboard>
+                                                <Storyboard>
+                                                    <DoubleAnimation Storyboard.TargetName="pressShade" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.05"/>
+                                                    <DoubleAnimation Storyboard.TargetName="shift" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="1" Duration="0:0:0.05"/>
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </EventTrigger>
+                                        <EventTrigger RoutedEvent="PreviewMouseLeftButtonUp">
+                                            <BeginStoryboard>
+                                                <Storyboard>
+                                                    <DoubleAnimation Storyboard.TargetName="pressShade" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.1"/>
+                                                    <DoubleAnimation Storyboard.TargetName="shift" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="0" Duration="0:0:0.1"/>
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </EventTrigger>
+                                        <EventTrigger RoutedEvent="MouseLeave">
+                                            <BeginStoryboard>
+                                                <Storyboard>
+                                                    <DoubleAnimation Storyboard.TargetName="pressShade" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.1"/>
+                                                    <DoubleAnimation Storyboard.TargetName="shift" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="0" Duration="0:0:0.1"/>
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </EventTrigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+</ResourceDictionary>

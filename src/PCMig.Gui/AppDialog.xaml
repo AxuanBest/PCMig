@@ -1,0 +1,59 @@
+<Window x:Class="PCMig.Gui.AppDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PCMig"
+        SizeToContent="WidthAndHeight"
+        WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Background="Transparent" AllowsTransparency="True"
+        FontFamily="Microsoft YaHei UI, Segoe UI"
+        FontSize="12.5">
+    <!-- ══════════════════════════════════════════════════════════════════════════════
+         MessageBox 替代窗口：外观完全继承 App 级 Design System。
+         圆角/边缘光/内部边缘/接触阴影/按钮/文字色全部取自共享 token 与共享控件样式，
+         因此主窗口换成新版视觉时，这里不需要任何单独设计。
+         AllowsTransparency 只用于承载圆角与窗口阴影，内容 Surface 本身完全不透明。
+         ══════════════════════════════════════════════════════════════════════════════ -->
+    <Border Style="{StaticResource DialogSurface}" Margin="20">
+        <Grid MinWidth="330" MaxWidth="520">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- 标题行：图标 + 标题文字（同一套 Typography token） -->
+            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+                <Border x:Name="IconRing" Width="22" Height="22" CornerRadius="11" VerticalAlignment="Center"
+                        BorderThickness="1.4" BorderBrush="{DynamicResource AccentColorBrush}"
+                        Background="Transparent">
+                    <TextBlock x:Name="IconGlyph" Text="i" FontSize="12" FontWeight="Bold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Foreground="{DynamicResource AccentColorBrush}"/>
+                </Border>
+                <TextBlock x:Name="CaptionText" Text="提示" Margin="9,0,0,0" VerticalAlignment="Center"
+                           Style="{StaticResource DialogTitle}"/>
+            </StackPanel>
+
+            <!-- 正文：可换行、可滚动（长错误信息不会撑破窗口） -->
+            <Border Grid.Row="1" Style="{StaticResource DialogInnerSurface}" Padding="12,10">
+                <ScrollViewer MaxHeight="320" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <TextBlock x:Name="MessageText" Text="" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TypographyPrimary}" LineHeight="19"/>
+                </ScrollViewer>
+            </Border>
+
+            <!-- 按钮行：全部复用共享按钮体系，与主窗口/更新日志窗口同一套 Hover/Pressed -->
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+                <Button x:Name="BtnYes" Content="是" MinWidth="76" Padding="14,7" Margin="0,0,8,0"
+                        Style="{StaticResource PrimaryButton}" Visibility="Collapsed" Click="Yes_Click"/>
+                <Button x:Name="BtnOk" Content="确定" MinWidth="76" Padding="14,7" Margin="0,0,8,0"
+                        Style="{StaticResource PrimaryButton}" Visibility="Collapsed" Click="Ok_Click"/>
+                <Button x:Name="BtnNo" Content="否" MinWidth="76" Padding="14,7" Margin="0,0,8,0"
+                        Style="{StaticResource NormalButton}" Visibility="Collapsed" Click="No_Click"/>
+                <Button x:Name="BtnCancel" Content="取消" MinWidth="76" Padding="14,7"
+                        Style="{StaticResource NormalButton}" Visibility="Collapsed" Click="Cancel_Click"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

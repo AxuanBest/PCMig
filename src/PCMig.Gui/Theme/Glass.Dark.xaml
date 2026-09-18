@@ -1,175 +1,216 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:s="clr-namespace:System;assembly=mscorlib">
-    <!-- PCMig 深色主题 Token（v0.4.2）：与 Glass.xaml 同键不同值；切换=换字典源，引用零改动。
-         深色不是"白改黑"：玻璃透明度重新配比、环境光与边缘高光稍强、阴影稍弱、文字/强调色重调。
-         启用：环境变量 PCMIG_THEME=dark，或 exe 旁 dark-ui.flag 文件。 -->
+    <!-- ══════════════════════════════════════════════════════════════════════════════
+         PCMig Design System · Dark
+         与 Glass.xaml 完全同键，切换 = 换字典源，引用零改动。
+         深色不是"白改黑"：Surface 仍然不透明，边缘光改为"顶部弱白 → 右下更深"，
+         接触阴影更收敛（深色底上阴影本来就该轻），文字对比重新配平。
+         启用：环境变量 PCMIG_THEME=dark，或 exe 旁 dark-ui.flag 文件。
+         ══════════════════════════════════════════════════════════════════════════════ -->
 
-    <!-- ══ 1. 环境光与空间底（Elevation 0） ══ -->
-    <LinearGradientBrush x:Key="GlassWindowBg" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#1B1F27" Offset="0"/>
-        <GradientStop Color="#23222C" Offset="0.55"/>
-        <GradientStop Color="#1D2130" Offset="1"/>
-    </LinearGradientBrush>
-    <Color x:Key="AmbientRose">#8C3A4A</Color>
-    <Color x:Key="AmbientAmber">#8A6330</Color>
-    <Color x:Key="AmbientSky">#2F4E86</Color>
-    <SolidColorBrush x:Key="GlassWashBg" Color="#0FFFFFFF"/>
+    <s:Double x:Key="LightDirection">315</s:Double>
+    <s:Double x:Key="HoverDepth">-1</s:Double>
+    <s:Double x:Key="PressedDepth">1</s:Double>
 
-    <!-- ══ 2. 表面材质（越靠前越亮、越实） ══ -->
-    <SolidColorBrush x:Key="GlassRailBg" Color="#A620242C"/>
-    <SolidColorBrush x:Key="GlassPanelBg" Color="#99222730"/>
-    <SolidColorBrush x:Key="GlassCardBg" Color="#B32A2F38"/>
-    <SolidColorBrush x:Key="GlassSecondaryBg" Color="#661F242C"/>
-    <SolidColorBrush x:Key="GlassInnerBg" Color="#59161A21"/>
-    <SolidColorBrush x:Key="GlassInnerDeepBg" Color="#3D12151B"/>
-    <SolidColorBrush x:Key="GlassPopupBg" Color="#F22B3039"/>
-    <SolidColorBrush x:Key="GlassDialogBg" Color="#F72B3039"/>
+    <!-- Surface（不透明深色，靠色调差分层） -->
+    <SolidColorBrush x:Key="SurfaceColor"     Color="#FF1E232B"/>
+    <SolidColorBrush x:Key="SurfaceSecondary" Color="#FF232932"/>
+    <SolidColorBrush x:Key="SurfaceTertiary"  Color="#FF191D24"/>
+    <SolidColorBrush x:Key="SurfaceHover"     Color="#FF272E38"/>
+    <SolidColorBrush x:Key="SurfacePressed"   Color="#FF1A1F26"/>
+    <SolidColorBrush x:Key="SurfaceSelected"  Color="#FF243449"/>
+    <SolidColorBrush x:Key="SurfaceSunken"    Color="#FF191D24"/>
+    <SolidColorBrush x:Key="SurfacePopup"     Color="#FF262C35"/>
+    <SolidColorBrush x:Key="SurfaceDialog"    Color="#FF262C35"/>
 
-    <!-- ══ 3. 玻璃折边（深色下高光稍强） ══ -->
-    <SolidColorBrush x:Key="GlassEdgeLight" Color="#26FFFFFF"/>
-    <SolidColorBrush x:Key="GlassEdgeDark" Color="#33000000"/>
-    <SolidColorBrush x:Key="GlassBorderBrush" Color="#24FFFFFF"/>
-    <SolidColorBrush x:Key="GlassInnerBorderBrush" Color="#17FFFFFF"/>
-    <LinearGradientBrush x:Key="GlassBevelBrush" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#2EFFFFFF" Offset="0"/>
-        <GradientStop Color="#14FFFFFF" Offset="0.5"/>
-        <GradientStop Color="#45000000" Offset="1"/>
+    <!-- 方向性边缘光（深色版：左上弱白 → 右下深黑） -->
+    <LinearGradientBrush x:Key="EdgeHighlight" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#33FFFFFF" Offset="0"/>
+        <GradientStop Color="#17FFFFFF" Offset="0.28"/>
+        <GradientStop Color="#08FFFFFF" Offset="0.52"/>
+        <GradientStop Color="#24000000" Offset="0.74"/>
+        <GradientStop Color="#4D000000" Offset="1"/>
     </LinearGradientBrush>
-    <LinearGradientBrush x:Key="GlassSurfaceSheen" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#12FFFFFF" Offset="0"/>
-        <GradientStop Color="#00FFFFFF" Offset="1"/>
-    </LinearGradientBrush>
-
-    <!-- ══ 4. 交互态 ══ -->
-    <SolidColorBrush x:Key="GlassHoverBg" Color="#1FFFFFFF"/>
-    <SolidColorBrush x:Key="GlassHoverStrongBg" Color="#2EFFFFFF"/>
-    <SolidColorBrush x:Key="GlassPressedBg" Color="#14FFFFFF"/>
-    <SolidColorBrush x:Key="GlassSelectedBg" Color="#2EFFFFFF"/>
-    <SolidColorBrush x:Key="GlassItemHoverBg" Color="#14FFFFFF"/>
-    <SolidColorBrush x:Key="GlassItemSelectedBg" Color="#330A84FF"/>
-    <SolidColorBrush x:Key="GlassAccentBrush" Color="#0A84FF"/>
-    <SolidColorBrush x:Key="GlassAccentDeep" Color="#3D9BFF"/>
-    <SolidColorBrush x:Key="GlassAccentSoft" Color="#382F8CFF"/>
-    <SolidColorBrush x:Key="GlassAccentSofter" Color="#1F2F8CFF"/>
-    <Color x:Key="AccentSoftColor">#66B2FF</Color>
-    <Color x:Key="AccentColor">#0A84FF</Color>
-    <Color x:Key="AccentDeepColor">#3D9BFF</Color>
-    <!-- ══════════ 浮雕材质（深色：顶部弱高光 + 底部更深，保持"上亮下暗"的光照逻辑）══════════ -->
-    <LinearGradientBrush x:Key="EmbossSheen" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#2EFFFFFF" Offset="0"/>
-        <GradientStop Color="#00FFFFFF" Offset="0.42"/>
-        <GradientStop Color="#52000000" Offset="1"/>
-    </LinearGradientBrush>
-    <LinearGradientBrush x:Key="EmbossSheenHover" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#45FFFFFF" Offset="0"/>
-        <GradientStop Color="#0DFFFFFF" Offset="0.45"/>
-        <GradientStop Color="#45000000" Offset="1"/>
-    </LinearGradientBrush>
-    <LinearGradientBrush x:Key="EmbossSheenPressed" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#61000000" Offset="0"/>
-        <GradientStop Color="#29000000" Offset="0.32"/>
-        <GradientStop Color="#00000000" Offset="0.72"/>
-        <GradientStop Color="#52000000" Offset="1"/>
-    </LinearGradientBrush>
-    <LinearGradientBrush x:Key="EmbossSheenSelected" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#2EFFFFFF" Offset="0"/>
-        <GradientStop Color="#08FFFFFF" Offset="0.5"/>
-        <GradientStop Color="#52000000" Offset="1"/>
-    </LinearGradientBrush>
-    <LinearGradientBrush x:Key="EmbossTopLight" StartPoint="0,0" EndPoint="0,1">
+    <LinearGradientBrush x:Key="EdgeHighlightStrong" StartPoint="0,0" EndPoint="1,1">
         <GradientStop Color="#59FFFFFF" Offset="0"/>
-        <GradientStop Color="#00FFFFFF" Offset="1"/>
+        <GradientStop Color="#29FFFFFF" Offset="0.28"/>
+        <GradientStop Color="#0FFFFFFF" Offset="0.52"/>
+        <GradientStop Color="#33000000" Offset="0.74"/>
+        <GradientStop Color="#5C000000" Offset="1"/>
     </LinearGradientBrush>
-    <LinearGradientBrush x:Key="EmbossBottomShade" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#00000000" Offset="0"/>
+    <LinearGradientBrush x:Key="EdgeHighlightPressed" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#5C000000" Offset="0"/>
+        <GradientStop Color="#33000000" Offset="0.30"/>
+        <GradientStop Color="#00000000" Offset="0.60"/>
+        <GradientStop Color="#1FFFFFFF" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="InnerEdge" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#14FFFFFF" Offset="0"/>
+        <GradientStop Color="#00000000" Offset="0.45"/>
+        <GradientStop Color="#1F000000" Offset="1"/>
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="DividerColor" Color="#FF333A45"/>
+
+    <!-- 阴影（深色底上更收敛） -->
+    <DropShadowEffect x:Key="ContactShadow" BlurRadius="3"  ShadowDepth="1.2" Direction="315" Opacity="0.28" Color="#FF000000"/>
+    <DropShadowEffect x:Key="Elevation1"    BlurRadius="6"  ShadowDepth="2"   Direction="315" Opacity="0.30" Color="#FF000000"/>
+    <DropShadowEffect x:Key="Elevation2"    BlurRadius="10" ShadowDepth="3"   Direction="315" Opacity="0.32" Color="#FF000000"/>
+    <DropShadowEffect x:Key="Elevation3"    BlurRadius="16" ShadowDepth="4"   Direction="315" Opacity="0.34" Color="#FF000000"/>
+    <DropShadowEffect x:Key="Elevation4"    BlurRadius="22" ShadowDepth="6"   Direction="315" Opacity="0.36" Color="#FF000000"/>
+    <DropShadowEffect x:Key="Elevation5"    BlurRadius="30" ShadowDepth="8"   Direction="315" Opacity="0.38" Color="#FF000000"/>
+    <DropShadowEffect x:Key="Elevation6"    BlurRadius="40" ShadowDepth="12"  Direction="315" Opacity="0.42" Color="#FF000000"/>
+
+    <CornerRadius x:Key="CornerRadiusSmall">6</CornerRadius>
+    <CornerRadius x:Key="CornerRadiusMedium">10</CornerRadius>
+    <CornerRadius x:Key="CornerRadiusLarge">14</CornerRadius>
+    <CornerRadius x:Key="CornerRadiusWindow">16</CornerRadius>
+
+    <Color x:Key="AccentColor">#3D8BFF</Color>
+    <Color x:Key="AccentSoftColor">#8FBAFF</Color>
+    <Color x:Key="AccentDeepColor">#2A6FE0</Color>
+    <SolidColorBrush x:Key="AccentColorBrush" Color="#FF3D8BFF"/>
+    <SolidColorBrush x:Key="AccentColorSoft"  Color="#FF243449"/>
+    <SolidColorBrush x:Key="AccentColorText"  Color="#FF7FB3FF"/>
+
+    <SolidColorBrush x:Key="TypographyPrimary"   Color="#FFE9EDF3"/>
+    <SolidColorBrush x:Key="TypographySecondary" Color="#FFA7B1C0"/>
+    <SolidColorBrush x:Key="TypographyMuted"     Color="#FF7B8494"/>
+    <SolidColorBrush x:Key="TypographyDisabled"  Color="#FF5A6270"/>
+    <SolidColorBrush x:Key="TypographyOnAccent"  Color="#FFFFFFFF"/>
+
+    <SolidColorBrush x:Key="InfoSurface"   Color="#FF1C2A3D"/>
+    <SolidColorBrush x:Key="WarnSurface"   Color="#FF2E2718"/>
+    <SolidColorBrush x:Key="ErrorSurface"  Color="#FF31211F"/>
+    <SolidColorBrush x:Key="SuccessColor"  Color="#FF4ADE80"/>
+    <SolidColorBrush x:Key="WarningColor"  Color="#FFF5B942"/>
+    <SolidColorBrush x:Key="ErrorColor"    Color="#FFF87171"/>
+
+    <!-- 兼容层 -->
+    <SolidColorBrush x:Key="GlassWindowBg"    Color="#FF15191F"/>
+    <SolidColorBrush x:Key="GlassWashBg"      Color="#FF1E232B"/>
+    <SolidColorBrush x:Key="GlassRailBg"      Color="#FF1E232B"/>
+    <SolidColorBrush x:Key="GlassPanelBg"     Color="#FF1E232B"/>
+    <SolidColorBrush x:Key="GlassCardBg"      Color="#FF1E232B"/>
+    <SolidColorBrush x:Key="GlassSecondaryBg" Color="#FF232932"/>
+    <SolidColorBrush x:Key="GlassInnerBg"     Color="#FF191D24"/>
+    <SolidColorBrush x:Key="GlassInnerDeepBg" Color="#FF15181E"/>
+    <SolidColorBrush x:Key="GlassPopupBg"     Color="#FF262C35"/>
+    <SolidColorBrush x:Key="GlassDialogBg"    Color="#FF262C35"/>
+    <Color x:Key="AmbientRose">#00FFFFFF</Color>
+    <Color x:Key="AmbientAmber">#00FFFFFF</Color>
+    <Color x:Key="AmbientSky">#00FFFFFF</Color>
+    <LinearGradientBrush x:Key="GlassEdgeLight" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#3DFFFFFF" Offset="0"/>
+        <GradientStop Color="#1AFFFFFF" Offset="0.30"/>
+        <GradientStop Color="#1A000000" Offset="0.68"/>
         <GradientStop Color="#47000000" Offset="1"/>
     </LinearGradientBrush>
+    <SolidColorBrush x:Key="GlassEdgeDark"         Color="#FF10131A"/>
+    <SolidColorBrush x:Key="GlassBorderBrush"      Color="#FF333A45"/>
+    <SolidColorBrush x:Key="GlassInnerBorderBrush" Color="#FF2B323C"/>
+    <LinearGradientBrush x:Key="GlassBevelBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#2EFFFFFF" Offset="0"/>
+        <GradientStop Color="#12FFFFFF" Offset="0.35"/>
+        <GradientStop Color="#14000000" Offset="0.70"/>
+        <GradientStop Color="#38000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="GlassSurfaceSheen" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#08FFFFFF" Offset="0"/>
+        <GradientStop Color="#00000000" Offset="0.5"/>
+        <GradientStop Color="#0A000000" Offset="1"/>
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="GlassHoverBg"        Color="#FF272E38"/>
+    <SolidColorBrush x:Key="GlassHoverStrongBg"  Color="#FF2C343F"/>
+    <SolidColorBrush x:Key="GlassPressedBg"      Color="#FF1A1F26"/>
+    <SolidColorBrush x:Key="GlassSelectedBg"     Color="#FF243449"/>
+    <SolidColorBrush x:Key="GlassItemHoverBg"    Color="#FF232932"/>
+    <SolidColorBrush x:Key="GlassItemSelectedBg" Color="#FF243449"/>
+    <SolidColorBrush x:Key="GlassAccentBrush"    Color="#FF3D8BFF"/>
+    <SolidColorBrush x:Key="GlassAccentDeep"     Color="#FF2A6FE0"/>
+    <SolidColorBrush x:Key="GlassAccentSoft"     Color="#FF8FBAFF"/>
+    <SolidColorBrush x:Key="GlassAccentSofter"   Color="#262A6FE0"/>
+    <SolidColorBrush x:Key="GlassAccentGlow"     Color="#4D3D8BFF"/>
+    <SolidColorBrush x:Key="GlassAccentText"     Color="#FF7FB3FF"/>
+    <SolidColorBrush x:Key="GlassFocusRing"      Color="#FF3D8BFF"/>
+    <SolidColorBrush x:Key="GlassNeutralSurface"   Color="#FF232932"/>
+    <SolidColorBrush x:Key="GlassInfoSurface"      Color="#FF1C2A3D"/>
+    <SolidColorBrush x:Key="GlassWarnSurface"      Color="#FF2E2718"/>
+    <SolidColorBrush x:Key="GlassErrorSurface"     Color="#FF31211F"/>
+    <SolidColorBrush x:Key="GlassErrorSurfaceSoft" Color="#FF3A2724"/>
+    <SolidColorBrush x:Key="GlassErrorHoverBg"     Color="#FF442C28"/>
+    <SolidColorBrush x:Key="GlassInfoEdge"         Color="#FF2E4664"/>
+    <SolidColorBrush x:Key="GlassWarnEdge"         Color="#FF4D3F22"/>
+    <SolidColorBrush x:Key="GlassErrorEdge"        Color="#FF57332E"/>
+    <SolidColorBrush x:Key="GlassInfoText"         Color="#FF6FA8FF"/>
+    <SolidColorBrush x:Key="GlassWarnText"         Color="#FFF5B942"/>
+    <SolidColorBrush x:Key="GlassErrorText"        Color="#FFF87171"/>
+    <SolidColorBrush x:Key="GlassSuccess"          Color="#FF4ADE80"/>
+    <SolidColorBrush x:Key="GlassWarning"          Color="#FFF5B942"/>
+    <SolidColorBrush x:Key="GlassError"            Color="#FFF87171"/>
+    <SolidColorBrush x:Key="GlassSuccessText"      Color="#FF4ADE80"/>
+    <SolidColorBrush x:Key="GlassTitleBrush"     Color="#FFE9EDF3"/>
+    <SolidColorBrush x:Key="GlassSubTextBrush"   Color="#FFA7B1C0"/>
+    <SolidColorBrush x:Key="GlassFaintTextBrush" Color="#FF7B8494"/>
+    <SolidColorBrush x:Key="GlassTextDisabled"   Color="#FF5A6270"/>
+    <SolidColorBrush x:Key="GlassTextOnAccent"   Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="GlassLogBg"   Color="#FF12161B"/>
+    <SolidColorBrush x:Key="GlassLogText" Color="#FFB9C6D6"/>
+    <SolidColorBrush x:Key="GlassCardBlue"   Color="#FF1E232B"/>
+    <SolidColorBrush x:Key="GlassCardGreen"  Color="#FF1E232B"/>
+    <SolidColorBrush x:Key="GlassCardPink"   Color="#FF1E232B"/>
+    <SolidColorBrush x:Key="GlassCardPurple" Color="#FF1E232B"/>
+    <CornerRadius x:Key="RadiusWindow">16</CornerRadius>
+    <CornerRadius x:Key="RadiusPanel">14</CornerRadius>
+    <CornerRadius x:Key="RadiusCard">12</CornerRadius>
+    <CornerRadius x:Key="RadiusInner">10</CornerRadius>
+    <CornerRadius x:Key="RadiusControl">9</CornerRadius>
+    <CornerRadius x:Key="RadiusItem">7</CornerRadius>
+    <CornerRadius x:Key="RadiusProgress">5</CornerRadius>
+    <CornerRadius x:Key="RadiusCapsule">999</CornerRadius>
+    <DropShadowEffect x:Key="Elevation0"       BlurRadius="0"  ShadowDepth="0"  Direction="315" Opacity="0"    Color="#00000000"/>
+    <DropShadowEffect x:Key="GlassPanelShadow" BlurRadius="10" ShadowDepth="3"  Direction="315" Opacity="0.30" Color="#FF000000"/>
+    <DropShadowEffect x:Key="GlassCardShadow"  BlurRadius="6"  ShadowDepth="2"  Direction="315" Opacity="0.28" Color="#FF000000"/>
+    <DropShadowEffect x:Key="GlassHoverShadow" BlurRadius="16" ShadowDepth="4"  Direction="315" Opacity="0.34" Color="#FF000000"/>
+    <DropShadowEffect x:Key="AmbientShadow"    BlurRadius="30" ShadowDepth="8"  Direction="315" Opacity="0.38" Color="#FF000000"/>
+    <DropShadowEffect x:Key="HoverShadow"      BlurRadius="16" ShadowDepth="4"  Direction="315" Opacity="0.34" Color="#FF000000"/>
+    <DropShadowEffect x:Key="PressedShadow"    BlurRadius="3"  ShadowDepth="1"  Direction="315" Opacity="0.24" Color="#FF000000"/>
+    <DropShadowEffect x:Key="PopupShadow"      BlurRadius="30" ShadowDepth="8"  Direction="315" Opacity="0.44" Color="#FF000000"/>
+    <DropShadowEffect x:Key="DialogShadow"     BlurRadius="40" ShadowDepth="12" Direction="315" Opacity="0.48" Color="#FF000000"/>
+    <LinearGradientBrush x:Key="EmbossSheen" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossSheenHover" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#0FFFFFFF" Offset="0"/><GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossSheenPressed" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#29000000" Offset="0"/><GradientStop Color="#00000000" Offset="0.7"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossSheenSelected" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossTopLight" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossBottomShade" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
     <LinearGradientBrush x:Key="EmbossInnerShade" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#59000000" Offset="0"/>
-        <GradientStop Color="#00000000" Offset="0.75"/>
+        <GradientStop Color="#1F000000" Offset="0"/><GradientStop Color="#00000000" Offset="1"/>
     </LinearGradientBrush>
     <LinearGradientBrush x:Key="EmbossInnerLight" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#00000000" Offset="0.25"/>
-        <GradientStop Color="#14FFFFFF" Offset="1"/>
+        <GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#00000000" Offset="1"/>
     </LinearGradientBrush>
-    <SolidColorBrush x:Key="GlassAccentGlow" Color="#5C0A84FF"/>
-    <SolidColorBrush x:Key="GlassAccentText" Color="#7FB6FF"/>
-    <SolidColorBrush x:Key="GlassFocusRing" Color="#800A84FF"/>
-
-    <!-- ══ 5. 语义表面（深色玻璃版） ══ -->
-    <SolidColorBrush x:Key="GlassNeutralSurface" Color="#14FFFFFF"/>
-    <SolidColorBrush x:Key="GlassInfoSurface" Color="#332F6FED"/>
-    <SolidColorBrush x:Key="GlassWarnSurface" Color="#33FF9F0A"/>
-    <SolidColorBrush x:Key="GlassErrorSurface" Color="#33FF453A"/>
-    <SolidColorBrush x:Key="GlassErrorSurfaceSoft" Color="#1FFF453A"/>
-    <SolidColorBrush x:Key="GlassErrorHoverBg" Color="#4DFF453A"/>
-    <SolidColorBrush x:Key="GlassInfoEdge" Color="#3D2F6FED"/>
-    <SolidColorBrush x:Key="GlassWarnEdge" Color="#3DFF9F0A"/>
-    <SolidColorBrush x:Key="GlassErrorEdge" Color="#3DFF453A"/>
-    <SolidColorBrush x:Key="GlassInfoText" Color="#8FBBFF"/>
-    <SolidColorBrush x:Key="GlassWarnText" Color="#FFC46B"/>
-    <SolidColorBrush x:Key="GlassErrorText" Color="#FF9A8F"/>
-    <SolidColorBrush x:Key="GlassSuccess" Color="#30D158"/>
-    <SolidColorBrush x:Key="GlassWarning" Color="#FFD60A"/>
-    <SolidColorBrush x:Key="GlassError" Color="#FF453A"/>
-
-    <!-- ══ 6. 文字 ══ -->
-    <SolidColorBrush x:Key="GlassTitleBrush" Color="#EDF1F7"/>
-    <SolidColorBrush x:Key="GlassSubTextBrush" Color="#9BA6B4"/>
-    <SolidColorBrush x:Key="GlassFaintTextBrush" Color="#6B7684"/>
-    <SolidColorBrush x:Key="GlassTextDisabled" Color="#5A6472"/>
-    <SolidColorBrush x:Key="GlassTextOnAccent" Color="#FFFFFF"/>
-    <SolidColorBrush x:Key="GlassLogBg" Color="#FF0B0E13"/>
-    <SolidColorBrush x:Key="GlassLogText" Color="#FFC7D0DA"/>
-
-    <!-- ══ 7. 页面色相（深色低饱和 tint） ══ -->
-    <LinearGradientBrush x:Key="GlassCardBlue" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#1F2C41" Offset="0"/><GradientStop Color="#232A35" Offset="1"/></LinearGradientBrush>
-    <LinearGradientBrush x:Key="GlassCardGreen" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#1C3327" Offset="0"/><GradientStop Color="#212B2A" Offset="1"/></LinearGradientBrush>
-    <LinearGradientBrush x:Key="GlassCardPink" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#35242C" Offset="0"/><GradientStop Color="#2A2327" Offset="1"/></LinearGradientBrush>
-    <LinearGradientBrush x:Key="GlassCardPurple" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#2C2643" Offset="0"/><GradientStop Color="#262433" Offset="1"/></LinearGradientBrush>
-
-    <!-- ══ 8. 圆角层级（与浅色一致） ══ -->
-    <CornerRadius x:Key="RadiusWindow">16</CornerRadius>
-    <CornerRadius x:Key="RadiusPanel">16</CornerRadius>
-    <CornerRadius x:Key="RadiusCard">14</CornerRadius>
-    <CornerRadius x:Key="RadiusInner">11</CornerRadius>
-    <CornerRadius x:Key="RadiusControl">10</CornerRadius>
-    <CornerRadius x:Key="RadiusItem">8</CornerRadius>
-    <CornerRadius x:Key="RadiusProgress">7</CornerRadius>
-    <CornerRadius x:Key="RadiusCapsule">999</CornerRadius>
-
-    <!-- ══ 9. 高度与阴影（深色下阴影稍弱，靠高光分层） ══ -->
-    <DropShadowEffect x:Key="Elevation0" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#000000"/>
-    <DropShadowEffect x:Key="Elevation1" BlurRadius="6" ShadowDepth="0.6" Direction="315" Opacity="0.16" Color="#000000"/>
-    <DropShadowEffect x:Key="Elevation2" BlurRadius="14" ShadowDepth="1.4" Direction="315" Opacity="0.26" Color="#000000"/>
-    <DropShadowEffect x:Key="Elevation3" BlurRadius="22" ShadowDepth="3" Direction="315" Opacity="0.34" Color="#000000"/>
-    <DropShadowEffect x:Key="Elevation4" BlurRadius="10" ShadowDepth="1.2" Direction="315" Opacity="0.28" Color="#000000"/>
-    <DropShadowEffect x:Key="Elevation5" BlurRadius="26" ShadowDepth="5" Direction="315" Opacity="0.46" Color="#000000"/>
-    <DropShadowEffect x:Key="Elevation6" BlurRadius="34" ShadowDepth="7" Direction="315" Opacity="0.55" Color="#000000"/>
-    <DropShadowEffect x:Key="GlassPanelShadow" BlurRadius="14" ShadowDepth="1.4" Direction="315" Opacity="0.26" Color="#000000"/>
-    <DropShadowEffect x:Key="GlassCardShadow" BlurRadius="14" ShadowDepth="1.4" Direction="315" Opacity="0.26" Color="#000000"/>
-    <DropShadowEffect x:Key="GlassHoverShadow" BlurRadius="22" ShadowDepth="3" Direction="315" Opacity="0.34" Color="#000000"/>
-    <DropShadowEffect x:Key="AmbientShadow" BlurRadius="6" ShadowDepth="0.6" Direction="315" Opacity="0.16" Color="#000000"/>
-    <DropShadowEffect x:Key="ContactShadow" BlurRadius="6" ShadowDepth="0.6" Direction="315" Opacity="0.16" Color="#000000"/>
-    <DropShadowEffect x:Key="HoverShadow" BlurRadius="22" ShadowDepth="3" Direction="315" Opacity="0.34" Color="#000000"/>
-    <DropShadowEffect x:Key="PressedShadow" BlurRadius="5" ShadowDepth="0.5" Direction="315" Opacity="0.12" Color="#000000"/>
-    <DropShadowEffect x:Key="PopupShadow" BlurRadius="26" ShadowDepth="5" Direction="315" Opacity="0.46" Color="#000000"/>
-    <DropShadowEffect x:Key="DialogShadow" BlurRadius="34" ShadowDepth="7" Direction="315" Opacity="0.55" Color="#000000"/>
-
-    <!-- ══ 10. 字体层级 ══ -->
-    <s:Double x:Key="FontPageTitle">26</s:Double>
-    <s:Double x:Key="FontSectionTitle">19</s:Double>
-    <s:Double x:Key="FontCardTitle">16</s:Double>
-    <s:Double x:Key="FontBody">13</s:Double>
+    <s:Double x:Key="FontPageTitle">21</s:Double>
+    <s:Double x:Key="FontSectionTitle">16</s:Double>
+    <s:Double x:Key="FontCardTitle">13.5</s:Double>
+    <s:Double x:Key="FontBody">12.5</s:Double>
     <s:Double x:Key="FontCaption">11.5</s:Double>
-    <s:Double x:Key="FontStatus">10.5</s:Double>
-    <s:Double x:Key="FontNumber">42</s:Double>
-
-    <!-- ══ 11. 间距 ══ -->
-    <Thickness x:Key="PageMargin">24,20,24,16</Thickness>
+    <s:Double x:Key="FontStatus">12</s:Double>
+    <s:Double x:Key="FontNumber">19</s:Double>
+    <Thickness x:Key="PageMargin">0</Thickness>
     <Thickness x:Key="CardPadding">16,14</Thickness>
-    <Thickness x:Key="SectionSpacing">0,18,0,0</Thickness>
-    <Thickness x:Key="ControlSpacing">0,10,0,0</Thickness>
-    <Thickness x:Key="InnerPadding">12,10</Thickness>
+    <Thickness x:Key="SectionSpacing">0,10,0,0</Thickness>
+    <Thickness x:Key="ControlSpacing">0,8,0,0</Thickness>
+    <Thickness x:Key="InnerPadding">10,8</Thickness>
 </ResourceDictionary>

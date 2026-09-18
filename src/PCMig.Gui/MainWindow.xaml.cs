@@ -87,7 +87,7 @@ public partial class MainWindow : Window
             App.Log?.Error(ex, "打开更新日志窗口失败");
             try
             {
-                MessageBox.Show(this, "无法打开更新日志：" + ex.Message, "PCMig 迁移工具",
+                AppDialog.Show(this, "无法打开更新日志：" + ex.Message, "PCMig 迁移工具",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             catch { /* 连弹窗都失败时至少已经写进应用日志 */ }
@@ -142,7 +142,7 @@ public partial class MainWindow : Window
     {
         if (DataContext is MainViewModel vm && vm.IsRunning)
         {
-            var r = MessageBox.Show(this,
+            var r = AppDialog.Show(this,
                 "迁移正在进行中。关闭窗口将立即停止传输（已传部分保留，下次可断点续传）。\n确定关闭吗？",
                 "PCMig", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (r != MessageBoxResult.Yes) { e.Cancel = true; return; }

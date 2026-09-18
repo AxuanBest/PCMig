@@ -16,21 +16,7 @@
         <local:InverseBoolToVisibilityConverter x:Key="InvBoolVis"/>
 
         <!-- ═══ 卡片与文字样式 ═══ -->
-        <Style x:Key="Card" TargetType="Border">
-            <Setter Property="Background" Value="{DynamicResource GlassCardBg}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource GlassBorderBrush}"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="CornerRadius" Value="{StaticResource RadiusCard}"/>
-            <Setter Property="Padding" Value="14,12"/>
-            <Setter Property="Effect" Value="{StaticResource GlassCardShadow}"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Effect" Value="{StaticResource GlassHoverShadow}"/>
-                    <Setter Property="RenderTransform"><Setter.Value><TranslateTransform Y="-2"/></Setter.Value></Setter>
-                </Trigger>
-            </Style.Triggers>
-            
-        </Style>
+        
         <Style x:Key="PageTitle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="19"/>
             <Setter Property="FontWeight" Value="Bold"/>
@@ -72,237 +58,16 @@
                ⑤ 内容
              交互：Hover 浮起 1.5px + 高光增强；Pressed 下沉 1px + 顶部转为内阴影
              ══════════════════════════════════════════════════════════════════════════ -->
-        <Style x:Key="PrimaryButton" TargetType="Button">
-            <Setter Property="Foreground" Value="{DynamicResource GlassTextOnAccent}"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Background">
-                <Setter.Value>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                        <GradientStop Color="#FF47A4FF" Offset="0"/>
-                        <GradientStop Color="#FF0A84FF" Offset="0.48"/>
-                        <GradientStop Color="#FF006BD6" Offset="1"/>
-                    </LinearGradientBrush>
-                </Setter.Value>
-            </Setter>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="SnapsToDevicePixels" Value="True"/>
-            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Grid>
-                            <Border x:Name="cast" CornerRadius="{DynamicResource RadiusControl}"
-                                    Background="{TemplateBinding Background}"
-                                    Effect="{DynamicResource Elevation3}" SnapsToDevicePixels="True"/>
-                            <Border x:Name="sheen" CornerRadius="{DynamicResource RadiusControl}"
-                                    Background="{DynamicResource EmbossSheen}" IsHitTestVisible="False"/>
-                            <Border x:Name="topLight" CornerRadius="{DynamicResource RadiusControl}" Height="1.5"
-                                    VerticalAlignment="Top" Background="{DynamicResource EmbossTopLight}"
-                                    IsHitTestVisible="False"/>
-                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}" BorderThickness="1"
-                                    BorderBrush="{DynamicResource GlassBevelBrush}" IsHitTestVisible="False"/>
-                            <Border CornerRadius="{DynamicResource RadiusControl}" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                  RecognizesAccessKey="True"/>
-                            </Border>
-                        </Grid>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation5}"/>
-                                <Setter TargetName="sheen" Property="Background" Value="{DynamicResource EmbossSheenHover}"/>
-                                <Setter Property="RenderTransform">
-                                    <Setter.Value><TranslateTransform Y="-1.5"/></Setter.Value>
-                                </Setter>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource PressedShadow}"/>
-                                <Setter TargetName="sheen" Property="Background" Value="{DynamicResource EmbossSheenPressed}"/>
-                                <Setter TargetName="topLight" Property="Opacity" Value="0"/>
-                                <Setter Property="RenderTransform">
-                                    <Setter.Value><TranslateTransform Y="1"/></Setter.Value>
-                                </Setter>
-                            </Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassFocusRing}"/>
-                                <Setter TargetName="edge" Property="BorderThickness" Value="1.6"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation0}"/>
-                                <Setter TargetName="sheen" Property="Opacity" Value="0"/>
-                                <Setter TargetName="topLight" Property="Opacity" Value="0"/>
-                                <Setter TargetName="edge" Property="Visibility" Value="Collapsed"/>
-                                <Setter Property="Foreground" Value="{DynamicResource GlassTextDisabled}"/>
-                                <Setter Property="Cursor" Value="Arrow"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="NormalButton" TargetType="Button">
-            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
-            <Setter Property="Background">
-                <Setter.Value>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                        <GradientStop Color="#FAFFFFFF" Offset="0"/>
-                        <GradientStop Color="#EFFFFFFF" Offset="0.45"/>
-                        <GradientStop Color="#DCE0E9F6" Offset="1"/>
-                    </LinearGradientBrush>
-                </Setter.Value>
-            </Setter>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="SnapsToDevicePixels" Value="True"/>
-            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Grid>
-                            <Border x:Name="cast" CornerRadius="{DynamicResource RadiusControl}"
-                                    Background="{TemplateBinding Background}"
-                                    Effect="{DynamicResource Elevation2}" SnapsToDevicePixels="True"/>
-                            <Border x:Name="sheen" CornerRadius="{DynamicResource RadiusControl}"
-                                    Background="{DynamicResource EmbossSheen}" IsHitTestVisible="False"/>
-                            <Border x:Name="topLight" CornerRadius="{DynamicResource RadiusControl}" Height="1.5"
-                                    VerticalAlignment="Top" Background="{DynamicResource EmbossTopLight}"
-                                    IsHitTestVisible="False"/>
-                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}" BorderThickness="1"
-                                    BorderBrush="{DynamicResource GlassBevelBrush}" IsHitTestVisible="False"/>
-                            <Border CornerRadius="{DynamicResource RadiusControl}" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                  RecognizesAccessKey="True"/>
-                            </Border>
-                        </Grid>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource GlassHoverStrongBg}"/>
-                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation4}"/>
-                                <Setter TargetName="sheen" Property="Background" Value="{DynamicResource EmbossSheenHover}"/>
-                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassEdgeLight}"/>
-                                <Setter Property="RenderTransform">
-                                    <Setter.Value><TranslateTransform Y="-1.5"/></Setter.Value>
-                                </Setter>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource GlassPressedBg}"/>
-                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource PressedShadow}"/>
-                                <Setter TargetName="sheen" Property="Background" Value="{DynamicResource EmbossSheenPressed}"/>
-                                <Setter TargetName="topLight" Property="Opacity" Value="0"/>
-                                <Setter Property="RenderTransform">
-                                    <Setter.Value><TranslateTransform Y="1"/></Setter.Value>
-                                </Setter>
-                            </Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassFocusRing}"/>
-                                <Setter TargetName="edge" Property="BorderThickness" Value="1.6"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource GlassInnerDeepBg}"/>
-                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation0}"/>
-                                <Setter TargetName="sheen" Property="Opacity" Value="0"/>
-                                <Setter TargetName="topLight" Property="Opacity" Value="0"/>
-                                <Setter TargetName="edge" Property="Visibility" Value="Collapsed"/>
-                                <Setter Property="Foreground" Value="{DynamicResource GlassTextDisabled}"/>
-                                <Setter Property="Cursor" Value="Arrow"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- 危险操作：低饱和红，同样走浮雕（顶部高光在红面上依然成立） -->
-        <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource NormalButton}">
-            <Setter Property="Foreground" Value="{DynamicResource GlassErrorText}"/>
-            <Setter Property="Background">
-                <Setter.Value>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                        <GradientStop Color="#F2FFF5F5" Offset="0"/>
-                        <GradientStop Color="#E8FFE9E9" Offset="0.5"/>
-                        <GradientStop Color="#D9F6D8D8" Offset="1"/>
-                    </LinearGradientBrush>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- 幽灵按钮：静止时无实体（无投影、无浮雕），Hover 才浮出——用于低优先操作 -->
-        <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource NormalButton}">
-            <Setter Property="Background" Value="Transparent"/>
-        </Style>
-
-        <!-- 图标按钮：中性低饱和主体、图标与文字融为一体的实体按钮（顶栏「更新日志」用） -->
-        <Style x:Key="IconButton" TargetType="Button">
-            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
-            <Setter Property="Background">
-                <Setter.Value>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                        <GradientStop Color="#F5FFFFFF" Offset="0"/>
-                        <GradientStop Color="#E9EFF6FC" Offset="0.45"/>
-                        <GradientStop Color="#D8DFE9F7" Offset="1"/>
-                    </LinearGradientBrush>
-                </Setter.Value>
-            </Setter>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="SnapsToDevicePixels" Value="True"/>
-            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Grid>
-                            <Border x:Name="cast" CornerRadius="{DynamicResource RadiusItem}"
-                                    Background="{TemplateBinding Background}"
-                                    Effect="{DynamicResource Elevation2}" SnapsToDevicePixels="True"/>
-                            <Border x:Name="sheen" CornerRadius="{DynamicResource RadiusItem}"
-                                    Background="{DynamicResource EmbossSheen}" IsHitTestVisible="False"/>
-                            <Border x:Name="topLight" CornerRadius="{DynamicResource RadiusItem}" Height="1.5"
-                                    VerticalAlignment="Top" Background="{DynamicResource EmbossTopLight}"
-                                    IsHitTestVisible="False"/>
-                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusItem}" BorderThickness="1"
-                                    BorderBrush="{DynamicResource GlassBevelBrush}" IsHitTestVisible="False"/>
-                            <Border CornerRadius="{DynamicResource RadiusItem}" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                  RecognizesAccessKey="True"/>
-                            </Border>
-                        </Grid>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource GlassHoverStrongBg}"/>
-                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation4}"/>
-                                <Setter TargetName="sheen" Property="Background" Value="{DynamicResource EmbossSheenHover}"/>
-                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassEdgeLight}"/>
-                                <Setter Property="RenderTransform">
-                                    <Setter.Value><TranslateTransform Y="-1.5"/></Setter.Value>
-                                </Setter>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="cast" Property="Background" Value="{DynamicResource GlassPressedBg}"/>
-                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource PressedShadow}"/>
-                                <Setter TargetName="sheen" Property="Background" Value="{DynamicResource EmbossSheenPressed}"/>
-                                <Setter TargetName="topLight" Property="Opacity" Value="0"/>
-                                <Setter Property="RenderTransform">
-                                    <Setter.Value><TranslateTransform Y="1"/></Setter.Value>
-                                </Setter>
-                            </Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassFocusRing}"/>
-                                <Setter TargetName="edge" Property="BorderThickness" Value="1.6"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation0}"/>
-                                <Setter TargetName="sheen" Property="Opacity" Value="0"/>
-                                <Setter TargetName="topLight" Property="Opacity" Value="0"/>
-                                <Setter TargetName="edge" Property="Visibility" Value="Collapsed"/>
-                                <Setter Property="Foreground" Value="{DynamicResource GlassTextDisabled}"/>
-                                <Setter Property="Cursor" Value="Arrow"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+        <!-- ══════════════════════════════════════════════════════════════════════════════
+             按钮体系 · Edge Lighting（取代上一版厚重浮雕）
+             ──────────────────────────────────────────────────────────────────────────────
+             每个按钮 4 层，空间感只来自边缘光学与接触阴影，主体保持干净的不透明 Surface：
+               ① cast      主体 + 极轻接触阴影（只表达"略高于背景"，快速衰减）
+               ② edge      方向性边缘光：45° 渐变 1px 描边，左上最亮 → 右下最暗
+               ③ innerEdge 内部边缘：距轮廓 1px 的极弱明暗，暗示表面厚度（不是 Bevel）
+               ④ 内容
+             没有粗白描边、没有大面积渐变、没有大黑阴影。
+             ══════════════════════════════════════════════════════════════════════════════ -->
         <Style x:Key="BigProgress" TargetType="ProgressBar">
             <Setter Property="Height" Value="30"/>
             <Setter Property="Minimum" Value="0"/>
@@ -404,133 +169,7 @@
         </Style>
         <!-- ══ 左侧步骤导轨 ═══ -->
 <!-- ══════════ 左侧四步导航（Elevation2→3）：Hover 亮面浮起；Selected 白色玻璃胶囊＋强调色 ══════════ -->
-        <Style x:Key="StepRail" TargetType="ListBox">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
-            <Setter Property="ItemContainerStyle">
-                <Setter.Value>
-                    <Style TargetType="ListBoxItem">
-                        <Setter Property="Padding" Value="11,9"/>
-                        <Setter Property="Margin" Value="0,2,0,2"/>
-                        <!-- ★ 必须 Focusable=True：WPF 的 ListBoxItem 在 Focusable=False 时会跳过鼠标选择逻辑，
-                             导致「hover 有反馈、点击不切换」——这正是本轮导航失灵的根因 -->
-                        <Setter Property="Focusable" Value="True"/>
-                        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                        <Setter Property="Cursor" Value="Hand"/>
-                        <Setter Property="SnapsToDevicePixels" Value="True"/>
-                        <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
-                        <Setter Property="Template">
-                            <Setter.Value>
-                                <ControlTemplate TargetType="ListBoxItem">
-                                    <!-- pressShift：按下时整体下沉的唯一载体（由 EventTrigger 动画驱动） -->
-                                    <Grid x:Name="pressShift" RenderTransformOrigin="0.5,0.5">
-                                        <Grid.RenderTransform>
-                                            <TranslateTransform Y="0"/>
-                                        </Grid.RenderTransform>
-                                        <!-- ① 主体 + 外部柔和投影 -->
-                                        <Border x:Name="bd" CornerRadius="{DynamicResource RadiusControl}"
-                                                Background="Transparent" Effect="{DynamicResource Elevation0}"
-                                                SnapsToDevicePixels="True"/>
-                                        <!-- ② 浮雕明暗层（顶亮→中透→底暗） -->
-                                        <Border x:Name="sheen" CornerRadius="{DynamicResource RadiusControl}"
-                                                Background="{DynamicResource EmbossSheen}" Opacity="0"
-                                                IsHitTestVisible="False"/>
-                                        <!-- ②b 按下专用内阴影层：顶暗→中透→底略暗（这才是"被按进去"的关键，不是换个颜色） -->
-                                        <Border x:Name="sheenPressed" CornerRadius="{DynamicResource RadiusControl}"
-                                                Background="{DynamicResource EmbossSheenPressed}" Opacity="0"
-                                                IsHitTestVisible="False"/>
-                                        <!-- ②c 按下整体压暗层 -->
-                                        <Border x:Name="pressShade" CornerRadius="{DynamicResource RadiusControl}"
-                                                Background="#14000000" Opacity="0" IsHitTestVisible="False"/>
-                                        <!-- ③ 顶部高光带（按下时熄灭 = 高光减弱） -->
-                                        <Border x:Name="topLight" CornerRadius="{DynamicResource RadiusControl}" Height="1.5"
-                                                VerticalAlignment="Top" Background="{DynamicResource EmbossTopLight}"
-                                                Opacity="0" IsHitTestVisible="False"/>
-                                        <!-- ④ 折边 -->
-                                        <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}" BorderThickness="1"
-                                                BorderBrush="Transparent" IsHitTestVisible="False"/>
-                                        <!-- ⑤ 选中态内侧强调条（弱，不发光） -->
-                                        <Border x:Name="accentBar" Width="3" Height="20" CornerRadius="1.5"
-                                                HorizontalAlignment="Left" VerticalAlignment="Center" Margin="3,0,0,0"
-                                                Background="{DynamicResource GlassAccentBrush}" Opacity="0"
-                                                IsHitTestVisible="False"/>
-                                        <Border Padding="{TemplateBinding Padding}" CornerRadius="{DynamicResource RadiusControl}">
-                                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
-                                        </Border>
-                                    </Grid>
-                                    <ControlTemplate.Triggers>
-                                        <!-- Hover：轻微上浮 + 高光浮现 + 阴影出现（触发器顺序：后声明者优先） -->
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassHoverBg}"/>
-                                            <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation2}"/>
-                                            <Setter TargetName="sheen" Property="Opacity" Value="1"/>
-                                            <Setter TargetName="topLight" Property="Opacity" Value="1"/>
-                                            <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassBevelBrush}"/>
-                                        </Trigger>
-                                        <!-- Selected：实体玻璃胶囊 + 内高光 + 底部阴影 + 极弱强调，深度高于 Hover -->
-                                        <Trigger Property="IsSelected" Value="True">
-                                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassSelectedBg}"/>
-                                            <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation2}"/>
-                                            <Setter TargetName="sheen" Property="Background" Value="{DynamicResource EmbossSheenSelected}"/>
-                                            <Setter TargetName="sheen" Property="Opacity" Value="1"/>
-                                            <Setter TargetName="topLight" Property="Opacity" Value="0.75"/>
-                                            <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassEdgeLight}"/>
-                                            <Setter TargetName="accentBar" Property="Opacity" Value="0.9"/>
-                                        </Trigger>
-                                        <!-- 已选中项上再 Hover：仍轻微浮起（不丢交互反馈） -->
-                                        <MultiTrigger>
-                                            <MultiTrigger.Conditions>
-                                                <Condition Property="IsSelected" Value="True"/>
-                                                <Condition Property="IsMouseOver" Value="True"/>
-                                            </MultiTrigger.Conditions>
-                                            <Setter TargetName="sheen" Property="Background" Value="{DynamicResource EmbossSheenHover}"/>
-                                            <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation3}"/>
-                                        </MultiTrigger>
-                                        <!-- ★ Pressed：ListBoxItem 按下时不捕获鼠标，IsMouseCaptured 永不成立，
-                                             因此用 EventTrigger 直接驱动：内阴影浮现 + 高光熄灭 + 整体压暗 + 下沉 1px -->
-                                        <EventTrigger RoutedEvent="PreviewMouseLeftButtonDown">
-                                            <BeginStoryboard>
-                                                <Storyboard>
-                                                    <DoubleAnimation Storyboard.TargetName="sheenPressed" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.05"/>
-                                                    <DoubleAnimation Storyboard.TargetName="pressShade" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.05"/>
-                                                    <DoubleAnimation Storyboard.TargetName="sheen" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.05"/>
-                                                    <DoubleAnimation Storyboard.TargetName="topLight" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.05"/>
-                                                    <DoubleAnimation Storyboard.TargetName="pressShift" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="1" Duration="0:0:0.05"/>
-                                                </Storyboard>
-                                            </BeginStoryboard>
-                                        </EventTrigger>
-                                        <!-- 释放 / 移出：回到"已选中"的实体态 -->
-                                        <EventTrigger RoutedEvent="PreviewMouseLeftButtonUp">
-                                            <BeginStoryboard>
-                                                <Storyboard>
-                                                    <DoubleAnimation Storyboard.TargetName="sheenPressed" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.1"/>
-                                                    <DoubleAnimation Storyboard.TargetName="pressShade" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.1"/>
-                                                    <DoubleAnimation Storyboard.TargetName="sheen" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.1"/>
-                                                    <DoubleAnimation Storyboard.TargetName="topLight" Storyboard.TargetProperty="Opacity" To="0.75" Duration="0:0:0.1"/>
-                                                    <DoubleAnimation Storyboard.TargetName="pressShift" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="0" Duration="0:0:0.1"/>
-                                                </Storyboard>
-                                            </BeginStoryboard>
-                                        </EventTrigger>
-                                        <EventTrigger RoutedEvent="MouseLeave">
-                                            <BeginStoryboard>
-                                                <Storyboard>
-                                                    <DoubleAnimation Storyboard.TargetName="sheenPressed" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.1"/>
-                                                    <DoubleAnimation Storyboard.TargetName="pressShade" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.1"/>
-                                                    <DoubleAnimation Storyboard.TargetName="pressShift" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="0" Duration="0:0:0.1"/>
-                                                </Storyboard>
-                                            </BeginStoryboard>
-                                        </EventTrigger>
-                                    </ControlTemplate.Triggers>
-                                </ControlTemplate>
-                            </Setter.Value>
-                        </Setter>
-                    </Style>
-                </Setter.Value>
-            </Setter>
-        </Style>
+        
 
 <!-- ══════════ 输入控件：嵌入式材质（Hover 亮起 / Focus 强调描边＋微光，不做 Y 位移） ══════════ -->
         <Style TargetType="TextBox">
@@ -841,22 +480,8 @@
         </Style>
 
         <!-- ══════════ 层级积木：InnerSurface（卡片内凹面）/ StatusSurface（状态卡片） ══════════ -->
-        <Style x:Key="GlassInnerSurface" TargetType="Border">
-            <Setter Property="Background" Value="{DynamicResource GlassInnerBg}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource GlassInnerBorderBrush}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="{DynamicResource RadiusInner}"/>
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="SnapsToDevicePixels" Value="True"/>
-        </Style>
-        <Style x:Key="GlassStatusSurface" TargetType="Border">
-            <Setter Property="Background" Value="{DynamicResource GlassNeutralSurface}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource GlassBevelBrush}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="{DynamicResource RadiusCard}"/>
-            <Setter Property="Padding" Value="12,10"/>
-            <Setter Property="SnapsToDevicePixels" Value="True"/>
-        </Style>
+        
+        
 <!-- ══════════ 数据列表项（Elevation1→2）：透明行 → Hover 亮面浮起 → Selected 强调玻璃 ══════════ -->
         <Style TargetType="ListBoxItem">
             <Setter Property="Padding" Value="9,6"/>
@@ -1115,20 +740,10 @@
         <!-- 白洗层：系统亚克力自带深色 tint，垫一层半透明白保证可读、又保留 30% 实时模糊 -->
         <Border Grid.RowSpan="3" Background="{StaticResource GlassWashBg}" IsHitTestVisible="False"/>
         <!-- 苹果风底景：内置柔色块光晕（mockup 的壁纸透色感，自绘、不依赖 OS 模糊） -->
-        <Canvas Grid.RowSpan="3" IsHitTestVisible="False" ClipToBounds="True">
-            <Ellipse Width="900" Height="700" Canvas.Left="-260" Canvas.Top="330" Opacity="0.32">
-                <Ellipse.Fill><RadialGradientBrush><GradientStop Color="{DynamicResource AmbientRose}" Offset="0"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
-            </Ellipse>
-            <Ellipse Width="800" Height="800" Canvas.Left="780" Canvas.Top="120" Opacity="0.30">
-                <Ellipse.Fill><RadialGradientBrush><GradientStop Color="{DynamicResource AmbientAmber}" Offset="0"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
-            </Ellipse>
-            <Ellipse Width="700" Height="500" Canvas.Left="180" Canvas.Top="-180" Opacity="0.28">
-                <Ellipse.Fill><RadialGradientBrush><GradientStop Color="{DynamicResource AmbientSky}" Offset="0"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
-            </Ellipse>
-        </Canvas>
+        
 
         <!-- ══════════ 顶栏：标题 + 源→目标 ═══════════ -->
-        <Border Grid.Row="0" Margin="14,14,14,0" Background="{StaticResource GlassRailBg}" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,12">
+        <Border Grid.Row="0" Margin="14,14,14,0" Background="{StaticResource GlassRailBg}" BorderBrush="{StaticResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,12">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -1190,7 +805,7 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Margin="14,12,0,0" Background="{StaticResource GlassRailBg}" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}">
+            <Border Grid.Column="0" Margin="14,12,0,0" Background="{StaticResource GlassRailBg}" BorderBrush="{StaticResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}">
               <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
@@ -1903,7 +1518,7 @@
         </Grid>
 
         <!-- ═══════════ 底部状态栏（常驻） ═══════════ -->
-        <Border Grid.Row="2" Margin="14,12,14,14" Background="{StaticResource GlassRailBg}" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,10">
+        <Border Grid.Row="2" Margin="14,12,14,14" Background="{StaticResource GlassRailBg}" BorderBrush="{StaticResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,10">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>

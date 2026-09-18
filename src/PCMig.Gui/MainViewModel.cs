@@ -712,7 +712,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 // 必须指定 Owner：不指定时该 MessageBox 会禁用本线程所有窗口，却可能显示在主窗口后面，
                 // 用户看到的现象就是“所有按钮都点不动了”——这正是本轮实测反馈里最迷惑人的一条。
-                var r = MessageBox.Show(Application.Current?.MainWindow,
+                var r = AppDialog.Show(Application.Current?.MainWindow,
                     $"该源电脑和目标路径下已有未完成的任务：\n\n任务：{dup.JobId}\n进度：{(dup.StateUnreliable ? "状态文件损坏，未知（以回执为准）" : $"已传 {dup.Percent:0.0}%")}\n状态：{dup.PhaseText}\n\n[是] 继续上次任务（已完成部分不重传）\n[否] 创建全新任务",
                     "发现未完成任务", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (r == MessageBoxResult.Yes)
@@ -808,7 +808,7 @@ public sealed class MainViewModel : ViewModelBase
                     warnText += $"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件（.pst/.ost）。\n如果旧电脑上 Outlook 正在运行，这些文件会被锁定导致迁移失败。\n建议：先让旧电脑用户关闭 Outlook。\n\n";
                 if (observed.EncryptedFiles > 0)
                     warnText += $"检测到 {observed.EncryptedFiles} 个 EFS 加密文件。\n内容可以正常复制，但在新机上将失去加密保护（明文可读）。\n\n";
-                var r = MessageBox.Show(Application.Current?.MainWindow, warnText.TrimEnd() + "\n\n仍要继续吗？",
+                var r = AppDialog.Show(Application.Current?.MainWindow, warnText.TrimEnd() + "\n\n仍要继续吗？",
                     "迁移前提醒", MessageBoxButton.YesNo, MessageBoxImage.Information);
                 if (r != MessageBoxResult.Yes)
                 {
@@ -826,7 +826,7 @@ public sealed class MainViewModel : ViewModelBase
                     var free = new DriveInfo(root).AvailableFreeSpace;
                     if (free < plan.TotalBytes)
                     {
-                        var r = MessageBox.Show(Application.Current?.MainWindow,
+                        var r = AppDialog.Show(Application.Current?.MainWindow,
                             $"目标盘 {root} 剩余空间不足（新建任务前置校验）：\n需要 {Format.Bytes(plan.TotalBytes)}，可用 {Format.Bytes(free)}。\n\n仍要继续吗？（写满时会记失败对象；释放空间后再点「恢复任务」即可补齐）",
                             "空间不足", MessageBoxButton.YesNo, MessageBoxImage.Warning);
                         if (r != MessageBoxResult.Yes)
@@ -1185,7 +1185,7 @@ public sealed class MainViewModel : ViewModelBase
             AddFailRow("扫描不可访问 · " + (p.Split('｜').FirstOrDefault() ?? p), p);
         if (gate.Acknowledged) return true;
 
-        var r = MessageBox.Show(Application.Current?.MainWindow,
+        var r = AppDialog.Show(Application.Current?.MainWindow,
             ScanGate.BuildBlockMessage(gate, cli: false),
             "扫描不完整：默认不允许开始迁移", MessageBoxButton.YesNo, MessageBoxImage.Warning,
             MessageBoxResult.No);
@@ -2021,7 +2021,7 @@ public sealed class MainViewModel : ViewModelBase
             // 同前：不指定 Owner 的 MessageBox 会禁用整窗却可能藏在后面，让人以为“按钮坏了”。
             // 顺带在左栏提示面板写一行，万一窗口被挡住也知道该做什么。
             StatusMessage = "检测到上次未完成的任务：请在对话框里选「是」继续（已完成部分不重传）或「否」跳过。若没看到对话框，请点任务栏里的 PCMig。";
-            var r = MessageBox.Show(Application.Current?.MainWindow,
+            var r = AppDialog.Show(Application.Current?.MainWindow,
                 $"检测到上次的迁移任务未完成：\n\n任务：{u.JobId}\n源：{u.SourceHost}\n目标：{u.TargetRoot}\n进度：{(u.StateUnreliable ? "状态文件损坏，未知（以回执为准）" : $"已传 {u.Percent:0.0}%")}\n状态：{u.PhaseText}\n\n是否从中断处继续？已完成的部分不会重传。",
                 "发现未完成的迁移任务", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (r == MessageBoxResult.Yes)

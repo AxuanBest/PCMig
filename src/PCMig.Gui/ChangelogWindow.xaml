@@ -4,95 +4,9 @@
         Title="PCMig 迁移工具 · 更新日志"
         Width="1040" Height="740" MinWidth="820" MinHeight="560"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource GlassWindowBg}"
+        Background="{StaticResource SurfaceTertiary}"
         Icon="/PCMig;component/Assets/pcmig-64.png"
         FontFamily="Microsoft YaHei UI, Segoe UI">
-    <Window.Resources>
-        <!-- 本窗按钮：与主窗同一材质体系（Elevation4 + Hover 浮起 + Pressed 压下），颜色全部取自 token -->
-        <Style x:Key="ClButton" TargetType="Button">
-            <Setter Property="Background" Value="{DynamicResource GlassCardBg}"/>
-            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="SnapsToDevicePixels" Value="True"/>
-            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Grid>
-                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}" BorderBrush="{DynamicResource GlassBevelBrush}" BorderThickness="1" Background="Transparent"/>
-                            <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource RadiusControl}"
-                                    Padding="{TemplateBinding Padding}" Effect="{DynamicResource Elevation4}" SnapsToDevicePixels="True">
-                                <Grid>
-                                    <Border x:Name="hoverLight" CornerRadius="{DynamicResource RadiusControl}" Background="White" Opacity="0" IsHitTestVisible="False"/>
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Grid>
-                            </Border>
-                        </Grid>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassHoverStrongBg}"/>
-                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation3}"/>
-                                <Setter Property="RenderTransform"><Setter.Value><TranslateTransform Y="-1.5"/></Setter.Value></Setter>
-                                <Setter TargetName="hoverLight" Property="Opacity" Value="0.22"/>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassPressedBg}"/>
-                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource PressedShadow}"/>
-                                <Setter Property="RenderTransform"><Setter.Value><TranslateTransform Y="0.5"/></Setter.Value></Setter>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassInnerDeepBg}"/>
-                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation0}"/>
-                                <Setter TargetName="edge" Property="Visibility" Value="Collapsed"/>
-                                <Setter Property="Foreground" Value="{DynamicResource GlassTextDisabled}"/>
-                                <Setter Property="Cursor" Value="Arrow"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style x:Key="ClPrimary" TargetType="Button">
-            <Setter Property="Background" Value="{DynamicResource GlassAccentBrush}"/>
-            <Setter Property="Foreground" Value="{DynamicResource GlassTextOnAccent}"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="SnapsToDevicePixels" Value="True"/>
-            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource RadiusControl}"
-                                Padding="{TemplateBinding Padding}" Effect="{DynamicResource Elevation4}" SnapsToDevicePixels="True">
-                            <Grid>
-                                <Border x:Name="hoverLight" CornerRadius="{DynamicResource RadiusControl}" Background="White" Opacity="0" IsHitTestVisible="False"/>
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            </Grid>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation3}"/>
-                                <Setter Property="RenderTransform"><Setter.Value><TranslateTransform Y="-1.5"/></Setter.Value></Setter>
-                                <Setter TargetName="hoverLight" Property="Opacity" Value="0.15"/>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource PressedShadow}"/>
-                                <Setter Property="RenderTransform"><Setter.Value><TranslateTransform Y="0.5"/></Setter.Value></Setter>
-                                <Setter TargetName="hoverLight" Property="Opacity" Value="0.06"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassInnerDeepBg}"/>
-                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation0}"/>
-                                <Setter Property="Foreground" Value="{DynamicResource GlassTextDisabled}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </Window.Resources>
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -136,7 +50,8 @@
                               PreviewMouseLeftButtonUp="VerList_PreviewMouseUp">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem">
-                                <Setter Property="Padding" Value="6,5"/>
+                                <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                                            <Setter Property="Padding" Value="6,5"/>
                                 <Setter Property="Margin" Value="0,1,0,1"/>
                                 <Setter Property="Focusable" Value="False"/>
                                 <!-- 整行可点：原模板只按内容宽度命中，点右侧空白没反应 -->
@@ -192,16 +107,16 @@
             </Grid.ColumnDefinitions>
             <TextBlock x:Name="FooterHint" FontSize="11" Foreground="{DynamicResource GlassSubTextBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
             <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <Button x:Name="BtnPrevVer" Content="◀ 上一版" Click="PrevVer_Click" Style="{StaticResource ClButton}"
+                <Button x:Name="BtnPrevVer" Content="◀ 上一版" Click="PrevVer_Click" Style="{StaticResource NormalButton}"
                         FontSize="12"
                         Padding="12,7" Margin="0,0,8,0"/>
-                <Button x:Name="BtnNextVer" Content="下一版 ▶" Click="NextVer_Click" Style="{StaticResource ClButton}"
+                <Button x:Name="BtnNextVer" Content="下一版 ▶" Click="NextVer_Click" Style="{StaticResource NormalButton}"
                         FontSize="12"
                         Padding="12,7" Margin="0,0,10,0"/>
-                <Button x:Name="BtnOpenTxt" Content="用记事本打开 TXT" Click="OpenTxt_Click" Style="{StaticResource ClButton}"
+                <Button x:Name="BtnOpenTxt" Content="用记事本打开 TXT" Click="OpenTxt_Click" Style="{StaticResource NormalButton}"
                         FontSize="12"
                         Padding="14,7" Margin="0,0,10,0"/>
-                <Button x:Name="BtnClose" Content="关闭" Click="Close_Click" Style="{StaticResource ClPrimary}"
+                <Button x:Name="BtnClose" Content="关闭" Click="Close_Click" Style="{StaticResource PrimaryButton}"
                         FontSize="12"
                         Padding="22,7"/>
             </StackPanel>

@@ -316,7 +316,7 @@ public partial class ChangelogWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "无法打开文本文件：" + ex.Message, "PCMig 更新日志",
+            AppDialog.Show(this, "无法打开文本文件：" + ex.Message, "PCMig 更新日志",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
