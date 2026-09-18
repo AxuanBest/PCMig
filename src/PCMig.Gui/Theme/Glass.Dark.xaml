@@ -242,9 +242,10 @@
          与全局光源同向（左上→右下），对比极低，肉眼不应看出"这是一块渐变"。
          只改变 Background Layer；所有 Surface 仍然完全不透明。 -->
     <LinearGradientBrush x:Key="AppBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#FF171C23" Offset="0"/>
-        <GradientStop Color="#FF141920" Offset="0.55"/>
-        <GradientStop Color="#FF11151B" Offset="1"/>
+        <GradientStop Color="#FF181D2A" Offset="0"/>
+        <GradientStop Color="#FF1C1B26" Offset="0.28"/>
+        <GradientStop Color="#FF241A1E" Offset="0.58"/>
+        <GradientStop Color="#FF261E19" Offset="1"/>
     </LinearGradientBrush>
 
     <s:Double x:Key="FontPageTitle">21</s:Double>

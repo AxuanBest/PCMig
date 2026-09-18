@@ -107,7 +107,7 @@
     <SolidColorBrush x:Key="GlassWindowBg"    Color="#FFEAEEF4"/>
     <SolidColorBrush x:Key="GlassWashBg"      Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="GlassRailBg"      Color="#FFEFF3F8"/>
-    <SolidColorBrush x:Key="GlassPanelBg"     Color="#FFF4F7FB"/>
+    <SolidColorBrush x:Key="GlassPanelBg"     Color="#FFFCFDFF"/>
     <SolidColorBrush x:Key="GlassCardBg"      Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="GlassSecondaryBg" Color="#FFF8FAFC"/>
     <SolidColorBrush x:Key="GlassInnerBg"     Color="#FFF4F7FA"/>
@@ -291,9 +291,10 @@
          它只是给上层的 Edge Light 与 Contact Shadow 提供一个有参照的底面。
          注意：这里只改变 Background Layer；所有 Button/Card/Nav/Dialog Surface 仍然完全不透明。 -->
     <LinearGradientBrush x:Key="AppBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#FFEFF3F8" Offset="0"/>
-        <GradientStop Color="#FFEBEFF5" Offset="0.55"/>
-        <GradientStop Color="#FFE5EAF1" Offset="1"/>
+        <GradientStop Color="#FFE3EDFA" Offset="0"/>
+        <GradientStop Color="#FFE9EBF7" Offset="0.28"/>
+        <GradientStop Color="#FFF8E9EC" Offset="0.58"/>
+        <GradientStop Color="#FFFBEFE4" Offset="1"/>
     </LinearGradientBrush>
 
     <s:Double x:Key="FontPageTitle">21</s:Double>
