@@ -6,7 +6,7 @@
         MinWidth="1120" MinHeight="740"
         Icon="/PCMig;component/Assets/pcmig.ico"
         FontFamily="Microsoft YaHei UI" FontSize="13"
-        Background="{StaticResource GlassWindowBg}">
+        Background="{DynamicResource GlassWindowBg}">
     <Window.DataContext>
         <local:MainViewModel/>
     </Window.DataContext>
@@ -76,7 +76,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="ProgressBar">
                         <Grid>
-                            <Border CornerRadius="{StaticResource RadiusProgress}" Background="{StaticResource GlassInnerDeepBg}"/>
+                            <Border CornerRadius="{StaticResource RadiusProgress}" Background="{DynamicResource GlassInnerDeepBg}"/>
                             <Border x:Name="PART_Track" CornerRadius="{StaticResource RadiusProgress}" ClipToBounds="True">
                                 <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="{StaticResource RadiusProgress}">
                                     <Border.Background>
@@ -136,7 +136,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="ProgressBar">
                         <Grid>
-                            <Border CornerRadius="{StaticResource RadiusProgress}" Background="{StaticResource GlassInnerDeepBg}"/>
+                            <Border CornerRadius="{StaticResource RadiusProgress}" Background="{DynamicResource GlassInnerDeepBg}"/>
                             <Border x:Name="PART_Track" CornerRadius="{StaticResource RadiusProgress}" ClipToBounds="True">
                                 <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="{StaticResource RadiusProgress}">
                                     <Border.Background>
@@ -295,7 +295,7 @@
                             <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}"
                                     BorderBrush="{DynamicResource GlassBevelBrush}" BorderThickness="1"
                                     IsHitTestVisible="False"/>
-                            <ToggleButton x:Name="toggle" Style="{StaticResource GlassComboToggle}"
+                            <ToggleButton x:Name="toggle" Style="{DynamicResource GlassComboToggle}"
                                           IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"/>
                             <Grid Margin="{TemplateBinding Padding}" IsHitTestVisible="False">
                                 <Grid.ColumnDefinitions>
@@ -738,12 +738,12 @@
             <RowDefinition Height="Auto"/>   <!-- 底部状态栏 -->
         </Grid.RowDefinitions>
         <!-- 白洗层：系统亚克力自带深色 tint，垫一层半透明白保证可读、又保留 30% 实时模糊 -->
-        <Border Grid.RowSpan="3" Background="{StaticResource GlassWashBg}" IsHitTestVisible="False"/>
+        <Border Grid.RowSpan="3" Background="{DynamicResource GlassWashBg}" IsHitTestVisible="False"/>
         <!-- 苹果风底景：内置柔色块光晕（mockup 的壁纸透色感，自绘、不依赖 OS 模糊） -->
         
 
         <!-- ══════════ 顶栏：标题 + 源→目标 ═══════════ -->
-        <Border Grid.Row="0" Margin="14,14,14,0" Background="{StaticResource GlassRailBg}" BorderBrush="{StaticResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,12">
+        <Border Grid.Row="0" Margin="14,14,14,0" Background="{DynamicResource GlassRailBg}" BorderBrush="{DynamicResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,12">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -805,7 +805,7 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Margin="14,12,0,0" Background="{StaticResource GlassRailBg}" BorderBrush="{StaticResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}">
+            <Border Grid.Column="0" Margin="14,12,0,0" Background="{DynamicResource GlassRailBg}" BorderBrush="{DynamicResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}">
               <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
@@ -828,10 +828,10 @@
                                     <TextBlock Text="{Binding Title}" FontWeight="SemiBold">
                                         <TextBlock.Style>
                                             <Style TargetType="TextBlock">
-                                                <Setter Property="Foreground" Value="{StaticResource GlassTitleBrush}"/>
+                                                <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
-                                                        <Setter Property="Foreground" Value="{StaticResource GlassAccentBrush}"/>
+                                                        <Setter Property="Foreground" Value="{DynamicResource GlassAccentBrush}"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -845,16 +845,16 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
                 <!-- 提示面板：原来挤在进度条下方，移到这里独立成块；清单可滚轮翻页。底栏不再重复显示状态文字 -->
-                <Border Grid.Row="1" Background="{DynamicResource GlassErrorSurface}" BorderBrush="{DynamicResource GlassErrorEdge}" BorderThickness="0" CornerRadius="{DynamicResource RadiusCard}" Padding="12,10">
+                <Border Grid.Row="1" Background="{DynamicResource GlassErrorSurface}" BorderBrush="{DynamicResource ErrorEdgeLight}" BorderThickness="0" CornerRadius="{DynamicResource RadiusCard}" Padding="12,10">
                     <!-- v0.3.8（缺陷 3）：有对象失败时整块变红（底色/边线/标题），不再是"失败了却像还在跑" -->
                     <Border.Style>
                         <Style TargetType="Border">
                             <Setter Property="Background" Value="{DynamicResource GlassErrorSurface}"/>
-                            <Setter Property="BorderBrush" Value="{DynamicResource GlassErrorEdge}"/>
+                            <Setter Property="BorderBrush" Value="{DynamicResource ErrorEdgeLight}"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding HasObjectFailures}" Value="True">
                                     <Setter Property="Background" Value="{DynamicResource GlassErrorSurfaceSoft}"/>
-                                    <Setter Property="BorderBrush" Value="{DynamicResource GlassErrorEdge}"/>
+                                    <Setter Property="BorderBrush" Value="{DynamicResource ErrorEdgeLight}"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
@@ -1066,7 +1066,7 @@
                                         Margin="8,0,0,0" Height="28" Padding="12,0"
                                         Command="{Binding AddManualShareCommand}" CommandParameter="{Binding ElementName=PwdBox}"/>
                             </Grid>
-                            <Border Grid.Row="2" Style="{StaticResource GlassInnerSurface}" Margin="0,10,0,0" Padding="0">
+                            <Border Grid.Row="2" Style="{DynamicResource GlassInnerSurface}" Margin="0,10,0,0" Padding="0">
                             <ListBox ItemsSource="{Binding Shares}" BorderThickness="0" Margin="5,4"
                                      Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto"
                                      VirtualizingPanel.IsVirtualizing="True">
@@ -1131,7 +1131,7 @@
                                 <CheckBox Grid.Row="1" Margin="0,8,0,0" Content="超大数据模式（上亿文件 / 几十 TB：改用排除规则，不展开目录）"
                                           IsChecked="{Binding ExpertMode}"
                                           ToolTip="目录树替换为「共享勾选 + 排除规则」，避免展开目录卡死"/>
-                                <Border Grid.Row="2" Style="{StaticResource GlassInnerSurface}" Margin="0,8,0,0" Padding="4,3"
+                                <Border Grid.Row="2" Style="{DynamicResource GlassInnerSurface}" Margin="0,8,0,0" Padding="4,3"
                                         Visibility="{Binding ExpertMode, Converter={StaticResource InvBoolVis}}">
                                 <TreeView ItemsSource="{Binding DirTree}" BorderThickness="0"
                                           Background="Transparent"
@@ -1175,7 +1175,7 @@
                                         <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     <TextBlock Text="勾选要迁移的共享（整盘）：" Style="{StaticResource FieldLabel}"/>
-                                    <Border Grid.Row="1" Style="{StaticResource GlassInnerSurface}" Margin="0,4,0,6" Padding="4,3">
+                                    <Border Grid.Row="1" Style="{DynamicResource GlassInnerSurface}" Margin="0,4,0,6" Padding="4,3">
                                     <ListBox ItemsSource="{Binding Shares}" BorderThickness="0"
                                              Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto">
                                         <ListBox.ItemTemplate>
@@ -1300,7 +1300,7 @@
                                 <ProgressBar Style="{StaticResource BigProgress}" Value="{Binding Percent}" Visibility="{Binding MigrationProgressVisibility}"/>
                                 <!-- 「尝试修复」独立进度：只在修复期间出现，避免与迁移进度混淆 -->
                                 <Border Visibility="{Binding RepairVisibility}" Margin="0,10,0,0"
-                                        Background="{DynamicResource GlassInfoSurface}" BorderBrush="{DynamicResource GlassInfoEdge}" BorderThickness="1" CornerRadius="{DynamicResource RadiusItem}" Padding="12,9">
+                                        Background="{DynamicResource GlassInfoSurface}" BorderBrush="{DynamicResource InfoEdgeLight}" BorderThickness="1" CornerRadius="{DynamicResource RadiusItem}" Padding="12,9">
                                     <StackPanel>
                                         <Grid>
                                             <TextBlock Text="正在修复（从源共享重拷差异文件）" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource GlassInfoText}"/>
@@ -1327,7 +1327,7 @@
                                            ToolTip="{Binding CurrentObjectDetail}"
                                            Visibility="{Binding HasCurrentObjectDetail, Converter={StaticResource BoolVis}}"/>
                                 <Border Visibility="{Binding HasStallHint, Converter={StaticResource BoolVis}}"
-                                        Background="{DynamicResource GlassWarnSurface}" BorderBrush="{DynamicResource GlassWarnEdge}" BorderThickness="1"
+                                        Background="{DynamicResource GlassWarnSurface}" BorderBrush="{DynamicResource WarnEdgeLight}" BorderThickness="1"
                                         CornerRadius="6" Padding="9,6" Margin="0,7,0,0">
                                     <TextBlock Text="{Binding StallHintText}" FontSize="11.5" Foreground="{DynamicResource GlassWarnText}"
                                                TextWrapping="Wrap"/>
@@ -1398,7 +1398,7 @@
                                     <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
                                 </Grid.RowDefinitions>
                                 <TextBlock Text="对象明细" Style="{StaticResource CardTitle}"/>
-                                <Border Grid.Row="1" Style="{StaticResource GlassInnerSurface}" Margin="0,8,0,0" Padding="4,2">
+                                <Border Grid.Row="1" Style="{DynamicResource GlassInnerSurface}" Margin="0,8,0,0" Padding="4,2">
                                 <DataGrid ItemsSource="{Binding Objects}" IsReadOnly="True"
                                           AutoGenerateColumns="False" HeadersVisibility="Column" BorderThickness="0"
                                           Background="Transparent"
@@ -1419,7 +1419,7 @@
                                     <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
                                 </Grid.RowDefinitions>
                                 <TextBlock Text="正在复制的文件" Style="{StaticResource CardTitle}"/>
-                                <Border Grid.Row="1" Style="{StaticResource GlassInnerSurface}" Margin="0,8,0,0" Padding="4,3">
+                                <Border Grid.Row="1" Style="{DynamicResource GlassInnerSurface}" Margin="0,8,0,0" Padding="4,3">
                                 <ListBox x:Name="LiveFilesList" ItemsSource="{Binding LiveFiles}"
                                          BorderThickness="0" Background="Transparent" FontFamily="Consolas" FontSize="11"
                                          VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -1485,7 +1485,7 @@
                                 <TextBlock Style="{StaticResource Caption}" Margin="10,0,0,0" VerticalAlignment="Center"
                                            Text="失败的位置与原因；处理完（例如关掉旧电脑上占用文件的程序）点「恢复任务」即可补齐"/>
                             </StackPanel>
-                            <Border Grid.Row="1" Style="{StaticResource GlassInnerSurface}" Margin="0,8,0,0" Padding="4,2">
+                            <Border Grid.Row="1" Style="{DynamicResource GlassInnerSurface}" Margin="0,8,0,0" Padding="4,2">
                             <DataGrid ItemsSource="{Binding FailItems}" IsReadOnly="True"
                                       AutoGenerateColumns="False" HeadersVisibility="Column" BorderThickness="0"
                                       Background="Transparent"
@@ -1518,7 +1518,7 @@
         </Grid>
 
         <!-- ═══════════ 底部状态栏（常驻） ═══════════ -->
-        <Border Grid.Row="2" Margin="14,12,14,14" Background="{StaticResource GlassRailBg}" BorderBrush="{StaticResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,10">
+        <Border Grid.Row="2" Margin="14,12,14,14" Background="{DynamicResource GlassRailBg}" BorderBrush="{DynamicResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,10">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -1537,7 +1537,7 @@
                     <!-- 百分比与数据量同一字号、同一颜色、固定列宽：数值跳动时不会左右漂移；
                          迁移页大号百分比已经显示同一个数字，这里隐藏（Hidden 保留占位，切页不跳动） -->
                     <TextBlock Text="{Binding Percent, StringFormat={}{0:F1}%}" FontSize="14" VerticalAlignment="Center"
-                               Foreground="{StaticResource GlassAccentBrush}">
+                               Foreground="{DynamicResource GlassAccentBrush}">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
                                 <Setter Property="FontWeight" Value="Bold"/>
@@ -1563,8 +1563,8 @@
                     <TextBlock Grid.Column="3" Text="{Binding EtaText}" FontSize="13" Foreground="{DynamicResource GlassSubTextBrush}" VerticalAlignment="Center"
                                ToolTip="预计剩余时间：按本次任务自己的实测速率（已落盘字节 ÷ 用时）估算，与上面的网卡实时吞吐无关"/>
                     <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,14,0">
-                        <TextBlock Text="网络" FontSize="{StaticResource FontStatus}" Foreground="{StaticResource GlassSubTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <Ellipse Width="8" Height="8" Fill="{StaticResource GlassSuccess}" VerticalAlignment="Center"/>
+                        <TextBlock Text="网络" FontSize="{StaticResource FontStatus}" Foreground="{DynamicResource GlassSubTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <Ellipse Width="8" Height="8" Fill="{DynamicResource GlassSuccess}" VerticalAlignment="Center"/>
                     </StackPanel>
                     <WrapPanel Grid.Column="5">
                         <Button Content="▶ 开始迁移" Style="{StaticResource PrimaryButton}" Padding="12,5" Margin="0,0,8,0"

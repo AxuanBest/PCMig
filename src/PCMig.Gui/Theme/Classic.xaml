@@ -13,8 +13,8 @@
 
     <!-- Surface -->
     <SolidColorBrush x:Key="SurfaceColor"     Color="#FFFFFFFF"/>
-    <SolidColorBrush x:Key="SurfaceSecondary" Color="#FFF7F8FA"/>
-    <SolidColorBrush x:Key="SurfaceTertiary"  Color="#FFF1F3F7"/>
+    <SolidColorBrush x:Key="SurfaceSecondary" Color="#FFEDF0F4"/>
+    <SolidColorBrush x:Key="SurfaceTertiary"  Color="#FFE9ECF1"/>
     <SolidColorBrush x:Key="SurfaceHover"     Color="#FFF1F5F9"/>
     <SolidColorBrush x:Key="SurfacePressed"   Color="#FFE8EDF3"/>
     <SolidColorBrush x:Key="SurfaceSelected"  Color="#FFE4EDFB"/>
@@ -76,10 +76,10 @@
     <SolidColorBrush x:Key="ErrorColor"    Color="#FFDC2626"/>
 
     <!-- 兼容层 -->
-    <SolidColorBrush x:Key="GlassWindowBg"    Color="#FFF0F2F5"/>
+    <SolidColorBrush x:Key="GlassWindowBg"    Color="#FFE9ECF1"/>
     <SolidColorBrush x:Key="GlassWashBg"      Color="#FFFFFFFF"/>
-    <SolidColorBrush x:Key="GlassRailBg"      Color="#FFFFFFFF"/>
-    <SolidColorBrush x:Key="GlassPanelBg"     Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="GlassRailBg"      Color="#FFEDF0F4"/>
+    <SolidColorBrush x:Key="GlassPanelBg"     Color="#FFF2F4F8"/>
     <SolidColorBrush x:Key="GlassCardBg"      Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="GlassSecondaryBg" Color="#FFF7F8FA"/>
     <SolidColorBrush x:Key="GlassInnerBg"     Color="#FFF7F8FA"/>
@@ -185,6 +185,11 @@
     <LinearGradientBrush x:Key="EmbossInnerLight" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#00000000" Offset="1"/>
     </LinearGradientBrush>
+    <!-- ── 语义 Surface 边缘光（与全局光源同向：左上→右下）── -->
+    <LinearGradientBrush x:Key="ErrorEdgeLight" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFF3C4BF" Offset="0"/><GradientStop Color="#FFF3C4BF" Offset="1"/></LinearGradientBrush>
+    <LinearGradientBrush x:Key="InfoEdgeLight" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFBFD7F7" Offset="0"/><GradientStop Color="#FFBFD7F7" Offset="1"/></LinearGradientBrush>
+    <LinearGradientBrush x:Key="WarnEdgeLight" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFEFD5A6" Offset="0"/><GradientStop Color="#FFEFD5A6" Offset="1"/></LinearGradientBrush>
+    
     <s:Double x:Key="FontPageTitle">21</s:Double>
     <s:Double x:Key="FontSectionTitle">16</s:Double>
     <s:Double x:Key="FontCardTitle">13.5</s:Double>

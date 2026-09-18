@@ -14,9 +14,9 @@
     <s:Double x:Key="PressedDepth">1</s:Double>
 
     <!-- Surface（不透明深色，靠色调差分层） -->
-    <SolidColorBrush x:Key="SurfaceColor"     Color="#FF1E232B"/>
-    <SolidColorBrush x:Key="SurfaceSecondary" Color="#FF232932"/>
-    <SolidColorBrush x:Key="SurfaceTertiary"  Color="#FF191D24"/>
+    <SolidColorBrush x:Key="SurfaceColor"     Color="#FF232932"/>
+    <SolidColorBrush x:Key="SurfaceSecondary" Color="#FF171B22"/>
+    <SolidColorBrush x:Key="SurfaceTertiary"  Color="#FF12161C"/>
     <SolidColorBrush x:Key="SurfaceHover"     Color="#FF272E38"/>
     <SolidColorBrush x:Key="SurfacePressed"   Color="#FF1A1F26"/>
     <SolidColorBrush x:Key="SurfaceSelected"  Color="#FF243449"/>
@@ -25,31 +25,31 @@
     <SolidColorBrush x:Key="SurfaceDialog"    Color="#FF262C35"/>
 
     <!-- 方向性边缘光（深色版：左上弱白 → 右下深黑） -->
-    <LinearGradientBrush x:Key="EdgeHighlight" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#33FFFFFF" Offset="0"/>
-        <GradientStop Color="#17FFFFFF" Offset="0.28"/>
-        <GradientStop Color="#08FFFFFF" Offset="0.52"/>
-        <GradientStop Color="#24000000" Offset="0.74"/>
-        <GradientStop Color="#4D000000" Offset="1"/>
-    </LinearGradientBrush>
-    <LinearGradientBrush x:Key="EdgeHighlightStrong" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#59FFFFFF" Offset="0"/>
-        <GradientStop Color="#29FFFFFF" Offset="0.28"/>
-        <GradientStop Color="#0FFFFFFF" Offset="0.52"/>
-        <GradientStop Color="#33000000" Offset="0.74"/>
-        <GradientStop Color="#5C000000" Offset="1"/>
-    </LinearGradientBrush>
-    <LinearGradientBrush x:Key="EdgeHighlightPressed" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#5C000000" Offset="0"/>
-        <GradientStop Color="#33000000" Offset="0.30"/>
-        <GradientStop Color="#00000000" Offset="0.60"/>
-        <GradientStop Color="#1FFFFFFF" Offset="1"/>
-    </LinearGradientBrush>
-    <LinearGradientBrush x:Key="InnerEdge" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#14FFFFFF" Offset="0"/>
-        <GradientStop Color="#00000000" Offset="0.45"/>
-        <GradientStop Color="#1F000000" Offset="1"/>
-    </LinearGradientBrush>
+    <RadialGradientBrush x:Key="EdgeHighlight" GradientOrigin="0.06,0.08" Center="0.06,0.08" RadiusX="1.25" RadiusY="1.25">
+        <GradientStop Color="#42FFFFFF" Offset="0.00"/>
+        <GradientStop Color="#1FFFFFFF" Offset="0.26"/>
+        <GradientStop Color="#0AFFFFFF" Offset="0.48"/>
+        <GradientStop Color="#26000000" Offset="0.68"/>
+        <GradientStop Color="#5C000000" Offset="1.00"/>
+    </RadialGradientBrush>
+    <RadialGradientBrush x:Key="EdgeHighlightStrong" GradientOrigin="0.06,0.08" Center="0.06,0.08" RadiusX="1.25" RadiusY="1.25">
+        <GradientStop Color="#66FFFFFF" Offset="0.00"/>
+        <GradientStop Color="#30FFFFFF" Offset="0.26"/>
+        <GradientStop Color="#10FFFFFF" Offset="0.48"/>
+        <GradientStop Color="#38000000" Offset="0.68"/>
+        <GradientStop Color="#75000000" Offset="1.00"/>
+    </RadialGradientBrush>
+    <RadialGradientBrush x:Key="EdgeHighlightPressed" GradientOrigin="0.94,0.92" Center="0.94,0.92" RadiusX="1.25" RadiusY="1.25">
+        <GradientStop Color="#66000000" Offset="0.00"/>
+        <GradientStop Color="#3A000000" Offset="0.28"/>
+        <GradientStop Color="#00000000" Offset="0.52"/>
+        <GradientStop Color="#1FFFFFFF" Offset="1.00"/>
+    </RadialGradientBrush>
+    <RadialGradientBrush x:Key="InnerEdge" GradientOrigin="0.06,0.08" Center="0.06,0.08" RadiusX="1.25" RadiusY="1.25">
+        <GradientStop Color="#17FFFFFF" Offset="0.00"/>
+        <GradientStop Color="#00000000" Offset="0.42"/>
+        <GradientStop Color="#1F000000" Offset="1.00"/>
+    </RadialGradientBrush>
     <SolidColorBrush x:Key="DividerColor" Color="#FF333A45"/>
 
     <!-- 阴影（深色底上更收敛） -->
@@ -87,11 +87,11 @@
     <SolidColorBrush x:Key="ErrorColor"    Color="#FFF87171"/>
 
     <!-- 兼容层 -->
-    <SolidColorBrush x:Key="GlassWindowBg"    Color="#FF15191F"/>
+    <SolidColorBrush x:Key="GlassWindowBg"    Color="#FF12161C"/>
     <SolidColorBrush x:Key="GlassWashBg"      Color="#FF1E232B"/>
-    <SolidColorBrush x:Key="GlassRailBg"      Color="#FF1E232B"/>
-    <SolidColorBrush x:Key="GlassPanelBg"     Color="#FF1E232B"/>
-    <SolidColorBrush x:Key="GlassCardBg"      Color="#FF1E232B"/>
+    <SolidColorBrush x:Key="GlassRailBg"      Color="#FF171B22"/>
+    <SolidColorBrush x:Key="GlassPanelBg"     Color="#FF1B2027"/>
+    <SolidColorBrush x:Key="GlassCardBg"      Color="#FF232932"/>
     <SolidColorBrush x:Key="GlassSecondaryBg" Color="#FF232932"/>
     <SolidColorBrush x:Key="GlassInnerBg"     Color="#FF191D24"/>
     <SolidColorBrush x:Key="GlassInnerDeepBg" Color="#FF15181E"/>
@@ -100,21 +100,21 @@
     <Color x:Key="AmbientRose">#00FFFFFF</Color>
     <Color x:Key="AmbientAmber">#00FFFFFF</Color>
     <Color x:Key="AmbientSky">#00FFFFFF</Color>
-    <LinearGradientBrush x:Key="GlassEdgeLight" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#3DFFFFFF" Offset="0"/>
-        <GradientStop Color="#1AFFFFFF" Offset="0.30"/>
-        <GradientStop Color="#1A000000" Offset="0.68"/>
-        <GradientStop Color="#47000000" Offset="1"/>
-    </LinearGradientBrush>
+    <RadialGradientBrush x:Key="GlassEdgeLight" GradientOrigin="0.06,0.08" Center="0.06,0.08" RadiusX="1.25" RadiusY="1.25">
+        <GradientStop Color="#47FFFFFF" Offset="0.00"/>
+        <GradientStop Color="#26FFFFFF" Offset="0.30"/>
+        <GradientStop Color="#1F000000" Offset="0.66"/>
+        <GradientStop Color="#52000000" Offset="1.00"/>
+    </RadialGradientBrush>
     <SolidColorBrush x:Key="GlassEdgeDark"         Color="#FF10131A"/>
     <SolidColorBrush x:Key="GlassBorderBrush"      Color="#FF333A45"/>
     <SolidColorBrush x:Key="GlassInnerBorderBrush" Color="#FF2B323C"/>
-    <LinearGradientBrush x:Key="GlassBevelBrush" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#2EFFFFFF" Offset="0"/>
-        <GradientStop Color="#12FFFFFF" Offset="0.35"/>
-        <GradientStop Color="#14000000" Offset="0.70"/>
-        <GradientStop Color="#38000000" Offset="1"/>
-    </LinearGradientBrush>
+    <RadialGradientBrush x:Key="GlassBevelBrush" GradientOrigin="0.06,0.08" Center="0.06,0.08" RadiusX="1.25" RadiusY="1.25">
+        <GradientStop Color="#33FFFFFF" Offset="0.00"/>
+        <GradientStop Color="#16FFFFFF" Offset="0.35"/>
+        <GradientStop Color="#16000000" Offset="0.70"/>
+        <GradientStop Color="#40000000" Offset="1.00"/>
+    </RadialGradientBrush>
     <LinearGradientBrush x:Key="GlassSurfaceSheen" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Color="#08FFFFFF" Offset="0"/>
         <GradientStop Color="#00000000" Offset="0.5"/>
@@ -201,6 +201,29 @@
     <LinearGradientBrush x:Key="EmbossInnerLight" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#00000000" Offset="1"/>
     </LinearGradientBrush>
+    <!-- ── 语义 Surface 边缘光（与全局光源同向：左上→右下）── -->
+    <RadialGradientBrush x:Key="ErrorEdgeLight" GradientOrigin="0.06,0.08" Center="0.06,0.08" RadiusX="1.25" RadiusY="1.25">
+        <GradientStop Color="#5CF87171" Offset="0"/>
+        <GradientStop Color="#26F87171" Offset="0.28"/>
+        <GradientStop Color="#00FFFFFF" Offset="0.50"/>
+        <GradientStop Color="#26F87171" Offset="0.72"/>
+        <GradientStop Color="#47B91C1C" Offset="1.00"/>
+    </RadialGradientBrush>
+    <RadialGradientBrush x:Key="InfoEdgeLight" GradientOrigin="0.06,0.08" Center="0.06,0.08" RadiusX="1.25" RadiusY="1.25">
+        <GradientStop Color="#5C6FA8FF" Offset="0"/>
+        <GradientStop Color="#266FA8FF" Offset="0.28"/>
+        <GradientStop Color="#00FFFFFF" Offset="0.50"/>
+        <GradientStop Color="#266FA8FF" Offset="0.72"/>
+        <GradientStop Color="#473D8BFF" Offset="1.00"/>
+    </RadialGradientBrush>
+    <RadialGradientBrush x:Key="WarnEdgeLight" GradientOrigin="0.06,0.08" Center="0.06,0.08" RadiusX="1.25" RadiusY="1.25">
+        <GradientStop Color="#5CF5B942" Offset="0"/>
+        <GradientStop Color="#26F5B942" Offset="0.28"/>
+        <GradientStop Color="#00FFFFFF" Offset="0.50"/>
+        <GradientStop Color="#26F5B942" Offset="0.72"/>
+        <GradientStop Color="#47B45309" Offset="1.00"/>
+    </RadialGradientBrush>
+    
     <s:Double x:Key="FontPageTitle">21</s:Double>
     <s:Double x:Key="FontSectionTitle">16</s:Double>
     <s:Double x:Key="FontCardTitle">13.5</s:Double>
