@@ -34,7 +34,7 @@
     <LinearGradientBrush x:Key="GlassBevelBrush" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Color="#2EFFFFFF" Offset="0"/>
         <GradientStop Color="#14FFFFFF" Offset="0.5"/>
-        <GradientStop Color="#33000000" Offset="1"/>
+        <GradientStop Color="#45000000" Offset="1"/>
     </LinearGradientBrush>
     <LinearGradientBrush x:Key="GlassSurfaceSheen" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Color="#12FFFFFF" Offset="0"/>
@@ -55,6 +55,44 @@
     <Color x:Key="AccentSoftColor">#66B2FF</Color>
     <Color x:Key="AccentColor">#0A84FF</Color>
     <Color x:Key="AccentDeepColor">#3D9BFF</Color>
+    <!-- ══════════ 浮雕材质（深色：顶部弱高光 + 底部更深，保持"上亮下暗"的光照逻辑）══════════ -->
+    <LinearGradientBrush x:Key="EmbossSheen" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#2EFFFFFF" Offset="0"/>
+        <GradientStop Color="#00FFFFFF" Offset="0.42"/>
+        <GradientStop Color="#52000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossSheenHover" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#45FFFFFF" Offset="0"/>
+        <GradientStop Color="#0DFFFFFF" Offset="0.45"/>
+        <GradientStop Color="#45000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossSheenPressed" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#61000000" Offset="0"/>
+        <GradientStop Color="#29000000" Offset="0.32"/>
+        <GradientStop Color="#00000000" Offset="0.72"/>
+        <GradientStop Color="#52000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossSheenSelected" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#2EFFFFFF" Offset="0"/>
+        <GradientStop Color="#08FFFFFF" Offset="0.5"/>
+        <GradientStop Color="#52000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossTopLight" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#59FFFFFF" Offset="0"/>
+        <GradientStop Color="#00FFFFFF" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossBottomShade" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00000000" Offset="0"/>
+        <GradientStop Color="#47000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossInnerShade" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#59000000" Offset="0"/>
+        <GradientStop Color="#00000000" Offset="0.75"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossInnerLight" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00000000" Offset="0.25"/>
+        <GradientStop Color="#14FFFFFF" Offset="1"/>
+    </LinearGradientBrush>
     <SolidColorBrush x:Key="GlassAccentGlow" Color="#5C0A84FF"/>
     <SolidColorBrush x:Key="GlassAccentText" Color="#7FB6FF"/>
     <SolidColorBrush x:Key="GlassFocusRing" Color="#800A84FF"/>

@@ -49,6 +49,39 @@
     <Color x:Key="AccentSoftColor">#93B4F5</Color>
     <Color x:Key="AccentColor">#2563EB</Color>
     <Color x:Key="AccentDeepColor">#1D4ED8</Color>
+    <!-- ══════════ 浮雕材质（经典模式：全部透明/纯净，保持传统扁平外观不变）══════════ -->
+    <LinearGradientBrush x:Key="EmbossSheen" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00000000" Offset="0"/>
+        <GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossSheenHover" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#0A000000" Offset="0"/>
+        <GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossSheenPressed" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#14000000" Offset="0"/>
+        <GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossSheenSelected" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00000000" Offset="0"/>
+        <GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossTopLight" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00000000" Offset="0"/>
+        <GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossBottomShade" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00000000" Offset="0"/>
+        <GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossInnerShade" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#12000000" Offset="0"/>
+        <GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="EmbossInnerLight" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00000000" Offset="0"/>
+        <GradientStop Color="#00000000" Offset="1"/>
+    </LinearGradientBrush>
     <SolidColorBrush x:Key="GlassAccentGlow" Color="#002563EB"/>
     <SolidColorBrush x:Key="GlassAccentText" Color="#FF1D4ED8"/>
     <SolidColorBrush x:Key="GlassFocusRing" Color="#662563EB"/>
