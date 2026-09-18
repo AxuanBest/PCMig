@@ -13,6 +13,7 @@ PCMig 迁移工具 · 更新日志
 ■ 版本号与发布日期对照
 
   版本 ｜ 发布日期 ｜ 主题
+  v0.4.5 ｜ 2026-09-19 ｜ 现代 UI 重构与视觉系统稳定版
   v0.4.1 ｜ 2026-09-18 ｜ 按 UI 规格精修：token 重整、经典回退、页面色相、动效、状态栏现代化
   v0.4.0 ｜ 2026-09-18 ｜ 苹果风视觉改版：窗内分层玻璃、iOS 开关、统一圆角与软阴影
   v0.3.10 ｜ 2026-09-17 ｜ 修复进度：去掉重复进度条，数值改为本次修复范围且动态前进
@@ -59,6 +60,114 @@ PCMig 迁移工具 · 更新日志
   v0.1.0 ｜ 2026-09-12 ｜ 首个完整版本（V1）
 
 
+■ v0.4.5 — 现代 UI 重构与视觉系统稳定版
+
+发布日期：2026-09-19
+
+本版本完成了 PCMig 界面的新一轮整体视觉重构，并对导航、交互反馈、Surface、窗口、日志区域以及多个细节组件进行了统一设计。V0.4.5 不是一次普通 Bugfix，而是一次完整的「UI / UX Design System 重构与稳定化」版本。
+
+■ 全新视觉设计系统
+
+建立统一的现代 Desktop UI Design System。整体设计不再采用传统 Windows Button、Windows 7 / Aero、老式 3D Button 或明显 Neumorphism 风格。
+
+新的界面采用：现代不透明 Surface + Liquid Glass-inspired Edge Lighting + 统一方向性光源 + 轻量空间层次 + 细腻 Hover / Pressed Interaction。在保持现代扁平 UI 的基础上，为交互组件增加非常轻微的物理空间感。
+
+■ 全新的 Edge Lighting
+
+为主要 UI Surface 引入统一的 Liquid Glass-inspired Edge Lighting。该效果借鉴 Liquid Glass 的「边缘光学语言」，而不是透明玻璃材质。因此：
+
+  · Surface 本身保持不透明；
+  · 不使用强透明玻璃；
+  · 不依赖强烈 Blur；
+  · 不使用明显折射；
+  · 不产生果冻式材质；
+  · 只通过极细边缘高光、暗部和空间接触阴影表现立体感。
+
+整个应用采用统一的 左上 → 右下，约 45° 方向光源，使按钮、导航、Panel、Dialog 等组件处于一致的视觉光照环境。
+
+■ 全新的 Surface 层级
+
+重新建立 Root Background → Opaque Surface → Edge Lighting → Interaction 四层视觉结构。所有主要 UI 模块不再透明透出底层背景；同时避免使用纯白 Surface，让大型模块与内部按钮之间保持清晰的视觉层级。
+
+三个大型模块（顶栏 / 侧栏 / 底栏）共享统一 Token `SurfacePearl`：带极轻微冷色环境倾向的浅色不透明实体（`#F4F7FC → #F1F5FA → #EDF1F8`），内部只有极微弱的中性渐变，遵循左上略亮 → 右下略暗的同向光源。
+
+■ 全新的应用底层环境背景
+
+重新设计 Root Background。最底层背景采用 浅蓝 → 浅红 → 浅橙 的柔和环境渐变。该渐变只属于整个应用最底层的 Background Layer，不会直接染色按钮、卡片或其他 UI Surface。因此形成「彩色环境背景 × 浅色实体 Surface × 精细 Edge Lighting」的空间层级。
+
+■ 导航系统重构
+
+重新整理左侧四大主导航。四个导航项目现在作为独立 UI Surface 存在，重新设计 Normal / Hover / Pressed / Selected 等交互状态。Hover 时具有轻微 Lift / Elevation；Pressed 时具有轻微下沉反馈；Selected 状态不再依赖传统大面积蓝色选中块。
+
+同时修复了此前「部分导航项目 Hover 正常但点击后无法切换页面」的问题，现在四大主要导航可以正常进入对应页面。
+
+■ 全局 Hover Lift
+
+重新统一交互 Surface 的 Hover 反馈。可交互按钮、导航、Action Surface、Interactive Card、可点击区域等组件能够根据交互状态轻微上浮、增强边缘光、产生轻微接触阴影、增强 Surface Separation。Hover 不再只是简单改变颜色。对于纯内容展示区域，则避免强行添加 Button 级别 Hover。
+
+■ Pressed Interaction
+
+统一实现 Pressed 状态。用户按下控件时：外部 Elevation 减少、Contact Shadow 减弱、内部暗部增强、顶部高光减弱、内容轻微下沉，从而形成非常轻微但自然的「按下」感觉。
+
+■ Update 按钮重构
+
+重新设计左上角 Update / 更新按钮。取消传统方形纯蓝按钮视觉，改为与全局 Surface / Edge Lighting 系统一致的现代实体控件，Hover、Pressed 等交互状态统一。
+
+■ 更新日志窗口统一
+
+重新整理 Update Log 页面及其二级窗口。更新日志及第二级 Dialog 与主窗口统一使用同一套 Surface / Edge Lighting / Shadow / Button / Hover / Pressed / Typography / ScrollBar 视觉系统，避免出现「主窗口是新 UI，而弹窗还是旧 Windows UI」的情况。
+
+■ 现代化滚动条
+
+重新设计应用内所有主要 ScrollBar，包括更新日志、日志区域、Secondary Dialog、长文本区域及其他可滚动内容。取消传统 Windows 默认滚动条视觉，新的滚动条更加纤细、简洁，并与全局 Edge Lighting / Hover 系统保持一致。
+
+■ Warning / Error Surface 重构
+
+重新设计提示、警告、报错区域。原本的扁平红色矩形被统一为 Warning Semantic Surface，继续保留红色的 Warning / Error 语义，同时加入实体 Surface、细 Edge Lighting、定向光源、Contact Shadow、统一圆角与统一空间层级。
+
+并修复此前出现的「内外双层边框 / 套娃式 Frame」问题：最终红色提示区域只保留一层主要 Surface，并由这一层承担 Edge Lighting。
+
+■ 实时日志区域优化
+
+重新处理 Realtime Log UI。修复鼠标 Hover 时内部区域出现高亮爆白的问题：Realtime Log 内容区域不再因为 MouseOver 产生大面积纯白 Highlight。
+
+根因是实时日志的只读 TextBox 复用了全局隐式输入框样式，该样式的 `ControlTemplate` 触发器在 `IsMouseOver` 时把内容底色换成浅色（优先级高于 `TemplateBinding`）。修法是给日志单独定义只读样式 `LogViewer`，背景恒定、不参与 Hover 变色（全局输入框的 Hover 亮起行为保持不变）。
+
+同时重新整理日志容器结构：外层 Surface 负责整体边缘表现，内部日志内容不再重复绘制第二层 Edge / Border，避免「外层框 + 内层框」造成视觉上的双框。日志区域现在使用更加克制的深色 Surface，使日志内容具有稳定的视觉层次。
+
+■ 嵌套 Surface / 双框问题治理
+
+对多个 UI 区域中的嵌套 Border / Edge Lighting 进行了检查和清理，避免「Outer Surface + Inner Surface + Inner Border + 第二层 Edge Lighting」这种重复效果。核心原则：同一个视觉区域的主要实体边缘只由最外层正式 Surface 提供，内部内容容器不再重复绘制同一层浮雕边缘。
+
+■ 视觉一致性
+
+本版本进一步统一：Corner Radius、Surface、Edge Highlight、Contact Shadow、Light Direction、Hover、Pressed、Selected、ScrollBar、Dialog、Warning、Button。使不同页面、弹窗、日志区域和功能模块拥有一致的空间语言。
+
+■ 业务逻辑保护
+
+本轮 UI 重构没有改变 PCMig 的核心数据迁移业务逻辑。重点保护现有：Robocopy、Job State、暂停、恢复、停止、SMB、文件验证、日志、报告、持久化、后台任务运行机制。UI 重构与业务层保持分离。
+
+■ 稳定性与验证
+
+本版本在发版前进行了：编译验证、冷启动验证、导航验证、Update 验证、Update Log 验证、Secondary Dialog 回归、Hover 验证、Pressed 验证、Surface 结构检查、ScrollBar 样式检查、日志区域检查。
+
+对于无法在当前环境真实触发的特殊故障路径，仍需在真实公司网络环境下进行最终业务场景验证。
+
+■ 版本号统一
+
+本项目全部对外展示版本号统一为 V0.4.5：主窗口标题、标题栏版本标识、程序集元数据（三个 csproj）、安装程序元数据与输出文件名（`pcmig.iss`）、应用内更新日志、随包 `更新日志.txt`、`使用说明.txt`、README 与项目指令文件均已同步。
+
+■ V0.4.5 Release Summary
+
+PCMig V0.4.5 的核心变化不是简单「换皮」，而是建立了一套完整的现代桌面 UI 空间系统：
+
+  · 底层：浅蓝 → 浅红 → 浅橙环境背景；
+  · 中层：不透明、干净的现代 Surface；
+  · 边缘：极细的 Liquid Glass-inspired Edge Lighting；
+  · 光源：左上 → 右下约 45°；
+  · 交互：Hover → Lift；Pressed → Sink。
+
+最终实现现代化、统一化、精细化、低干扰的桌面工具界面。这是 PCMig 本阶段 UI 重构的稳定发版版本。
 ■ v0.4.1 — 按 UI 规格精修视觉（v0.4.0 基础上）
 
 按用户 UI/UX 重构规格逐项落实；功能/绑定/迁移逻辑零改动。

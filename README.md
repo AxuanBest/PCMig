@@ -2,7 +2,7 @@
 
 > **直拉模式（Direct Pull）**：在新电脑上运行 PCMig，输入旧电脑 IP 或电脑名，通过 SMB 网络把旧电脑共享盘的数据完整拉到新电脑。
 
-**当前版本：v0.4.1** ｜ 设计 & 开发：郑子轩（[Axuanbest](https://github.com/Axuanbest)）
+**当前版本：v0.4.5** ｜ 设计 & 开发：郑子轩（[Axuanbest](https://github.com/Axuanbest)）
 
 ## 架构
 

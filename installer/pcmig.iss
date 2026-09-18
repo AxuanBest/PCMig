@@ -3,7 +3,7 @@
 ; 构建: ISCC.exe installer\pcmig.iss（先执行 publish 到 dist\app）
 ; ============================================================
 #define MyAppName "PCMig 迁移工具"
-#define MyAppVersion "0.4.1"
+#define MyAppVersion "0.4.5"
 #define MyAuthor "郑子轩（Axuanbest）"
 #define MyCopyright "郑子轩 个人制作"
 
@@ -27,7 +27,7 @@ WizardStyle=modern
 DisableProgramGroupPage=yes
 SetupIconFile=..\src\PCMig.Gui\Assets\pcmig.ico
 UninstallDisplayIcon={app}\PCMig.exe
-VersionInfoVersion=0.4.1.0
+VersionInfoVersion=0.4.5.0
 VersionInfoCompany=Axuanbest
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
