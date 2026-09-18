@@ -25,7 +25,7 @@
 
 工作区根目录纪律：根目录只允许 `PCMig\`、`AGENTS.md` 与 `labs\`/`archive\`/`projects\`/`dsh-data\` 四个分类目录，一次性脚本一律写进 `archive\scripts\`。
 
-## 三、八条不可违反的死律（详见 `docs/发版铁律.md`）
+## 三、九条不可违反的死律（详见 `docs/发版铁律.md`）
 
 1. **功能冻结**（自 v0.2.28）：只做修复、加固、纯视觉层。禁止动 ViewModel / Command / 绑定 / 迁移与 Robocopy 逻辑 / 状态机 / 错误处理 / 网络检测；禁止改存档格式（`job-state.json` 字段语义、`plan.json`、Receipt）。
 2. **先写日志，再打包**：`docs/更新日志.md`（正文一节 + 对照表一行）、`docs/使用说明.txt`（顶部一段）写好才许发版。
@@ -35,6 +35,7 @@
 6. **两类独立证据**：复现证据 + 修好证据（不同方法）。故障类 **连续复现 3 次 + 修复后回归 3 次**，正常路径不退化；数据正确性必跑 `tools\stability-test.ps1`。
 7. **看不见的东西不改**：UI 改动走"修改→编译→启动→`uishot.ps1` 截图→视觉模型自查→通过才继续"闭环，范围锁死在 Theme/Style/模板层；回退用 `PCMIG_CLASSIC_UI=1` 或 exe 旁 `classic-ui.flag`。
 8. **编码禁区**：所有 `.ps1` 必须 **UTF-8 带 BOM**（编辑后复查前三字节 `EF BB BF`）；禁止注释式批量替换（v0.3.7 事故）；XAML 隐式 Style 只改不新建；验证必须跑刚 Build 的新 EXE；截图必须定位 PCMig 真实窗口；真实口令零残留（脚本第 5 道闸门）。
+9. **禁止破坏性 git 命令**：不执行 `git reset --hard` / `git checkout .` / `git restore .` / `git clean -fd`（会不可逆抹掉未提交成果）；撤销改动用 `git stash` 或 `git revert`。
 
 ## 四、每次交付版本时必须做的事
 
