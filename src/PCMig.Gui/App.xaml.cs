@@ -17,18 +17,28 @@ public partial class App : Application
     /// <summary>给界面代码（如顶栏按钮）取的全局日志出口；未初始化时为 null，调用方一律用 ?. 。</summary>
     internal static Serilog.ILogger? Log => _log;
 
-    /// <summary>主题回退开关：环境变量 PCMIG_CLASSIC_UI=1 或 exe 旁 classic-ui.flag 文件 → 换经典字典（同键不同值）。</summary>
+    /// <summary>
+    /// 主题开关（纯 UI，不碰任何业务）：
+    /// ① 经典回退：环境变量 PCMIG_CLASSIC_UI=1 或 exe 旁 classic-ui.flag → Theme/Classic.xaml
+    /// ② 深色主题：环境变量 PCMIG_THEME=dark（不区分大小写）或 exe 旁 dark-ui.flag → Theme/Glass.Dark.xaml
+    /// 三个字典同键不同值，所以切换只是换字典源，所有引用零改动。经典优先于深色。
+    /// </summary>
     private void ApplyThemeChoice()
     {
         try
         {
             bool classic = Environment.GetEnvironmentVariable("PCMIG_CLASSIC_UI") == "1"
                 || File.Exists(Path.Combine(AppContext.BaseDirectory, "classic-ui.flag"));
-            if (!classic) return;
+            bool dark = !classic && (string.Equals(Environment.GetEnvironmentVariable("PCMIG_THEME"), "dark",
+                    StringComparison.OrdinalIgnoreCase)
+                || File.Exists(Path.Combine(AppContext.BaseDirectory, "dark-ui.flag")));
+            if (!classic && !dark) return;
+
+            string target = classic ? "Theme/Classic.xaml" : "Theme/Glass.Dark.xaml";
             void Swap(System.Windows.ResourceDictionary d)
             {
                 if (d.Source?.OriginalString?.Contains("Glass.xaml") == true)
-                    d.Source = new Uri("pack://application:,,,/PCMig;component/Theme/Classic.xaml");
+                    d.Source = new Uri("pack://application:,,,/PCMig;component/" + target);
                 foreach (var inner in d.MergedDictionaries) Swap(inner);
             }
             Swap(Resources);

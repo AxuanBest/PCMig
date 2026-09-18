@@ -34,59 +34,99 @@
         <Style x:Key="PageTitle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="19"/>
             <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Foreground" Value="#0F172A"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
         </Style>
         <Style x:Key="PageSub" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12"/>
-            <Setter Property="Foreground" Value="#94A3B8"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassFaintTextBrush}"/>
             <Setter Property="Margin" Value="0,3,0,0"/>
         </Style>
         <Style x:Key="CardTitle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Foreground" Value="#0F172A"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
         </Style>
         <Style x:Key="FieldLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#64748B"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassSubTextBrush}"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Margin" Value="0,0,8,0"/>
         </Style>
         <Style x:Key="Hint" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#94A3B8"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassFaintTextBrush}"/>
             <Setter Property="FontSize" Value="11"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
         </Style>
         <Style x:Key="Caption" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#94A3B8"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassFaintTextBrush}"/>
             <Setter Property="FontSize" Value="11"/>
         </Style>
 
         <!-- ══ 按钮 ══ -->
+<!-- ══════════ 按钮（Elevation4）：Hover 浮起＋高光增强；Pressed 压下＋阴影收缩 ══════════ -->
         <Style x:Key="PrimaryButton" TargetType="Button">
             <Setter Property="Padding" Value="16,7"/>
             <Setter Property="Margin" Value="0"/>
-            <Setter Property="Background" Value="#2563EB"/>
-            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="{DynamicResource GlassAccentBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTextOnAccent}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="RenderTransform">
+                <Setter.Value><TranslateTransform Y="0"/></Setter.Value>
+            </Setter>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="{StaticResource RadiusControl}"
-                                Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                CornerRadius="{DynamicResource RadiusControl}"
+                                Padding="{TemplateBinding Padding}"
+                                Effect="{DynamicResource Elevation4}" SnapsToDevicePixels="True">
+                            <Grid>
+                                <Border x:Name="hoverLight" CornerRadius="{DynamicResource RadiusControl}" IsHitTestVisible="False"
+                                        Background="White" Opacity="0"/>
+                                <Border x:Name="pressShade" CornerRadius="{DynamicResource RadiusControl}" IsHitTestVisible="False"
+                                        Background="Black" Opacity="0"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#1D4ED8"/>
+                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation3}"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="-1.5"/></Setter.Value>
+                                </Setter>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="hoverLight" Storyboard.TargetProperty="Opacity"
+                                                             To="0.15" Duration="0:0:0.12"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="hoverLight" Storyboard.TargetProperty="Opacity"
+                                                             To="0" Duration="0:0:0.12"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#1E40AF"/>
+                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource PressedShadow}"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="0.5"/></Setter.Value>
+                                </Setter>
+                                <Setter TargetName="hoverLight" Property="Opacity" Value="0.06"/>
+                                <Setter TargetName="pressShade" Property="Opacity" Value="0.12"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="bd" Property="Background" Value="#CBD5E1"/>
-                                <Setter Property="Foreground" Value="#F8FAFC"/>
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassInnerDeepBg}"/>
+                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation0}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassTextDisabled}"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -95,31 +135,74 @@
         </Style>
         <Style x:Key="NormalButton" TargetType="Button">
             <Setter Property="Padding" Value="14,7"/>
-            <Setter Property="Background" Value="{StaticResource GlassCardBg}"/>
-            <Setter Property="Foreground" Value="#334155"/>
-            <Setter Property="BorderBrush" Value="{StaticResource GlassBorderBrush}"/>
-            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="{DynamicResource GlassCardBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="RenderTransform">
+                <Setter.Value><TranslateTransform Y="0"/></Setter.Value>
+            </Setter>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="{StaticResource RadiusControl}"
-                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                                Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
+                        <Grid>
+                            <!-- 玻璃折边：外圈极淡亮边（左上亮、右下暗），厚度靠一条 Border 模拟，避免 1px 硬框 -->
+                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}"
+                                    BorderBrush="{DynamicResource GlassBevelBrush}" BorderThickness="1"
+                                    Background="Transparent"/>
+                            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                    CornerRadius="{DynamicResource RadiusControl}"
+                                    Padding="{TemplateBinding Padding}"
+                                    Effect="{DynamicResource Elevation4}" SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Border x:Name="hoverLight" CornerRadius="{DynamicResource RadiusControl}" IsHitTestVisible="False"
+                                            Background="White" Opacity="0"/>
+                                    <Border x:Name="pressShade" CornerRadius="{DynamicResource RadiusControl}" IsHitTestVisible="False"
+                                            Background="Black" Opacity="0"/>
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#DDFFFFFF"/>
-                                <Setter TargetName="bd" Property="BorderBrush" Value="#66FFFFFF"/>
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassHoverStrongBg}"/>
+                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation3}"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="-1.5"/></Setter.Value>
+                                </Setter>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="hoverLight" Storyboard.TargetProperty="Opacity"
+                                                             To="0.22" Duration="0:0:0.12"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="hoverLight" Storyboard.TargetProperty="Opacity"
+                                                             To="0" Duration="0:0:0.12"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#99FFFFFF"/>
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassPressedBg}"/>
+                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource PressedShadow}"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="0.5"/></Setter.Value>
+                                </Setter>
+                                <Setter TargetName="pressShade" Property="Opacity" Value="0.10"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="bd" Property="Background" Value="#B3FFFFFF"/>
-                                <Setter Property="Foreground" Value="#B6C2D2"/>
-                                <Setter TargetName="bd" Property="BorderBrush" Value="#E2E8F0"/>
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassInnerDeepBg}"/>
+                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation0}"/>
+                                <Setter TargetName="edge" Property="Visibility" Value="Collapsed"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassTextDisabled}"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -228,29 +311,53 @@
             </Style.Triggers>
         </Style>
         <!-- ══ 左侧步骤导轨 ═══ -->
+<!-- ══════════ 左侧四步导航（Elevation2→3）：Hover 亮面浮起；Selected 白色玻璃胶囊＋强调色 ══════════ -->
         <Style x:Key="StepRail" TargetType="ListBox">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="0,6"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
             <Setter Property="ItemContainerStyle">
                 <Setter.Value>
                     <Style TargetType="ListBoxItem">
-                        <Setter Property="Padding" Value="0"/>
-                        <Setter Property="Margin" Value="8,3"/>
+                        <Setter Property="Padding" Value="10,9"/>
+                        <Setter Property="Margin" Value="0,2,0,2"/>
+                        <Setter Property="Focusable" Value="False"/>
                         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="Cursor" Value="Hand"/>
+                        <Setter Property="SnapsToDevicePixels" Value="True"/>
+                        <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+                        <Setter Property="RenderTransform">
+                            <Setter.Value><TranslateTransform Y="0"/></Setter.Value>
+                        </Setter>
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="ListBoxItem">
-                                    <Border x:Name="bd" CornerRadius="{StaticResource RadiusControl}" Background="Transparent" Padding="12,10">
-                                        <ContentPresenter/>
+                                    <Border x:Name="bd" CornerRadius="{DynamicResource RadiusControl}" Background="Transparent"
+                                            Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                                        <Grid>
+                                            <Border x:Name="hoverLight" CornerRadius="{DynamicResource RadiusControl}"
+                                                    IsHitTestVisible="False" Background="White" Opacity="0"/>
+                                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                                        </Grid>
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="bd" Property="Background" Value="#66FFFFFF"/>
+                                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassHoverBg}"/>
+                                            <Setter Property="RenderTransform">
+                                                <Setter.Value><TranslateTransform Y="-1"/></Setter.Value>
+                                            </Setter>
+                                            <Setter TargetName="hoverLight" Property="Opacity" Value="0.18"/>
+                                        </Trigger>
+                                        <Trigger Property="IsMouseCaptured" Value="True">
+                                            <Setter Property="RenderTransform">
+                                                <Setter.Value><TranslateTransform Y="0.5"/></Setter.Value>
+                                            </Setter>
                                         </Trigger>
                                         <Trigger Property="IsSelected" Value="True">
-                                            <Setter TargetName="bd" Property="Background" Value="#CCFFFFFF"/>
-                                            <Setter TargetName="bd" Property="Effect" Value="{StaticResource GlassCardShadow}"/>
+                                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassSelectedBg}"/>
+                                            <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation2}"/>
+                                            <Setter TargetName="hoverLight" Property="Opacity" Value="0.20"/>
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
@@ -261,28 +368,47 @@
             </Setter>
         </Style>
 
+<!-- ══════════ 输入控件：嵌入式材质（Hover 亮起 / Focus 强调描边＋微光，不做 Y 位移） ══════════ -->
         <Style TargetType="TextBox">
-            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="Padding" Value="9,6"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="Background" Value="#99FFFFFF"/>
-            <Setter Property="BorderBrush" Value="{StaticResource GlassBorderBrush}"/>
-            <Setter Property="Foreground" Value="{StaticResource GlassTitleBrush}"/>
-            <Setter Property="CaretBrush" Value="{StaticResource GlassTitleBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource GlassInnerBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource GlassTitleBrush}"/>
+            <Setter Property="SelectionBrush" Value="{DynamicResource GlassAccentGlow}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
-                        <Border x:Name="bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="1" CornerRadius="{StaticResource RadiusControl}" SnapsToDevicePixels="True">
-                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
-                        </Border>
+                        <Grid>
+                            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                    CornerRadius="{DynamicResource RadiusControl}"/>
+                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}"
+                                    BorderBrush="{DynamicResource GlassBevelBrush}" BorderThickness="1"
+                                    IsHitTestVisible="False"/>
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
+                                          VerticalAlignment="Center" Focusable="False"/>
+                        </Grid>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassHoverBg}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassEdgeLight}"/>
+                            </Trigger>
                             <Trigger Property="IsKeyboardFocusWithin" Value="True">
-                                <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource GlassAccentBrush}"/>
-                                <Setter TargetName="bd" Property="BorderThickness" Value="1.5"/>
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassHoverStrongBg}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassAccentBrush}"/>
+                                <Setter TargetName="edge" Property="BorderThickness" Value="1.4"/>
+                                <Setter TargetName="bd" Property="Effect">
+                                    <Setter.Value>
+                                        <DropShadowEffect BlurRadius="9" ShadowDepth="0" Opacity="0.40" Color="#0A84FF"/>
+                                    </Setter.Value>
+                                </Setter>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="bd" Property="Background" Value="#4DFFFFFF"/>
-                                <Setter Property="Foreground" Value="{StaticResource GlassTextDisabled}"/>
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassInnerDeepBg}"/>
+                                <Setter TargetName="bd" Property="Opacity" Value="0.65"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassTextDisabled}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -290,29 +416,174 @@
             </Setter>
         </Style>
         <Style TargetType="PasswordBox">
-            <Setter Property="Padding" Value="7,5"/>
+            <Setter Property="Padding" Value="9,6"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="Background" Value="#99FFFFFF"/>
-            <Setter Property="BorderBrush" Value="{StaticResource GlassBorderBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource GlassInnerBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource GlassTitleBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <Grid>
+                            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                    CornerRadius="{DynamicResource RadiusControl}"/>
+                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}"
+                                    BorderBrush="{DynamicResource GlassBevelBrush}" BorderThickness="1"
+                                    IsHitTestVisible="False"/>
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
+                                          VerticalAlignment="Center" Focusable="False"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassHoverBg}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassEdgeLight}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassHoverStrongBg}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassAccentBrush}"/>
+                                <Setter TargetName="edge" Property="BorderThickness" Value="1.4"/>
+                                <Setter TargetName="bd" Property="Effect">
+                                    <Setter.Value>
+                                        <DropShadowEffect BlurRadius="9" ShadowDepth="0" Opacity="0.40" Color="#0A84FF"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassInnerDeepBg}"/>
+                                <Setter TargetName="bd" Property="Opacity" Value="0.65"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassTextDisabled}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ══════════ 下拉框：闭合=嵌入式材质＋现代细箭头；Popup=独立浮层（Elevation5） ══════════ -->
+        <Style x:Key="GlassComboToggle" TargetType="ToggleButton">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="ClickMode" Value="Press"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Grid Background="Transparent"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="ComboBox">
+            <Setter Property="Padding" Value="11,6"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource GlassInnerBg}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="Background" Value="#99FFFFFF"/>
-            <Setter Property="BorderBrush" Value="{StaticResource GlassBorderBrush}"/>
-            <Setter Property="Foreground" Value="{StaticResource GlassTitleBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                    CornerRadius="{DynamicResource RadiusControl}"/>
+                            <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}"
+                                    BorderBrush="{DynamicResource GlassBevelBrush}" BorderThickness="1"
+                                    IsHitTestVisible="False"/>
+                            <ToggleButton x:Name="toggle" Style="{StaticResource GlassComboToggle}"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"/>
+                            <Grid Margin="{TemplateBinding Padding}" IsHitTestVisible="False">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter x:Name="ContentSite" VerticalAlignment="Center" HorizontalAlignment="Left"
+                                                  Content="{TemplateBinding SelectionBoxItem}"
+                                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                  ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"/>
+                                <Path x:Name="arrow" Grid.Column="1" VerticalAlignment="Center" Margin="8,1,0,0"
+                                      Data="M 0,0 L 4.5,4.5 L 9,0" Stroke="{DynamicResource GlassSubTextBrush}"
+                                      StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                            </Grid>
+                            <Popup x:Name="PART_Popup" AllowsTransparency="True" Placement="Bottom"
+                                   VerticalOffset="4" Focusable="False" PopupAnimation="Fade"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}">
+                                <Border Background="{DynamicResource GlassPopupBg}"
+                                        CornerRadius="{DynamicResource RadiusInner}"
+                                        BorderBrush="{DynamicResource GlassBevelBrush}" BorderThickness="1"
+                                        Effect="{DynamicResource PopupShadow}"
+                                        MinWidth="{TemplateBinding ActualWidth}" MaxHeight="260" Padding="4">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                        <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassHoverBg}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassEdgeLight}"/>
+                            </Trigger>
+                            <Trigger Property="IsDropDownOpen" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassHoverStrongBg}"/>
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassAccentBrush}"/>
+                                <Setter TargetName="arrow" Property="Stroke" Value="{DynamicResource GlassAccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource GlassAccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.6"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassTextDisabled}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
-        <!-- ══ iOS 风格开关：全局 CheckBox 模板（苹果风控件细节） ══ -->
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="bd" Background="Transparent" CornerRadius="{DynamicResource RadiusItem}"
+                                Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassAccentSofter}"/>
+                            </Trigger>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassAccentSofter}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassAccentSoft}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassAccentText}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ══════════ 开关：iOS 胶囊（全局 40×24；树内用 TreeCheckBox 28×18） ══════════ -->
         <Style TargetType="CheckBox">
-            <Setter Property="Foreground" Value="#0F172A"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
                         <StackPanel Orientation="Horizontal" Background="Transparent">
                             <Grid Width="40" Height="24" VerticalAlignment="Center">
-                                <Border x:Name="track" CornerRadius="12" Background="#330F172A"/>
+                                <Border x:Name="track" CornerRadius="12" Background="{DynamicResource GlassInnerDeepBg}"
+                                        BorderBrush="{DynamicResource GlassInnerBorderBrush}" BorderThickness="1"/>
                                 <Border x:Name="thumb" Width="20" Height="20" CornerRadius="10" Background="White"
-                                        HorizontalAlignment="Left" Margin="2,0,0,0" Effect="{StaticResource GlassCardShadow}">
+                                        HorizontalAlignment="Left" Margin="2,0,0,0" Effect="{DynamicResource Elevation1}">
                                     <Border.RenderTransform><TranslateTransform x:Name="thumbX" X="0"/></Border.RenderTransform>
                                 </Border>
                             </Grid>
@@ -320,22 +591,352 @@
                         </StackPanel>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="track" Property="Background" Value="{StaticResource GlassAccentBrush}"/>
+                                <Setter TargetName="track" Property="Background" Value="{DynamicResource GlassAccentBrush}"/>
+                                <Setter TargetName="track" Property="BorderBrush" Value="Transparent"/>
+                                <Setter TargetName="thumb" Property="Effect" Value="{DynamicResource Elevation2}"/>
                                 <Trigger.EnterActions>
-                                    <BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="thumbX" Storyboard.TargetProperty="X" To="16" Duration="0:0:0.16"/></Storyboard></BeginStoryboard>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="thumbX" Storyboard.TargetProperty="X"
+                                                             To="16" Duration="0:0:0.16"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
                                 </Trigger.EnterActions>
                                 <Trigger.ExitActions>
-                                    <BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="thumbX" Storyboard.TargetProperty="X" To="0" Duration="0:0:0.16"/></Storyboard></BeginStoryboard>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="thumbX" Storyboard.TargetProperty="X"
+                                                             To="0" Duration="0:0:0.16"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
                                 </Trigger.ExitActions>
                             </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="thumb" Property="Effect" Value="{DynamicResource Elevation2}"/>
+                            </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="track" Property="Background" Value="#1A0F172A"/>
-                                <Setter TargetName="thumb" Property="Background" Value="#E2E8F0"/>
+                                <Setter Property="Opacity" Value="0.55"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+        <Style x:Key="TreeCheckBox" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal" Background="Transparent">
+                            <Grid Width="28" Height="18" VerticalAlignment="Center">
+                                <Border x:Name="track" CornerRadius="9" Background="{DynamicResource GlassInnerDeepBg}"
+                                        BorderBrush="{DynamicResource GlassInnerBorderBrush}" BorderThickness="1"/>
+                                <Border x:Name="thumb" Width="14" Height="14" CornerRadius="7" Background="White"
+                                        HorizontalAlignment="Left" Margin="2,0,0,0" Effect="{DynamicResource Elevation1}">
+                                    <Border.RenderTransform><TranslateTransform x:Name="thumbX" X="0"/></Border.RenderTransform>
+                                </Border>
+                            </Grid>
+                            <ContentPresenter Margin="7,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <!-- 三态：目录部分勾选时显示中间态（不做位移动画，避免半选也在滑） -->
+                            <Trigger Property="IsChecked" Value="{x:Null}">
+                                <Setter TargetName="track" Property="Background" Value="{DynamicResource GlassAccentSoft}"/>
+                                <Setter TargetName="track" Property="BorderBrush" Value="{DynamicResource GlassAccentBrush}"/>
+                                <Setter TargetName="thumb" Property="HorizontalAlignment" Value="Center"/>
+                                <Setter TargetName="thumb" Property="Margin" Value="0"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="track" Property="Background" Value="{DynamicResource GlassAccentBrush}"/>
+                                <Setter TargetName="track" Property="BorderBrush" Value="Transparent"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="thumbX" Storyboard.TargetProperty="X"
+                                                             To="10" Duration="0:0:0.16"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="thumbX" Storyboard.TargetProperty="X"
+                                                             To="0" Duration="0:0:0.16"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.55"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ══════════ 层级积木：InnerSurface（卡片内凹面）/ StatusSurface（状态卡片） ══════════ -->
+        <Style x:Key="GlassInnerSurface" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource GlassInnerBg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource GlassInnerBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusInner}"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
+        <Style x:Key="GlassStatusSurface" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource GlassNeutralSurface}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource GlassBevelBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusCard}"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
+<!-- ══════════ 数据列表项（Elevation1→2）：透明行 → Hover 亮面浮起 → Selected 强调玻璃 ══════════ -->
+        <Style TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="9,6"/>
+            <Setter Property="Margin" Value="0,1,0,1"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="RenderTransform">
+                <Setter.Value><TranslateTransform Y="0"/></Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="bd" Background="Transparent" CornerRadius="{DynamicResource RadiusItem}"
+                                Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                            <Grid>
+                                <Border x:Name="hoverLight" CornerRadius="{DynamicResource RadiusItem}"
+                                        Background="White" Opacity="0" IsHitTestVisible="False"/>
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassItemHoverBg}"/>
+                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation1}"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="-1"/></Setter.Value>
+                                </Setter>
+                                <Setter TargetName="hoverLight" Property="Opacity" Value="0.16"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassItemSelectedBg}"/>
+                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation2}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassAccentText}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.6"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ══════════ 树（内容目录）：现代细箭头＋120~180ms 旋转；行级 Hover/Selected 玻璃面 ══════════ -->
+        <Style TargetType="TreeView">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
+        </Style>
+        <Style TargetType="TreeViewItem">
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="Margin" Value="0,1,0,1"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TreeViewItem">
+                        <StackPanel>
+                            <Border x:Name="bd" Background="Transparent" CornerRadius="{DynamicResource RadiusItem}"
+                                    Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="18"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ToggleButton x:Name="expander" Grid.Column="0" Focusable="False" ClickMode="Press"
+                                                  VerticalAlignment="Center"
+                                                  IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}">
+                                        <ToggleButton.Template>
+                                            <ControlTemplate TargetType="ToggleButton">
+                                                <Grid Background="Transparent" Width="16" Height="16">
+                                                    <Path x:Name="arrow" Data="M 0,0 L 4.2,4.2 L 0,8.4"
+                                                          Stroke="{DynamicResource GlassSubTextBrush}" StrokeThickness="1.6"
+                                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                          RenderTransformOrigin="0.5,0.5">
+                                                        <Path.RenderTransform><RotateTransform x:Name="rot" Angle="0"/></Path.RenderTransform>
+                                                    </Path>
+                                                </Grid>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsChecked" Value="True">
+                                                        <Setter TargetName="arrow" Property="Stroke" Value="{DynamicResource GlassAccentBrush}"/>
+                                                        <Trigger.EnterActions>
+                                                            <BeginStoryboard>
+                                                                <Storyboard>
+                                                                    <DoubleAnimation Storyboard.TargetName="rot" Storyboard.TargetProperty="Angle"
+                                                                                     To="90" Duration="0:0:0.16"/>
+                                                                </Storyboard>
+                                                            </BeginStoryboard>
+                                                        </Trigger.EnterActions>
+                                                        <Trigger.ExitActions>
+                                                            <BeginStoryboard>
+                                                                <Storyboard>
+                                                                    <DoubleAnimation Storyboard.TargetName="rot" Storyboard.TargetProperty="Angle"
+                                                                                     To="0" Duration="0:0:0.16"/>
+                                                                </Storyboard>
+                                                            </BeginStoryboard>
+                                                        </Trigger.ExitActions>
+                                                    </Trigger>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="arrow" Property="Stroke" Value="{DynamicResource GlassAccentBrush}"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </ToggleButton.Template>
+                                    </ToggleButton>
+                                    <ContentPresenter x:Name="PART_Header" Grid.Column="1" ContentSource="Header"
+                                                      HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                      VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                            <ItemsPresenter x:Name="ItemsHost" Margin="16,0,0,0"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="False">
+                                <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed"/>
+                            </Trigger>
+                            <Trigger Property="HasItems" Value="False">
+                                <Setter TargetName="expander" Property="Visibility" Value="Hidden"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassItemHoverBg}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassItemSelectedBg}"/>
+                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation1}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ══════════ 数据表格（对象明细 / 报错清单共用）：无网格线，行＝悬浮数据条目 ══════════ -->
+        <Style TargetType="DataGrid">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="RowBackground" Value="Transparent"/>
+            <Setter Property="AlternatingRowBackground" Value="Transparent"/>
+            <Setter Property="GridLinesVisibility" Value="None"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="Transparent"/>
+            <Setter Property="VerticalGridLinesBrush" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
+            <Setter Property="RowHeight" Value="34"/>
+            <Setter Property="ColumnHeaderHeight" Value="32"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="EnableRowVirtualization" Value="True"/>
+            <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True"/>
+            <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling"/>
+            <Setter Property="ScrollViewer.CanContentScroll" Value="True"/>
+        </Style>
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassSubTextBrush}"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridColumnHeader">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource RadiusItem}"
+                                Padding="{TemplateBinding Padding}" Margin="0,0,4,2" SnapsToDevicePixels="True">
+                            <ContentPresenter VerticalAlignment="Center"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassItemHoverBg}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="DataGridRow">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridRow">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                CornerRadius="{DynamicResource RadiusItem}" Margin="0,1,0,1" SnapsToDevicePixels="True">
+                            <Grid>
+                                <Border x:Name="hoverLight" CornerRadius="{DynamicResource RadiusItem}"
+                                        Background="White" Opacity="0" IsHitTestVisible="False"/>
+                                <DataGridCellsPresenter ItemsPanel="{TemplateBinding ItemsPanel}"
+                                                        SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="hoverLight" Property="Opacity" Value="0.16"/>
+                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation1}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlassItemSelectedBg}"/>
+                                <Setter TargetName="bd" Property="Effect" Value="{DynamicResource Elevation2}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="DataGridCell">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTitleBrush}"/>
+            <Setter Property="Padding" Value="10,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridCell">
+                        <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource GlassAccentText}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- 报错清单专用行：淡红玻璃，Hover 红色增强（选中态仍走 Accent 玻璃） -->
+        <Style x:Key="ErrorDataGridRow" TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
+            <Setter Property="Background" Value="{DynamicResource GlassErrorSurfaceSoft}"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassErrorText}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource GlassErrorHoverBg}"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
     </Window.Resources>
 
@@ -349,14 +950,14 @@
         <Border Grid.RowSpan="3" Background="{StaticResource GlassWashBg}" IsHitTestVisible="False"/>
         <!-- 苹果风底景：内置柔色块光晕（mockup 的壁纸透色感，自绘、不依赖 OS 模糊） -->
         <Canvas Grid.RowSpan="3" IsHitTestVisible="False" ClipToBounds="True">
-            <Ellipse Width="900" Height="700" Canvas.Left="-260" Canvas.Top="330" Opacity="0.6">
-                <Ellipse.Fill><RadialGradientBrush><GradientStop Color="#F7A8B4" Offset="0"/><GradientStop Color="#00F7A8B4" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
+            <Ellipse Width="900" Height="700" Canvas.Left="-260" Canvas.Top="330" Opacity="0.32">
+                <Ellipse.Fill><RadialGradientBrush><GradientStop Color="{DynamicResource AmbientRose}" Offset="0"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
             </Ellipse>
-            <Ellipse Width="800" Height="800" Canvas.Left="780" Canvas.Top="120" Opacity="0.55">
-                <Ellipse.Fill><RadialGradientBrush><GradientStop Color="#FBC98A" Offset="0"/><GradientStop Color="#00FBC98A" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
+            <Ellipse Width="800" Height="800" Canvas.Left="780" Canvas.Top="120" Opacity="0.30">
+                <Ellipse.Fill><RadialGradientBrush><GradientStop Color="{DynamicResource AmbientAmber}" Offset="0"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
             </Ellipse>
-            <Ellipse Width="700" Height="500" Canvas.Left="180" Canvas.Top="-180" Opacity="0.5">
-                <Ellipse.Fill><RadialGradientBrush><GradientStop Color="#9EC3F7" Offset="0"/><GradientStop Color="#009EC3F7" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
+            <Ellipse Width="700" Height="500" Canvas.Left="180" Canvas.Top="-180" Opacity="0.28">
+                <Ellipse.Fill><RadialGradientBrush><GradientStop Color="{DynamicResource AmbientSky}" Offset="0"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
             </Ellipse>
         </Canvas>
 
@@ -383,24 +984,24 @@
                     </StackPanel>
                     <!-- 更新日志入口：点开看历代版本改了什么（内容随程序内置） -->
                     <Button x:Name="BtnChangelog" Content="更新日志" Click="Changelog_Click"
-                            Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" Foreground="#1D4ED8"
+                            Background="{DynamicResource GlassInfoSurface}" BorderBrush="{DynamicResource GlassInfoEdge}" BorderThickness="1" Foreground="{DynamicResource GlassInfoText}"
                             Padding="10,5" Margin="12,0,0,0" Cursor="Hand" FontSize="11.5"
                             VerticalAlignment="Center" ToolTip="查看从 v0.1.0 起的所有版本更新内容（安装目录下也有 更新日志.txt）"/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="10,6">
+                    <Border Background="{DynamicResource GlassNeutralSurface}" BorderBrush="{DynamicResource GlassBorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource RadiusItem}" Padding="10,6">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="源" Style="{StaticResource Caption}" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding SourceSummary}" Margin="6,0,0,0" Foreground="#0F172A"
+                            <TextBlock Text="{Binding SourceSummary}" Margin="6,0,0,0" Foreground="{DynamicResource GlassTitleBrush}"
                                        MaxWidth="230" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Border>
-                    <TextBlock Text="→" Margin="8,0" Foreground="#94A3B8" VerticalAlignment="Center"/>
-                    <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="10,6">
+                    <TextBlock Text="→" Margin="8,0" Foreground="{DynamicResource GlassFaintTextBrush}" VerticalAlignment="Center"/>
+                    <Border Background="{DynamicResource GlassNeutralSurface}" BorderBrush="{DynamicResource GlassBorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource RadiusItem}" Padding="10,6">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="目标" Style="{StaticResource Caption}" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding TargetSummary}" Margin="6,0,0,0" Foreground="#0F172A"
+                            <TextBlock Text="{Binding TargetSummary}" Margin="6,0,0,0" Foreground="{DynamicResource GlassTitleBrush}"
                                        MaxWidth="270" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Border>
@@ -433,7 +1034,7 @@
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="{Binding Number}" FontSize="16" FontWeight="Bold"
-                                           Foreground="#2563EB" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                                           Foreground="{DynamicResource GlassAccentBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
                                 <StackPanel Grid.Column="1">
                                     <TextBlock Text="{Binding Title}" FontWeight="SemiBold">
                                         <TextBlock.Style>
@@ -455,16 +1056,16 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
                 <!-- 提示面板：原来挤在进度条下方，移到这里独立成块；清单可滚轮翻页。底栏不再重复显示状态文字 -->
-                <Border Grid.Row="1" Background="#FFF7F7" BorderBrush="#FECACA" BorderThickness="0,1,0,0" Padding="0,9,0,9">
+                <Border Grid.Row="1" Background="{DynamicResource GlassErrorSurface}" BorderBrush="{DynamicResource GlassErrorEdge}" BorderThickness="0" CornerRadius="{DynamicResource RadiusCard}" Padding="12,10">
                     <!-- v0.3.8（缺陷 3）：有对象失败时整块变红（底色/边线/标题），不再是"失败了却像还在跑" -->
                     <Border.Style>
                         <Style TargetType="Border">
-                            <Setter Property="Background" Value="#FFF7F7"/>
-                            <Setter Property="BorderBrush" Value="#FECACA"/>
+                            <Setter Property="Background" Value="{DynamicResource GlassErrorSurface}"/>
+                            <Setter Property="BorderBrush" Value="{DynamicResource GlassErrorEdge}"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding HasObjectFailures}" Value="True">
-                                    <Setter Property="Background" Value="#FEF2F2"/>
-                                    <Setter Property="BorderBrush" Value="#DC2626"/>
+                                    <Setter Property="Background" Value="{DynamicResource GlassErrorSurfaceSoft}"/>
+                                    <Setter Property="BorderBrush" Value="{DynamicResource GlassErrorEdge}"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
@@ -476,13 +1077,13 @@
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Text="{Binding ErrorHeader}" Margin="16,0,14,5"
-                                   FontSize="12" FontWeight="SemiBold" Foreground="#B91C1C">
+                                   FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource GlassErrorText}">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
-                                    <Setter Property="Foreground" Value="#B91C1C"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource GlassErrorText}"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding HasObjectFailures}" Value="True">
-                                            <Setter Property="Foreground" Value="#DC2626"/>
+                                            <Setter Property="Foreground" Value="{DynamicResource GlassErrorText}"/>
                                             <Setter Property="FontSize" Value="13.5"/>
                                             <Setter Property="FontWeight" Value="Bold"/>
                                         </DataTrigger>
@@ -493,11 +1094,11 @@
                         <ScrollViewer Grid.Row="1" MaxHeight="132" VerticalScrollBarVisibility="Auto"
                                    HorizontalScrollBarVisibility="Disabled" Margin="16,0,14,4">
                             <TextBlock Text="{Binding StatusMessage}"
-                                   FontSize="11" LineHeight="15" Foreground="#7F1D1D" TextWrapping="Wrap"
+                                   FontSize="11" LineHeight="15" Foreground="{DynamicResource GlassErrorText}" TextWrapping="Wrap"
                                    ToolTip="{Binding StatusMessage}"/>
                         </ScrollViewer>
                         <Grid Grid.Row="2">
-                            <TextBlock Text="✔ 暂无报错" Margin="16,2,14,0" FontSize="11" Foreground="#047857">
+                            <TextBlock Text="✔ 暂无报错" Margin="16,2,14,0" FontSize="11" Foreground="{DynamicResource GlassSuccessText}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="Visibility" Value="Visible"/>
@@ -531,10 +1132,10 @@
                                                     </Border>
                                                     <ControlTemplate.Triggers>
                                                         <Trigger Property="IsMouseOver" Value="True">
-                                                            <Setter TargetName="Bd" Property="Background" Value="#FEE2E2"/>
+                                                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource GlassErrorHoverBg}"/>
                                                         </Trigger>
                                                         <Trigger Property="IsSelected" Value="True">
-                                                            <Setter TargetName="Bd" Property="Background" Value="#FECACA"/>
+                                                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource GlassErrorHoverBg}"/>
                                                         </Trigger>
                                                     </ControlTemplate.Triggers>
                                                 </ControlTemplate>
@@ -563,10 +1164,10 @@
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
                                                         <Setter Property="FontWeight" Value="SemiBold"/>
-                                                        <Setter Property="Foreground" Value="#7F1D1D"/>
+                                                        <Setter Property="Foreground" Value="{DynamicResource GlassErrorText}"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsObjectLevel}" Value="True">
-                                                                <Setter Property="Foreground" Value="#DC2626"/>
+                                                                <Setter Property="Foreground" Value="{DynamicResource GlassErrorText}"/>
                                                                 <Setter Property="FontWeight" Value="Bold"/>
                                                                 <Setter Property="FontSize" Value="11.5"/>
                                                             </DataTrigger>
@@ -577,10 +1178,10 @@
                                             <TextBlock Text="{Binding Reason}" FontSize="10.5" TextWrapping="Wrap" Margin="0,1,0,0">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
-                                                        <Setter Property="Foreground" Value="#92400E"/>
+                                                        <Setter Property="Foreground" Value="{DynamicResource GlassWarnText}"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsObjectLevel}" Value="True">
-                                                                <Setter Property="Foreground" Value="#B91C1C"/>
+                                                                <Setter Property="Foreground" Value="{DynamicResource GlassErrorText}"/>
                                                                 <Setter Property="FontWeight" Value="SemiBold"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
@@ -597,7 +1198,7 @@
 
                 <!-- 署名/品牌标签：常驻左下角，不占操作区 -->
                 <TextBlock Grid.Row="2" Margin="18,10,14,16" FontSize="11" LineHeight="16"
-                           Foreground="#94A3B8" TextWrapping="Wrap"
+                           Foreground="{DynamicResource GlassFaintTextBrush}" TextWrapping="Wrap"
                            ToolTip="https://github.com/Axuanbest"
                            Text="由 郑子轩 个人制作"/>
               </Grid>
@@ -675,14 +1276,15 @@
                                         Margin="8,0,0,0" Height="28" Padding="12,0"
                                         Command="{Binding AddManualShareCommand}" CommandParameter="{Binding ElementName=PwdBox}"/>
                             </Grid>
-                            <ListBox Grid.Row="2" ItemsSource="{Binding Shares}" BorderThickness="0" Margin="0,10,0,0"
-                                     Background="#FBFDFF" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                            <Border Grid.Row="2" Style="{StaticResource GlassInnerSurface}" Margin="0,10,0,0" Padding="0">
+                            <ListBox ItemsSource="{Binding Shares}" BorderThickness="0" Margin="5,4"
+                                     Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto"
                                      VirtualizingPanel.IsVirtualizing="True">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <StackPanel Orientation="Horizontal" Margin="2,3">
                                             <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" VerticalAlignment="Center"/>
-                                            <TextBlock Text="{Binding UncPath}" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#0F172A"/>
+                                            <TextBlock Text="{Binding UncPath}" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="{DynamicResource GlassTitleBrush}"/>
                                             <TextBlock Text="{Binding TypeText}" Margin="10,0,0,0" Style="{StaticResource Caption}" VerticalAlignment="Center"/>
                                             <TextBlock Text="{Binding Remark}" Margin="10,0,0,0" Style="{StaticResource Caption}"
                                                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="420"/>
@@ -690,6 +1292,7 @@
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
+                            </Border>
                         </Grid>
                     </Border>
 
@@ -738,16 +1341,17 @@
                                 <CheckBox Grid.Row="1" Margin="0,8,0,0" Content="超大数据模式（上亿文件 / 几十 TB：改用排除规则，不展开目录）"
                                           IsChecked="{Binding ExpertMode}"
                                           ToolTip="目录树替换为「共享勾选 + 排除规则」，避免展开目录卡死"/>
-                                <TreeView Grid.Row="2" ItemsSource="{Binding DirTree}" BorderThickness="0" Margin="0,8,0,0"
-                                          Background="#FBFDFF"
-                                          Visibility="{Binding ExpertMode, Converter={StaticResource InvBoolVis}}"
+                                <Border Grid.Row="2" Style="{StaticResource GlassInnerSurface}" Margin="0,8,0,0" Padding="4,3"
+                                        Visibility="{Binding ExpertMode, Converter={StaticResource InvBoolVis}}">
+                                <TreeView ItemsSource="{Binding DirTree}" BorderThickness="0"
+                                          Background="Transparent"
                                           VirtualizingStackPanel.IsVirtualizing="True"
                                           VirtualizingStackPanel.VirtualizationMode="Recycling"
                                           ToolTip="勾共享=整盘；点 ▶ 展开可精确勾选目录/文件">
                                     <TreeView.Resources>
                                         <HierarchicalDataTemplate DataType="{x:Type local:DirNode}" ItemsSource="{Binding Children}">
                                             <StackPanel Orientation="Horizontal">
-                                                <CheckBox IsChecked="{Binding IsChecked, Mode=OneWay}" IsThreeState="True"
+                                                <CheckBox Style="{StaticResource TreeCheckBox}" IsChecked="{Binding IsChecked, Mode=OneWay}" IsThreeState="True"
                                                           VerticalAlignment="Center"
                                                           PreviewMouseLeftButtonDown="NodeCheck_Toggle" PreviewKeyDown="NodeCheck_KeyToggle"/>
                                                 <TextBlock Text="{Binding Name}" Margin="5,0,0,0"/>
@@ -755,7 +1359,7 @@
                                         </HierarchicalDataTemplate>
                                         <DataTemplate DataType="{x:Type local:FileRow}">
                                             <StackPanel Orientation="Horizontal">
-                                                <CheckBox IsChecked="{Binding IsChecked, Mode=OneWay}" VerticalAlignment="Center"
+                                                <CheckBox Style="{StaticResource TreeCheckBox}" IsChecked="{Binding IsChecked, Mode=OneWay}" VerticalAlignment="Center"
                                                           PreviewMouseLeftButtonDown="NodeCheck_Toggle" PreviewKeyDown="NodeCheck_KeyToggle"/>
                                                 <TextBlock Text="{Binding Name}" Margin="5,0,0,0"/>
                                                 <TextBlock Text="{Binding SizeText}" Margin="8,0,0,0" Style="{StaticResource Caption}"/>
@@ -763,13 +1367,14 @@
                                         </DataTemplate>
                                     </TreeView.Resources>
                                     <TreeView.ItemContainerStyle>
-                                        <Style TargetType="TreeViewItem">
+                                        <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
                                             <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
                                             <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
                                             <EventSetter Event="TreeViewItem.Expanded" Handler="DirNode_Expanded"/>
                                         </Style>
                                     </TreeView.ItemContainerStyle>
                                 </TreeView>
+                                </Border>
 
                                 <Grid Grid.Row="2" Margin="0,8,0,0" Visibility="{Binding ExpertMode, Converter={StaticResource BoolVis}}">
                                     <Grid.RowDefinitions>
@@ -780,8 +1385,9 @@
                                         <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     <TextBlock Text="勾选要迁移的共享（整盘）：" Style="{StaticResource FieldLabel}"/>
-                                    <ListBox Grid.Row="1" ItemsSource="{Binding Shares}" BorderThickness="0" Margin="0,4,0,6"
-                                             Background="#FBFDFF" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                    <Border Grid.Row="1" Style="{StaticResource GlassInnerSurface}" Margin="0,4,0,6" Padding="4,3">
+                                    <ListBox ItemsSource="{Binding Shares}" BorderThickness="0"
+                                             Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <StackPanel Orientation="Horizontal">
@@ -792,6 +1398,7 @@
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                     </ListBox>
+                                    </Border>
                                     <TextBlock Grid.Row="2" Text="排除规则（每行一条）：" Style="{StaticResource FieldLabel}"/>
                                     <TextBox Grid.Row="3" AcceptsReturn="True" TextWrapping="NoWrap"
                                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
@@ -896,21 +1503,21 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" Margin="0,0,20,0" MinWidth="118" Visibility="{Binding MigrationProgressVisibility}">
                                 <TextBlock Text="{Binding Percent, StringFormat={}{0:F1}%}" FontSize="42" FontWeight="Bold"
-                                           Foreground="#2563EB" HorizontalAlignment="Center"/>
+                                           Foreground="{DynamicResource GlassAccentBrush}" HorizontalAlignment="Center"/>
                                 <TextBlock Text="总体进度" Style="{StaticResource Caption}" HorizontalAlignment="Center"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                 <ProgressBar Style="{StaticResource BigProgress}" Value="{Binding Percent}" Visibility="{Binding MigrationProgressVisibility}"/>
                                 <!-- 「尝试修复」独立进度：只在修复期间出现，避免与迁移进度混淆 -->
                                 <Border Visibility="{Binding RepairVisibility}" Margin="0,10,0,0"
-                                        Background="#F5F8FF" BorderBrush="#D8E3F8" BorderThickness="1" CornerRadius="8" Padding="12,9">
+                                        Background="{DynamicResource GlassInfoSurface}" BorderBrush="{DynamicResource GlassInfoEdge}" BorderThickness="1" CornerRadius="{DynamicResource RadiusItem}" Padding="12,9">
                                     <StackPanel>
                                         <Grid>
-                                            <TextBlock Text="正在修复（从源共享重拷差异文件）" FontSize="12.5" FontWeight="SemiBold" Foreground="#1D4ED8"/>
-                                            <TextBlock HorizontalAlignment="Right" Text="{Binding RepairObjectText}" FontSize="12" Foreground="#64748B"/>
+                                            <TextBlock Text="正在修复（从源共享重拷差异文件）" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource GlassInfoText}"/>
+                                            <TextBlock HorizontalAlignment="Right" Text="{Binding RepairObjectText}" FontSize="12" Foreground="{DynamicResource GlassSubTextBrush}"/>
                                         </Grid>
                                         <ProgressBar Style="{StaticResource SlimProgress}" Value="{Binding RepairPercent}" Margin="0,7,0,0"/>
-                                        <TextBlock Text="{Binding RepairText}" FontSize="11.5" Foreground="#64748B" Margin="0,5,0,0"/>
+                                        <TextBlock Text="{Binding RepairText}" FontSize="11.5" Foreground="{DynamicResource GlassSubTextBrush}" Margin="0,5,0,0"/>
                                     </StackPanel>
                                 </Border>
                                 <Grid Margin="0,10,0,0">
@@ -918,31 +1525,31 @@
                                         <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="{Binding CurrentFileText}" FontFamily="Consolas" FontSize="11"
-                                               Foreground="#0F766E" TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource GlassSuccessText}" TextTrimming="CharacterEllipsis"
                                                ToolTip="{Binding CurrentFileText}"/>
-                                    <TextBlock Grid.Column="1" Text="{Binding TargetSummary}" FontWeight="SemiBold" Foreground="#64748B"
+                                    <TextBlock Grid.Column="1" Text="{Binding TargetSummary}" FontWeight="SemiBold" Foreground="{DynamicResource GlassSubTextBrush}"
                                                MaxWidth="340" TextTrimming="CharacterEllipsis" ToolTip="{Binding TargetSummary}"/>
                                 </Grid>
                                 <!-- v0.3.8（缺陷 3）：当前对象 + 停滞提示。生产事故里"界面长时间不动"是用户判断卡死并手动终止的直接原因，
                                      这一行明确写出"当前在传哪个对象、这个对象已传多少"，并在停滞/大文件场景解释"为什么数字不动"。 -->
                                 <TextBlock Text="{Binding CurrentObjectDetail}" Margin="0,7,0,0" FontSize="11.5"
-                                           Foreground="#334155" TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource GlassTitleBrush}" TextTrimming="CharacterEllipsis"
                                            ToolTip="{Binding CurrentObjectDetail}"
                                            Visibility="{Binding HasCurrentObjectDetail, Converter={StaticResource BoolVis}}"/>
                                 <Border Visibility="{Binding HasStallHint, Converter={StaticResource BoolVis}}"
-                                        Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="1"
+                                        Background="{DynamicResource GlassWarnSurface}" BorderBrush="{DynamicResource GlassWarnEdge}" BorderThickness="1"
                                         CornerRadius="6" Padding="9,6" Margin="0,7,0,0">
-                                    <TextBlock Text="{Binding StallHintText}" FontSize="11.5" Foreground="#92400E"
+                                    <TextBlock Text="{Binding StallHintText}" FontSize="11.5" Foreground="{DynamicResource GlassWarnText}"
                                                TextWrapping="Wrap"/>
                                 </Border>
                                 <TextBlock Text="{Binding BalanceText}" Margin="0,8,0,0" FontSize="12.5" FontWeight="SemiBold"
                                            TextTrimming="CharacterEllipsis" ToolTip="{Binding BalanceText}">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
-                                            <Setter Property="Foreground" Value="#0F766E"/>
+                                            <Setter Property="Foreground" Value="{DynamicResource GlassSuccessText}"/>
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding HasShortfall}" Value="True">
-                                                    <Setter Property="Foreground" Value="#B45309"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource GlassWarnText}"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -956,34 +1563,34 @@
                         <Border Style="{StaticResource Card}" Margin="0,0,5,0">
                             <StackPanel>
                                 <TextBlock Text="传输速度（网卡实时）" Style="{StaticResource Caption}"/>
-                                <TextBlock Text="{Binding NicSpeedText}" FontSize="19" FontWeight="Bold" Foreground="#0F172A" Margin="0,3,0,0"/>
+                                <TextBlock Text="{Binding NicSpeedText}" FontSize="19" FontWeight="Bold" Foreground="{DynamicResource GlassTitleBrush}" Margin="0,3,0,0"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
-                                    <TextBlock Text="任务实测（本次平均）" FontSize="12" Foreground="#64748B"/>
-                                    <TextBlock Text="{Binding EngineSpeedText}" FontSize="12" Foreground="#64748B" Margin="4,0,0,0"/>
+                                    <TextBlock Text="任务实测（本次平均）" FontSize="12" Foreground="{DynamicResource GlassSubTextBrush}"/>
+                                    <TextBlock Text="{Binding EngineSpeedText}" FontSize="12" Foreground="{DynamicResource GlassSubTextBrush}" Margin="4,0,0,0"/>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource Card}" Margin="5,0,5,0">
                             <StackPanel>
                                 <TextBlock Text="预计剩余（按任务实测）" Style="{StaticResource Caption}"/>
-                                <TextBlock Text="{Binding EtaText}" FontSize="19" FontWeight="Bold" Foreground="#0F172A" Margin="0,3,0,0"
+                                <TextBlock Text="{Binding EtaText}" FontSize="19" FontWeight="Bold" Foreground="{DynamicResource GlassTitleBrush}" Margin="0,3,0,0"
                                            ToolTip="按本次任务自己的实测速率（已落盘字节 ÷ 用时）估算剩余时间，与网卡实时吞吐无关"/>
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource Card}" Margin="5,0,5,0">
                             <StackPanel>
                                 <TextBlock Text="对象进度" Style="{StaticResource Caption}"/>
-                                <TextBlock Text="{Binding ObjectText}" FontSize="19" FontWeight="Bold" Foreground="#0F172A" Margin="0,3,0,0"/>
+                                <TextBlock Text="{Binding ObjectText}" FontSize="19" FontWeight="Bold" Foreground="{DynamicResource GlassTitleBrush}" Margin="0,3,0,0"/>
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource Card}" Margin="5,0,0,0">
                             <StackPanel>
                                 <TextBlock Text="{Binding DataLabel}" Style="{StaticResource Caption}"/>
-                                <TextBlock Text="{Binding ActualBytesText}" FontSize="17" FontWeight="Bold" Foreground="#0F172A"
+                                <TextBlock Text="{Binding ActualBytesText}" FontSize="17" FontWeight="Bold" Foreground="{DynamicResource GlassTitleBrush}"
                                            Margin="0,3,0,0" TextWrapping="Wrap"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
-                                    <TextBlock Text="计划" FontSize="12" Foreground="#64748B"/>
-                                    <TextBlock Text="{Binding PlanBytesText}" FontSize="12" Foreground="#64748B" Margin="4,0,0,0"/>
+                                    <TextBlock Text="计划" FontSize="12" Foreground="{DynamicResource GlassSubTextBrush}"/>
+                                    <TextBlock Text="{Binding PlanBytesText}" FontSize="12" Foreground="{DynamicResource GlassSubTextBrush}" Margin="4,0,0,0"/>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -1001,10 +1608,11 @@
                                     <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
                                 </Grid.RowDefinitions>
                                 <TextBlock Text="对象明细" Style="{StaticResource CardTitle}"/>
-                                <DataGrid Grid.Row="1" Margin="0,8,0,0" ItemsSource="{Binding Objects}" IsReadOnly="True"
+                                <Border Grid.Row="1" Style="{StaticResource GlassInnerSurface}" Margin="0,8,0,0" Padding="4,2">
+                                <DataGrid ItemsSource="{Binding Objects}" IsReadOnly="True"
                                           AutoGenerateColumns="False" HeadersVisibility="Column" BorderThickness="0"
-                                          GridLinesVisibility="Horizontal" Background="Transparent"
-                                          RowBackground="Transparent" AlternatingRowBackground="#FBFDFF">
+                                          Background="Transparent"
+                                          RowBackground="Transparent" AlternatingRowBackground="Transparent">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="对象" Binding="{Binding ObjectId}" Width="100"/>
                                         <DataGridTextColumn Header="源" Binding="{Binding SourcePath}" Width="*"/>
@@ -1012,6 +1620,7 @@
                                         <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="140"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
+                                </Border>
                             </Grid>
                         </Border>
                         <Border Grid.Column="2" Style="{StaticResource Card}">
@@ -1020,17 +1629,19 @@
                                     <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
                                 </Grid.RowDefinitions>
                                 <TextBlock Text="正在复制的文件" Style="{StaticResource CardTitle}"/>
-                                <ListBox x:Name="LiveFilesList" Grid.Row="1" Margin="0,8,0,0" ItemsSource="{Binding LiveFiles}"
-                                         BorderThickness="0" Background="#FBFDFF" FontFamily="Consolas" FontSize="11"
+                                <Border Grid.Row="1" Style="{StaticResource GlassInnerSurface}" Margin="0,8,0,0" Padding="4,3">
+                                <ListBox x:Name="LiveFilesList" ItemsSource="{Binding LiveFiles}"
+                                         BorderThickness="0" Background="Transparent" FontFamily="Consolas" FontSize="11"
                                          VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                     <ListBox.ItemContainerStyle>
-                                        <Style TargetType="ListBoxItem">
-                                            <Setter Property="Padding" Value="2,0"/>
-                                            <Setter Property="Margin" Value="0"/>
+                                        <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                            <Setter Property="Padding" Value="7,3"/>
+                                            <Setter Property="Margin" Value="0,1,0,1"/>
                                             <Setter Property="MinHeight" Value="0"/>
                                         </Style>
                                     </ListBox.ItemContainerStyle>
                                 </ListBox>
+                                </Border>
                             </Grid>
                         </Border>
                     </Grid>
@@ -1080,34 +1691,36 @@
                                 <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="⚠ 报错清单" Style="{StaticResource CardTitle}" Foreground="#B91C1C"/>
+                                <TextBlock Text="⚠ 报错清单" Style="{StaticResource CardTitle}" Foreground="{DynamicResource GlassErrorText}"/>
                                 <TextBlock Style="{StaticResource Caption}" Margin="10,0,0,0" VerticalAlignment="Center"
                                            Text="失败的位置与原因；处理完（例如关掉旧电脑上占用文件的程序）点「恢复任务」即可补齐"/>
                             </StackPanel>
-                            <DataGrid Grid.Row="1" Margin="0,8,0,0" ItemsSource="{Binding FailItems}" IsReadOnly="True"
+                            <Border Grid.Row="1" Style="{StaticResource GlassInnerSurface}" Margin="0,8,0,0" Padding="4,2">
+                            <DataGrid ItemsSource="{Binding FailItems}" IsReadOnly="True"
                                       AutoGenerateColumns="False" HeadersVisibility="Column" BorderThickness="0"
-                                      GridLinesVisibility="Horizontal" Background="Transparent"
-                                      RowBackground="Transparent" AlternatingRowBackground="#FFF7F7">
+                                      Background="Transparent"
+                                      RowBackground="Transparent" AlternatingRowBackground="Transparent" RowStyle="{StaticResource ErrorDataGridRow}">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="时间" Binding="{Binding Time}" Width="80"/>
                                     <DataGridTextColumn Header="位置（盘符\文件夹\文件）" Binding="{Binding Location}" Width="*"/>
                                     <DataGridTextColumn Header="原因" Binding="{Binding Reason}" Width="320"/>
                                 </DataGrid.Columns>
                             </DataGrid>
+                            </Border>
                         </Grid>
                     </Border>
 
-                    <Border Grid.Row="4" Style="{StaticResource Card}" Background="#0F172A" BorderBrush="#1E293B">
+                    <Border Grid.Row="4" Style="{StaticResource Card}" Background="{DynamicResource GlassLogBg}" BorderBrush="{DynamicResource GlassLogBg}">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
                             <TextBlock Text="实时日志（完整日志见 %ProgramData%\PCMig\Logs 与任务目录）"
-                                       Foreground="#64748B" FontSize="11"/>
+                                       Foreground="{DynamicResource GlassFaintTextBrush}" FontSize="11"/>
                             <TextBox Grid.Row="1" Margin="0,8,0,0" Text="{Binding LogText, Mode=OneWay}" IsReadOnly="True"
                                      TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
                                      FontFamily="Consolas" FontSize="11" BorderThickness="0"
-                                     Background="#0F172A" Foreground="#CBD5E1" CaretBrush="#CBD5E1"/>
+                                     Background="{DynamicResource GlassLogBg}" Foreground="{DynamicResource GlassLogText}" CaretBrush="{DynamicResource GlassLogText}"/>
                         </Grid>
                     </Border>
                 </Grid>
@@ -1146,18 +1759,18 @@
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
-                    <TextBlock Grid.Column="1" Text="{Binding ProgressText}" FontSize="13" Foreground="#0F172A" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding ProgressText}" FontSize="13" Foreground="{DynamicResource GlassTitleBrush}" VerticalAlignment="Center"/>
                     <!-- 网速 = 真实网卡吞吐（任务管理器同源）+ 60 秒时间轴波形；占用与原文字一致，不额外加高 -->
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"
                                 ToolTip="{Binding NicSparkTip}">
-                        <TextBlock Text="⇅" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                        <TextBlock Text="{Binding NicSpeedText}" FontSize="13" Foreground="#64748B" VerticalAlignment="Center"
+                        <TextBlock Text="⇅" FontSize="11" Foreground="{DynamicResource GlassFaintTextBrush}" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBlock Text="{Binding NicSpeedText}" FontSize="13" Foreground="{DynamicResource GlassSubTextBrush}" VerticalAlignment="Center"
                                    MinWidth="76"/>
                         <Polyline Points="{Binding NicSparkPoints}" Width="116" Height="20" Margin="8,0,0,0"
-                                  Stroke="#2563EB" StrokeThickness="1.4" StrokeLineJoin="Round"
+                                  Stroke="{DynamicResource GlassAccentBrush}" StrokeThickness="1.4" StrokeLineJoin="Round"
                                   VerticalAlignment="Center"/>
                     </StackPanel>
-                    <TextBlock Grid.Column="3" Text="{Binding EtaText}" FontSize="13" Foreground="#64748B" VerticalAlignment="Center"
+                    <TextBlock Grid.Column="3" Text="{Binding EtaText}" FontSize="13" Foreground="{DynamicResource GlassSubTextBrush}" VerticalAlignment="Center"
                                ToolTip="预计剩余时间：按本次任务自己的实测速率（已落盘字节 ÷ 用时）估算，与上面的网卡实时吞吐无关"/>
                     <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,14,0">
                         <TextBlock Text="网络" FontSize="{StaticResource FontStatus}" Foreground="{StaticResource GlassSubTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>

@@ -1,45 +1,116 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:s="clr-namespace:System;assembly=mscorlib">
-    <!-- PCMig 经典主题 Token（回退用）：与 Glass.xaml 同键不同值；切换=换字典源，引用零改动 -->
-    <!-- ══ 颜色 ══ -->
+    <!-- PCMig 经典主题 Token（回退用）：与 Glass.xaml 同键不同值；切换=换字典源，引用零改动。
+         经典 = 不透明表面、硬边框、无阴影、无折边（v0.4.1 及以前的老观感）。 -->
+
+    <!-- ══ 1. 环境光与空间底 ══ -->
     <LinearGradientBrush x:Key="GlassWindowBg" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Color="#F1F5F9" Offset="0"/><GradientStop Color="#F1F5F9" Offset="1"/>
     </LinearGradientBrush>
+    <Color x:Key="AmbientRose">#00F1F5F9</Color>
+    <Color x:Key="AmbientAmber">#00F1F5F9</Color>
+    <Color x:Key="AmbientSky">#00F1F5F9</Color>
     <SolidColorBrush x:Key="GlassWashBg" Color="#00FFFFFF"/>
+
+    <!-- ══ 2. 表面材质 ══ -->
     <SolidColorBrush x:Key="GlassRailBg" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="GlassPanelBg" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="GlassCardBg" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="GlassSecondaryBg" Color="#FFF8FAFC"/>
+    <SolidColorBrush x:Key="GlassInnerBg" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="GlassInnerDeepBg" Color="#FFF1F5F9"/>
+    <SolidColorBrush x:Key="GlassPopupBg" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="GlassDialogBg" Color="#FFFFFFFF"/>
+
+    <!-- ══ 3. 折边（经典无折边，用传统边框色） ══ -->
+    <SolidColorBrush x:Key="GlassEdgeLight" Color="#00FFFFFF"/>
+    <SolidColorBrush x:Key="GlassEdgeDark" Color="#00FFFFFF"/>
     <SolidColorBrush x:Key="GlassBorderBrush" Color="#FFE2E8F0"/>
+    <SolidColorBrush x:Key="GlassInnerBorderBrush" Color="#FFE2E8F0"/>
+    <LinearGradientBrush x:Key="GlassBevelBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00FFFFFF" Offset="0"/><GradientStop Color="#00FFFFFF" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="GlassSurfaceSheen" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#00FFFFFF" Offset="0"/><GradientStop Color="#00FFFFFF" Offset="1"/>
+    </LinearGradientBrush>
+
+    <!-- ══ 4. 交互态 ══ -->
+    <SolidColorBrush x:Key="GlassHoverBg" Color="#FFF1F5F9"/>
+    <SolidColorBrush x:Key="GlassHoverStrongBg" Color="#FFE2E8F0"/>
+    <SolidColorBrush x:Key="GlassPressedBg" Color="#FFE2E8F0"/>
+    <SolidColorBrush x:Key="GlassSelectedBg" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="GlassItemHoverBg" Color="#FFF1F5F9"/>
+    <SolidColorBrush x:Key="GlassItemSelectedBg" Color="#FFDBEAFE"/>
     <SolidColorBrush x:Key="GlassAccentBrush" Color="#FF2563EB"/>
-    <SolidColorBrush x:Key="GlassAccentSoft" Color="#330A84FF"/>
-    <SolidColorBrush x:Key="GlassTitleBrush" Color="#0F172A"/>
-    <SolidColorBrush x:Key="GlassSubTextBrush" Color="#64748B"/>
-    <SolidColorBrush x:Key="GlassTextDisabled" Color="#9AA7B8"/>
+    <SolidColorBrush x:Key="GlassAccentDeep" Color="#FF1D4ED8"/>
+    <SolidColorBrush x:Key="GlassAccentSoft" Color="#332563EB"/>
+    <SolidColorBrush x:Key="GlassAccentSofter" Color="#1A2563EB"/>
+    <SolidColorBrush x:Key="GlassAccentGlow" Color="#002563EB"/>
+    <SolidColorBrush x:Key="GlassAccentText" Color="#FF1D4ED8"/>
+    <SolidColorBrush x:Key="GlassFocusRing" Color="#662563EB"/>
+
+    <!-- ══ 5. 语义表面（经典 = 老式浅底 + 硬边） ══ -->
+    <SolidColorBrush x:Key="GlassNeutralSurface" Color="#FFF8FAFC"/>
+    <SolidColorBrush x:Key="GlassInfoSurface" Color="#FFEFF6FF"/>
+    <SolidColorBrush x:Key="GlassWarnSurface" Color="#FFFFFBEB"/>
+    <SolidColorBrush x:Key="GlassErrorSurface" Color="#FFFFF7F7"/>
+    <SolidColorBrush x:Key="GlassErrorSurfaceSoft" Color="#FFFEF2F2"/>
+    <SolidColorBrush x:Key="GlassErrorHoverBg" Color="#FFFECACA"/>
+    <SolidColorBrush x:Key="GlassInfoEdge" Color="#FFBFDBFE"/>
+    <SolidColorBrush x:Key="GlassWarnEdge" Color="#FFFDE68A"/>
+    <SolidColorBrush x:Key="GlassErrorEdge" Color="#FFFECACA"/>
+    <SolidColorBrush x:Key="GlassInfoText" Color="#FF1D4ED8"/>
+    <SolidColorBrush x:Key="GlassWarnText" Color="#FFB45309"/>
+    <SolidColorBrush x:Key="GlassErrorText" Color="#FFDC2626"/>
     <SolidColorBrush x:Key="GlassSuccess" Color="#34C759"/>
     <SolidColorBrush x:Key="GlassWarning" Color="#FF9F0A"/>
     <SolidColorBrush x:Key="GlassError" Color="#FF3B30"/>
-    <!-- 页面色相：极淡 tint，只给卡片底色 -->
+
+    <!-- ══ 6. 文字 ══ -->
+    <SolidColorBrush x:Key="GlassTitleBrush" Color="#0F172A"/>
+    <SolidColorBrush x:Key="GlassSubTextBrush" Color="#64748B"/>
+    <SolidColorBrush x:Key="GlassFaintTextBrush" Color="#94A3B8"/>
+    <SolidColorBrush x:Key="GlassTextDisabled" Color="#9AA7B8"/>
+    <SolidColorBrush x:Key="GlassTextOnAccent" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="GlassLogBg" Color="#FF0F172A"/>
+    <SolidColorBrush x:Key="GlassLogText" Color="#FFCBD5E1"/>
+
+    <!-- ══ 7. 页面色相（经典 = 纯白） ══ -->
     <LinearGradientBrush x:Key="GlassCardBlue" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FFFFFFFF" Offset="0"/><GradientStop Color="#FFFFFFFF" Offset="1"/></LinearGradientBrush>
     <LinearGradientBrush x:Key="GlassCardGreen" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FFFFFFFF" Offset="0"/><GradientStop Color="#FFFFFFFF" Offset="1"/></LinearGradientBrush>
     <LinearGradientBrush x:Key="GlassCardPink" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FFFFFFFF" Offset="0"/><GradientStop Color="#FFFFFFFF" Offset="1"/></LinearGradientBrush>
     <LinearGradientBrush x:Key="GlassCardPurple" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FFFFFFFF" Offset="0"/><GradientStop Color="#FFFFFFFF" Offset="1"/></LinearGradientBrush>
 
-    <!-- ══ 圆角 ══ -->
+    <!-- ══ 8. 圆角层级（经典略小） ══ -->
     <CornerRadius x:Key="RadiusWindow">16</CornerRadius>
     <CornerRadius x:Key="RadiusPanel">16</CornerRadius>
     <CornerRadius x:Key="RadiusCard">12</CornerRadius>
+    <CornerRadius x:Key="RadiusInner">8</CornerRadius>
     <CornerRadius x:Key="RadiusControl">8</CornerRadius>
-    <CornerRadius x:Key="RadiusCapsule">999</CornerRadius>
+    <CornerRadius x:Key="RadiusItem">6</CornerRadius>
     <CornerRadius x:Key="RadiusProgress">7</CornerRadius>
+    <CornerRadius x:Key="RadiusCapsule">999</CornerRadius>
 
-    <!-- ══ 阴影 ══ -->
-    <DropShadowEffect x:Key="GlassPanelShadow" BlurRadius="18" ShadowDepth="2" Direction="270" Opacity="0.10" Color="#0F172A"/>
-    <DropShadowEffect x:Key="GlassCardShadow" BlurRadius="0" ShadowDepth="0" Direction="270" Opacity="0" Color="#0F172A"/>
-    <DropShadowEffect x:Key="GlassHoverShadow" BlurRadius="0" ShadowDepth="0" Direction="270" Opacity="0" Color="#0F172A"/>
+    <!-- ══ 9. 高度与阴影（经典 = 全零，不用阴影） ══ -->
+    <DropShadowEffect x:Key="Elevation0" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="Elevation1" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="Elevation2" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="Elevation3" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="Elevation4" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="Elevation5" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="Elevation6" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="GlassPanelShadow" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="GlassCardShadow" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="GlassHoverShadow" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="AmbientShadow" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="ContactShadow" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="HoverShadow" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="PressedShadow" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="PopupShadow" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
+    <DropShadowEffect x:Key="DialogShadow" BlurRadius="0" ShadowDepth="0" Direction="315" Opacity="0" Color="#0F172A"/>
 
-    <!-- ══ 字体层级 ══ -->
+    <!-- ══ 10. 字体层级 ══ -->
     <s:Double x:Key="FontPageTitle">26</s:Double>
     <s:Double x:Key="FontSectionTitle">19</s:Double>
     <s:Double x:Key="FontCardTitle">16</s:Double>
@@ -48,9 +119,10 @@
     <s:Double x:Key="FontStatus">10.5</s:Double>
     <s:Double x:Key="FontNumber">42</s:Double>
 
-    <!-- ══ 间距 ══ -->
+    <!-- ══ 11. 间距 ══ -->
     <Thickness x:Key="PageMargin">24,20,24,16</Thickness>
     <Thickness x:Key="CardPadding">16,14</Thickness>
     <Thickness x:Key="SectionSpacing">0,18,0,0</Thickness>
     <Thickness x:Key="ControlSpacing">0,10,0,0</Thickness>
+    <Thickness x:Key="InnerPadding">12,10</Thickness>
 </ResourceDictionary>
