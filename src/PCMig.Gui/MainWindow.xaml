@@ -6,7 +6,7 @@
         MinWidth="1120" MinHeight="740"
         Icon="/PCMig;component/Assets/pcmig.ico"
         FontFamily="Microsoft YaHei UI" FontSize="13"
-        Background="{DynamicResource GlassWindowBg}">
+        Background="{DynamicResource AppBackgroundBrush}">
     <Window.DataContext>
         <local:MainViewModel/>
     </Window.DataContext>

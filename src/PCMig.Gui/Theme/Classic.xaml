@@ -185,11 +185,32 @@
     <LinearGradientBrush x:Key="EmbossInnerLight" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#00000000" Offset="1"/>
     </LinearGradientBrush>
+    <!-- ══ 滚动条（全局统一，经典主题无边缘光）══ -->
+    <SolidColorBrush x:Key="ScrollTrack"        Color="#00000000"/>
+    <SolidColorBrush x:Key="ScrollThumb"        Color="#4A8A94A4"/>
+    <SolidColorBrush x:Key="ScrollThumbHover"   Color="#668A94A4"/>
+    <SolidColorBrush x:Key="ScrollThumbPressed" Color="#808A94A4"/>
+    <s:Double x:Key="RadiusScroll">3</s:Double>
+    <LinearGradientBrush x:Key="EdgeHighlightThin" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#00FFFFFF" Offset="0"/>
+        <GradientStop Color="#00FFFFFF" Offset="1"/>
+    </LinearGradientBrush>
+
     <!-- ── 语义 Surface 边缘光（与全局光源同向：左上→右下）── -->
     <LinearGradientBrush x:Key="ErrorEdgeLight" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFF3C4BF" Offset="0"/><GradientStop Color="#FFF3C4BF" Offset="1"/></LinearGradientBrush>
     <LinearGradientBrush x:Key="InfoEdgeLight" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFBFD7F7" Offset="0"/><GradientStop Color="#FFBFD7F7" Offset="1"/></LinearGradientBrush>
     <LinearGradientBrush x:Key="WarnEdgeLight" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFEFD5A6" Offset="0"/><GradientStop Color="#FFEFD5A6" Offset="1"/></LinearGradientBrush>
     
+    <!-- ══ Layer 0：底层磨砂渐变环境 ══
+         与全局光源同向（左上→右下），对比极低（约 8 级亮度差），肉眼不应看出"这是一块渐变"，
+         它只是给上层的 Edge Light 与 Contact Shadow 提供一个有参照的底面。
+         注意：这里只改变 Background Layer；所有 Button/Card/Nav/Dialog Surface 仍然完全不透明。 -->
+    <LinearGradientBrush x:Key="AppBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FFEFF3F8" Offset="0"/>
+        <GradientStop Color="#FFEBEFF5" Offset="0.55"/>
+        <GradientStop Color="#FFE5EAF1" Offset="1"/>
+    </LinearGradientBrush>
+
     <s:Double x:Key="FontPageTitle">21</s:Double>
     <s:Double x:Key="FontSectionTitle">16</s:Double>
     <s:Double x:Key="FontCardTitle">13.5</s:Double>

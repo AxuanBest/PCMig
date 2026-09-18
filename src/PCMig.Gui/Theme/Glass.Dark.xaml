@@ -201,6 +201,20 @@
     <LinearGradientBrush x:Key="EmbossInnerLight" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#00000000" Offset="1"/>
     </LinearGradientBrush>
+    <!-- ══ 滚动条（全局统一）══ -->
+    <SolidColorBrush x:Key="ScrollTrack"        Color="#00000000"/>
+    <SolidColorBrush x:Key="ScrollThumb"        Color="#38A8B4C4"/>
+    <SolidColorBrush x:Key="ScrollThumbHover"   Color="#5CA8B4C4"/>
+    <SolidColorBrush x:Key="ScrollThumbPressed" Color="#78A8B4C4"/>
+    <s:Double x:Key="RadiusScroll">4</s:Double>
+    <RadialGradientBrush x:Key="EdgeHighlightThin" GradientOrigin="0.06,0.08" Center="0.06,0.08" RadiusX="1.25" RadiusY="1.25">
+        <GradientStop Color="#38FFFFFF" Offset="0"/>
+        <GradientStop Color="#17FFFFFF" Offset="0.30"/>
+        <GradientStop Color="#00000000" Offset="0.55"/>
+        <GradientStop Color="#26000000" Offset="0.75"/>
+        <GradientStop Color="#40000000" Offset="1.00"/>
+    </RadialGradientBrush>
+
     <!-- ── 语义 Surface 边缘光（与全局光源同向：左上→右下）── -->
     <RadialGradientBrush x:Key="ErrorEdgeLight" GradientOrigin="0.06,0.08" Center="0.06,0.08" RadiusX="1.25" RadiusY="1.25">
         <GradientStop Color="#5CF87171" Offset="0"/>
@@ -224,6 +238,15 @@
         <GradientStop Color="#47B45309" Offset="1.00"/>
     </RadialGradientBrush>
     
+    <!-- ══ Layer 0：底层磨砂渐变环境 ══
+         与全局光源同向（左上→右下），对比极低，肉眼不应看出"这是一块渐变"。
+         只改变 Background Layer；所有 Surface 仍然完全不透明。 -->
+    <LinearGradientBrush x:Key="AppBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FF171C23" Offset="0"/>
+        <GradientStop Color="#FF141920" Offset="0.55"/>
+        <GradientStop Color="#FF11151B" Offset="1"/>
+    </LinearGradientBrush>
+
     <s:Double x:Key="FontPageTitle">21</s:Double>
     <s:Double x:Key="FontSectionTitle">16</s:Double>
     <s:Double x:Key="FontCardTitle">13.5</s:Double>

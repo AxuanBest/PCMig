@@ -411,4 +411,93 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         全局滚动条 Design System（隐式样式，无 x:Key）
+         任何 ScrollViewer / ListBox / DataGrid / TextBox 的滚动条自动生效。
+         · Track：完全透明（几乎不可见）
+         · Thumb：8px 细条、全圆角、低对比，带同一套「左上亮→右下暗」边缘光
+         · Hover：加深一档并略微加厚（8→10px）
+         · Pressed/Dragging：再加深一档
+         不做立体水滴、不做老式灰色轨道、不加粗描边。
+         ══════════════════════════════════════════════════════════════ -->
+    <Style x:Key="AppScrollPageButton" TargetType="RepeatButton">
+        <Setter Property="OverridesDefaultStyle" Value="True"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Border Background="Transparent"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="AppScrollThumb" TargetType="Thumb">
+        <Setter Property="OverridesDefaultStyle" Value="True"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Grid Background="Transparent">
+                        <Border x:Name="cast" Margin="3,2" Background="{DynamicResource ScrollThumb}"
+                                CornerRadius="{DynamicResource RadiusScroll}"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border x:Name="edge" BorderBrush="{DynamicResource EdgeHighlightThin}"
+                                    BorderThickness="1"
+                                    CornerRadius="{DynamicResource RadiusScroll}"/>
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="cast" Property="Background" Value="{DynamicResource ScrollThumbHover}"/>
+                            <Setter TargetName="cast" Property="Margin" Value="2,2"/>
+                            <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlight}"/>
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="cast" Property="Background" Value="{DynamicResource ScrollThumbPressed}"/>
+                            <Setter TargetName="cast" Property="Margin" Value="2,2"/>
+                            <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightStrong}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="ScrollBar">
+        <Setter Property="OverridesDefaultStyle" Value="True"/>
+        <Setter Property="Background" Value="{DynamicResource ScrollTrack}"/>
+        <Setter Property="Width" Value="12"/>
+        <Setter Property="MinWidth" Value="12"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollBar">
+                    <Grid Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageUpCommand" Style="{StaticResource AppScrollPageButton}"/>
+                            </Track.DecreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Style="{StaticResource AppScrollThumb}"/>
+                            </Track.Thumb>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageDownCommand" Style="{StaticResource AppScrollPageButton}"/>
+                            </Track.IncreaseRepeatButton>
+                        </Track>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Orientation" Value="Horizontal">
+                            <Setter Property="Width" Value="Auto"/>
+                            <Setter Property="MinWidth" Value="0"/>
+                            <Setter Property="Height" Value="12"/>
+                            <Setter Property="MinHeight" Value="12"/>
+                            <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 </ResourceDictionary>
