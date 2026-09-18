@@ -845,8 +845,13 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
                 <!-- 提示面板：原来挤在进度条下方，移到这里独立成块；清单可滚轮翻页。底栏不再重复显示状态文字 -->
-                <Border Grid.Row="1" Background="{DynamicResource GlassErrorSurface}" BorderBrush="{DynamicResource ErrorEdgeLight}" BorderThickness="0" CornerRadius="{DynamicResource RadiusCard}" Padding="12,10">
+                <Border Grid.Row="1" Background="{DynamicResource GlassErrorSurface}" BorderBrush="{DynamicResource ErrorEdgeLight}" BorderThickness="1" CornerRadius="{DynamicResource RadiusCard}" Padding="12,10"
+                        Effect="{DynamicResource ContactShadow}">
                     <!-- v0.3.8（缺陷 3）：有对象失败时整块变红（底色/边线/标题），不再是"失败了却像还在跑" -->
+                    <!-- v0.4.2 视觉统一：这块此前 BorderThickness=0，导致已指定的 ErrorEdgeLight 根本没被绘制，
+                         加上没有 Contact Shadow，于是看起来是一个二维纯红矩形，像从旧 UI 遗留下来的色块。
+                         现在它与其他 Surface 一样拥有：Surface + Edge Lighting + Contact Shadow，
+                         红色仍然作为该 Surface 的语义色（Highlight 是与红表面融合的暖白，不是纯白）。 -->
                     <Border.Style>
                         <Style TargetType="Border">
                             <Setter Property="Background" Value="{DynamicResource GlassErrorSurface}"/>
@@ -865,6 +870,11 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
+                        <!-- Inner Edge：极细内缘光学，与其他 Surface 同一套；不参与命中测试，不影响交互 -->
+                        <Border Grid.RowSpan="3" Margin="1" BorderThickness="1"
+                                BorderBrush="{DynamicResource InnerEdge}"
+                                CornerRadius="{DynamicResource RadiusCard}"
+                                IsHitTestVisible="False" Panel.ZIndex="99"/>
                         <TextBlock Grid.Row="0" Text="{Binding ErrorHeader}" Margin="16,0,14,5"
                                    FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource GlassErrorText}">
                             <TextBlock.Style>
