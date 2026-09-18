@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # PCMig 迁移策略矩阵 v1
 # 扫描 / 传输 / 验证 三方统一使用本名单，保证口径一致。
 # 修改后无需重启：每个 Job 启动时读取。
@@ -8,7 +8,9 @@ schemaVersion: "1.0"
 # 大文件阈值：≥ 该值的文件走 /Z 单线程可续传通道（断网/断电后可从文件内部续传）
 largeFileThresholdMB: 512
 
-# 云占位符（OneDrive 等）策略：Warn = 记录警告仍继续；后续版本支持 Skip
+# 云占位符（OneDrive 等）策略：
+#   Warn = 记录警告仍照常复制（SMB 读取会触发云端回源下载，可能拖慢网络）
+#   Skip = 不复制（robocopy /XA:O 排除脱机文件，扫描/验证同口径剔除；新机登录账号后自动同步）
 cloudPlaceholderPolicy: Warn
 
 # 全局排除目录（robocopy /XD，任意深度生效）
@@ -31,6 +33,9 @@ excludedFileNames:
   - DumpStack.log.tmp
   - desktop.ini
   - Thumbs.db
+  # Office/WPS 打开文档时生成的所有者锁文件（~$ 前缀）、LibreOffice 锁文件：瞬态文件，不迁移
+  - "~$*"
+  - ".~lock*#"
 
 # 凭据/安全边界：永不迁移（DPAPI 绑定源机+源用户，搬过去也解不开）
 securityBlockedFileNames:

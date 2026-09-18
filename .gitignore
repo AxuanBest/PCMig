@@ -29,3 +29,5 @@ jobs/
 
 # 截图（按需手动加入）
 docs/screenshots/*.png
+# VM 应答 ISO（二进制，勿入库）
+lab/*.iso

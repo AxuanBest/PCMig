@@ -1,0 +1,1 @@
+﻿((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalMinutes | Out-File C:\uptime.txt -Encoding ascii
