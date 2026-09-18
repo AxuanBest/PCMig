@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -39,16 +39,24 @@ public sealed class RelayCommand : ICommand
 {
     private readonly Func<object?, Task> _execute;
     private readonly Func<object?, bool>? _canExecute;
+    private readonly string _name;
     private bool _running;
 
-    public RelayCommand(Func<object?, Task> execute, Func<object?, bool>? canExecute = null)
+    /// <summary>
+    /// 命令内部异常的统一出口，由 App 在启动时挂上（写日志 + 写崩溃文件 + 弹可读提示）。
+    /// 稳定性要点：Execute 是 async void，异常若漏出去就是整个程序崩溃；这里必须兜住。
+    /// </summary>
+    public static Action<string, Exception>? OnError;
+
+    public RelayCommand(Func<object?, Task> execute, Func<object?, bool>? canExecute = null, string? displayName = null)
     {
         _execute = execute;
         _canExecute = canExecute;
+        _name = displayName ?? "命令";
     }
 
-    public RelayCommand(Action<object?> execute, Func<object?, bool>? canExecute = null)
-        : this(p => { execute(p); return Task.CompletedTask; }, canExecute) { }
+    public RelayCommand(Action<object?> execute, Func<object?, bool>? canExecute = null, string? displayName = null)
+        : this(p => { execute(p); return Task.CompletedTask; }, canExecute, displayName) { }
 
     public event EventHandler? CanExecuteChanged
     {
@@ -60,9 +68,18 @@ public sealed class RelayCommand : ICommand
 
     public async void Execute(object? parameter)
     {
-        if (_running) return;
+        if (_running) return;   // 防重入：连点两下不会跑两遍
         _running = true;
         try { await _execute(parameter); }
-        finally { _running = false; }
+        catch (Exception ex)
+        {
+            try { OnError?.Invoke(_name, ex); }
+            catch { /* 兜底本身再出错也不能崩 */ }
+        }
+        finally
+        {
+            _running = false;
+            try { CommandManager.InvalidateRequerySuggested(); } catch { }
+        }
     }
 }

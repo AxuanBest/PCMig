@@ -8,11 +8,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>PCMig</AssemblyName>
     <RootNamespace>PCMig.Gui</RootNamespace>
-    <Version>0.2.5</Version>
-    <Description>PCMig 图形界面：企业内网 Windows 数据/环境迁移</Description>
+    <Version>0.4.1</Version>
+    <AssemblyTitle>PCMig 迁移工具</AssemblyTitle>
+    <Product>PCMig 迁移工具</Product>
+    <Description>由 郑子轩 个人制作 · 企业内网 Windows 数据/环境迁移图形界面</Description>
     <Authors>郑子轩 (Axuanbest)</Authors>
     <Company>Axuanbest</Company>
-    <Copyright>© 2026 郑子轩 (Axuanbest). Crafted with care.</Copyright>
+    <Copyright>郑子轩 个人制作</Copyright>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationIcon>Assets\pcmig.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
@@ -23,6 +26,12 @@
 
   <ItemGroup>
     <Resource Include="Assets\pcmig.ico" />
+    <Resource Include="Assets\pcmig-64.png" />
+    <Resource Include="Assets\pcmig-256.png" />
+    <!-- 更新日志：随程序内置（应用内窗口渲染），同时作为 TXT 随包发出 -->
+    <Resource Include="..\..\docs\更新日志.md">
+      <Link>Assets\CHANGELOG.md</Link>
+    </Resource>
     <None Include="..\..\matrix\migration-matrix.yaml">
       <Link>matrix\migration-matrix.yaml</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

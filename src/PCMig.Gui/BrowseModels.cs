@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using PCMig.Core.Util;
 
 namespace PCMig.Gui;
@@ -131,6 +131,16 @@ public sealed class FileRow : ViewModelBase
         set { if (Set(ref _isChecked, value)) Parent?.RecomputeFromChildren(); }
     }
 
-    /// <summary>静默赋值（父级联/加载继承用），不触发向上重算。</summary>
-    public void SetCheckedSilent(bool value) => Set(ref _isChecked, value);
+    /// <summary>
+    /// 静默赋值（父级联/加载继承用）：不触发向上重算，但必须通知 UI。
+    /// 注意不能写成 Set(ref _isChecked, value) —— 那样 [CallerMemberName] 取到的是本方法名
+    /// "SetCheckedSilent"，PropertyChanged 名义不对，复选框绑定收不到通知（表现为：
+    /// 勾整盘时目录勾上了、根目录下的散落文件没勾上）。这里显式发 IsChecked。
+    /// </summary>
+    public void SetCheckedSilent(bool value)
+    {
+        if (_isChecked == value) return;
+        _isChecked = value;
+        OnPropertyChanged(nameof(IsChecked));
+    }
 }

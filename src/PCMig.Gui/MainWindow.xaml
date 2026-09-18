@@ -2,11 +2,11 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:PCMig.Gui"
-        Title="PCMig 迁移工具 v0.2.5" Width="1240" Height="820"
-        MinWidth="1020" MinHeight="700"
+        Title="PCMig 迁移工具 v0.4.1" Width="1340" Height="880"
+        MinWidth="1120" MinHeight="740"
         Icon="/PCMig;component/Assets/pcmig.ico"
         FontFamily="Microsoft YaHei UI" FontSize="13"
-        Background="#F5F6F8">
+        Background="{StaticResource GlassWindowBg}">
     <Window.DataContext>
         <local:MainViewModel/>
     </Window.DataContext>
@@ -14,333 +14,1167 @@
     <Window.Resources>
         <local:BoolToVisibilityConverter x:Key="BoolVis"/>
         <local:InverseBoolToVisibilityConverter x:Key="InvBoolVis"/>
-        <Style x:Key="GroupBoxStyle" TargetType="GroupBox">
-            <Setter Property="Margin" Value="6,4"/>
-            <Setter Property="Padding" Value="10,6"/>
-            <Setter Property="Background" Value="White"/>
-            <Setter Property="BorderBrush" Value="#E0E3E8"/>
+
+        <!-- ═══ 卡片与文字样式 ═══ -->
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource GlassCardBg}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource GlassBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="{StaticResource RadiusCard}"/>
+            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="Effect" Value="{StaticResource GlassCardShadow}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Effect" Value="{StaticResource GlassHoverShadow}"/>
+                    <Setter Property="RenderTransform"><Setter.Value><TranslateTransform Y="-2"/></Setter.Value></Setter>
+                </Trigger>
+            </Style.Triggers>
+            
         </Style>
+        <Style x:Key="PageTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="19"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="#0F172A"/>
+        </Style>
+        <Style x:Key="PageSub" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="#94A3B8"/>
+            <Setter Property="Margin" Value="0,3,0,0"/>
+        </Style>
+        <Style x:Key="CardTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#0F172A"/>
+        </Style>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#64748B"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#94A3B8"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+        <Style x:Key="Caption" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#94A3B8"/>
+            <Setter Property="FontSize" Value="11"/>
+        </Style>
+
+        <!-- ══ 按钮 ══ -->
         <Style x:Key="PrimaryButton" TargetType="Button">
-            <Setter Property="Padding" Value="14,6"/>
-            <Setter Property="Margin" Value="4,2"/>
+            <Setter Property="Padding" Value="16,7"/>
+            <Setter Property="Margin" Value="0"/>
             <Setter Property="Background" Value="#2563EB"/>
             <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="{StaticResource RadiusControl}"
+                                Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#1D4ED8"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#1E40AF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bd" Property="Background" Value="#CBD5E1"/>
+                                <Setter Property="Foreground" Value="#F8FAFC"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style x:Key="NormalButton" TargetType="Button">
-            <Setter Property="Padding" Value="12,5"/>
-            <Setter Property="Margin" Value="4,2"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="Background" Value="{StaticResource GlassCardBg}"/>
+            <Setter Property="Foreground" Value="#334155"/>
+            <Setter Property="BorderBrush" Value="{StaticResource GlassBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="{StaticResource RadiusControl}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#DDFFFFFF"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#66FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#99FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bd" Property="Background" Value="#B3FFFFFF"/>
+                                <Setter Property="Foreground" Value="#B6C2D2"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#E2E8F0"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
+
+        <!-- ═══ 进度条：大号（迁移页）+ 细条（状态栏），圆角渐变 + 流动光带 ══ -->
+        <Style x:Key="BigProgress" TargetType="ProgressBar">
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Minimum" Value="0"/>
+            <Setter Property="Maximum" Value="100"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Grid>
+                            <Border CornerRadius="8" Background="{StaticResource GlassSecondaryBg}"/>
+                            <Border x:Name="PART_Track" CornerRadius="8" ClipToBounds="True">
+                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="8">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                            <GradientStop Color="#60A5FA" Offset="0"/>
+                                            <GradientStop Color="#2563EB" Offset="0.55"/>
+                                            <GradientStop Color="#1D4ED8" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                    <Grid ClipToBounds="True">
+                                        <Rectangle Width="140" HorizontalAlignment="Left" IsHitTestVisible="False">
+                                            <Rectangle.Fill>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                    <GradientStop Color="#00FFFFFF" Offset="0"/>
+                                                    <GradientStop Color="#66FFFFFF" Offset="0.5"/>
+                                                    <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                                </LinearGradientBrush>
+                                            </Rectangle.Fill>
+                                            <Rectangle.RenderTransform>
+                                                <TranslateTransform x:Name="ShimmerX" X="-160"/>
+                                            </Rectangle.RenderTransform>
+                                            <Rectangle.Style>
+                                                <Style TargetType="Rectangle">
+                                                    <Setter Property="Opacity" Value="0"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsRunning}" Value="True">
+                                                            <Setter Property="Opacity" Value="1"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Rectangle.Style>
+                                            <Rectangle.Triggers>
+                                                <EventTrigger RoutedEvent="Loaded">
+                                                    <BeginStoryboard>
+                                                        <Storyboard RepeatBehavior="Forever">
+                                                            <DoubleAnimation Storyboard.TargetName="ShimmerX"
+                                                                             Storyboard.TargetProperty="X"
+                                                                             From="-160" To="1600" Duration="0:0:2.2"/>
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </EventTrigger>
+                                            </Rectangle.Triggers>
+                                        </Rectangle>
+                                    </Grid>
+                                </Border>
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="SlimProgress" TargetType="ProgressBar">
+            <Setter Property="Height" Value="6"/>
+            <Setter Property="Minimum" Value="0"/>
+            <Setter Property="Maximum" Value="100"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Grid>
+                            <Border CornerRadius="6" Background="{StaticResource GlassSecondaryBg}"/>
+                            <Border x:Name="PART_Track" CornerRadius="6" ClipToBounds="True">
+                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="6">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                            <GradientStop Color="#60A5FA" Offset="0"/>
+                                            <GradientStop Color="#2563EB" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ══ 页面切换：200ms 淡入 + 轻微上移（仅视觉） ══ -->
+        <Style x:Key="PageFade" TargetType="Grid">
+            <Setter Property="RenderTransform"><Setter.Value><TranslateTransform Y="0"/></Setter.Value></Setter>
+            <Style.Triggers>
+                <Trigger Property="Visibility" Value="Visible">
+                    <Trigger.EnterActions>
+                        <BeginStoryboard><Storyboard>
+                            <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.2"/>
+                            <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" From="8" To="0" Duration="0:0:0.2"/>
+                        </Storyboard></BeginStoryboard>
+                    </Trigger.EnterActions>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- ══ 左侧步骤导轨 ═══ -->
+        <Style x:Key="StepRail" TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0,6"/>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="Margin" Value="8,3"/>
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="bd" CornerRadius="{StaticResource RadiusControl}" Background="Transparent" Padding="12,10">
+                                        <ContentPresenter/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="bd" Property="Background" Value="#66FFFFFF"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="bd" Property="Background" Value="#CCFFFFFF"/>
+                                            <Setter TargetName="bd" Property="Effect" Value="{StaticResource GlassCardShadow}"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="TextBox">
-            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="Padding" Value="8,6"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Background" Value="#99FFFFFF"/>
+            <Setter Property="BorderBrush" Value="{StaticResource GlassBorderBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource GlassTitleBrush}"/>
+            <Setter Property="CaretBrush" Value="{StaticResource GlassTitleBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="{StaticResource RadiusControl}" SnapsToDevicePixels="True">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource GlassAccentBrush}"/>
+                                <Setter TargetName="bd" Property="BorderThickness" Value="1.5"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bd" Property="Background" Value="#4DFFFFFF"/>
+                                <Setter Property="Foreground" Value="{StaticResource GlassTextDisabled}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="PasswordBox">
-            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="Padding" Value="7,5"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Background" Value="#99FFFFFF"/>
+            <Setter Property="BorderBrush" Value="{StaticResource GlassBorderBrush}"/>
         </Style>
-        <Style TargetType="Label">
-            <Setter Property="Padding" Value="2"/>
+        <Style TargetType="ComboBox">
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Background" Value="#99FFFFFF"/>
+            <Setter Property="BorderBrush" Value="{StaticResource GlassBorderBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource GlassTitleBrush}"/>
+        </Style>
+        <!-- ══ iOS 风格开关：全局 CheckBox 模板（苹果风控件细节） ══ -->
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="#0F172A"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal" Background="Transparent">
+                            <Grid Width="40" Height="24" VerticalAlignment="Center">
+                                <Border x:Name="track" CornerRadius="12" Background="#330F172A"/>
+                                <Border x:Name="thumb" Width="20" Height="20" CornerRadius="10" Background="White"
+                                        HorizontalAlignment="Left" Margin="2,0,0,0" Effect="{StaticResource GlassCardShadow}">
+                                    <Border.RenderTransform><TranslateTransform x:Name="thumbX" X="0"/></Border.RenderTransform>
+                                </Border>
+                            </Grid>
+                            <ContentPresenter Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="track" Property="Background" Value="{StaticResource GlassAccentBrush}"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="thumbX" Storyboard.TargetProperty="X" To="16" Duration="0:0:0.16"/></Storyboard></BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="thumbX" Storyboard.TargetProperty="X" To="0" Duration="0:0:0.16"/></Storyboard></BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="track" Property="Background" Value="#1A0F172A"/>
+                                <Setter TargetName="thumb" Property="Background" Value="#E2E8F0"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Window.Resources>
 
-    <Grid Margin="4">
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="*"/>     <!-- 主区域：左右两块 -->
-            <RowDefinition Height="Auto"/>  <!-- 底部通栏进度 -->
+            <RowDefinition Height="Auto"/>   <!-- 顶栏 -->
+            <RowDefinition Height="*"/>      <!-- 步骤导轨 + 页面 -->
+            <RowDefinition Height="Auto"/>   <!-- 底部状态栏 -->
         </Grid.RowDefinitions>
+        <!-- 白洗层：系统亚克力自带深色 tint，垫一层半透明白保证可读、又保留 30% 实时模糊 -->
+        <Border Grid.RowSpan="3" Background="{StaticResource GlassWashBg}" IsHitTestVisible="False"/>
+        <!-- 苹果风底景：内置柔色块光晕（mockup 的壁纸透色感，自绘、不依赖 OS 模糊） -->
+        <Canvas Grid.RowSpan="3" IsHitTestVisible="False" ClipToBounds="True">
+            <Ellipse Width="900" Height="700" Canvas.Left="-260" Canvas.Top="330" Opacity="0.6">
+                <Ellipse.Fill><RadialGradientBrush><GradientStop Color="#F7A8B4" Offset="0"/><GradientStop Color="#00F7A8B4" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
+            </Ellipse>
+            <Ellipse Width="800" Height="800" Canvas.Left="780" Canvas.Top="120" Opacity="0.55">
+                <Ellipse.Fill><RadialGradientBrush><GradientStop Color="#FBC98A" Offset="0"/><GradientStop Color="#00FBC98A" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
+            </Ellipse>
+            <Ellipse Width="700" Height="500" Canvas.Left="180" Canvas.Top="-180" Opacity="0.5">
+                <Ellipse.Fill><RadialGradientBrush><GradientStop Color="#9EC3F7" Offset="0"/><GradientStop Color="#009EC3F7" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
+            </Ellipse>
+        </Canvas>
 
-        <!-- ═══════════ 主区域 ═══════════ -->
-        <Grid Grid.Row="0">
+        <!-- ══════════ 顶栏：标题 + 源→目标 ═══════════ -->
+        <Border Grid.Row="0" Background="{StaticResource GlassPanelBg}" BorderBrush="{StaticResource GlassBorderBrush}" BorderThickness="0,0,0,1" Padding="18,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- 应用图标（多尺寸 ico 里的 64px 图）：以前这里是个纯蓝方块，里面的字形丢了 -->
+                    <Image Source="/PCMig;component/Assets/pcmig-64.png" Width="34" Height="34"
+                           VerticalAlignment="Center" Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           ToolTip="PCMig 迁移工具 · 郑子轩 个人制作"/>
+                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="PCMig 迁移工具" Style="{StaticResource CardTitle}" FontSize="15"/>
+                        <TextBlock Style="{StaticResource Caption}">
+                            <Run Text="{Binding VersionText, Mode=OneWay}"/>
+                            <Run Text=" · 旧电脑 → 新电脑 数据迁移"/>
+                        </TextBlock>
+                    </StackPanel>
+                    <!-- 更新日志入口：点开看历代版本改了什么（内容随程序内置） -->
+                    <Button x:Name="BtnChangelog" Content="更新日志" Click="Changelog_Click"
+                            Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" Foreground="#1D4ED8"
+                            Padding="10,5" Margin="12,0,0,0" Cursor="Hand" FontSize="11.5"
+                            VerticalAlignment="Center" ToolTip="查看从 v0.1.0 起的所有版本更新内容（安装目录下也有 更新日志.txt）"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="10,6">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="源" Style="{StaticResource Caption}" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding SourceSummary}" Margin="6,0,0,0" Foreground="#0F172A"
+                                       MaxWidth="230" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock Text="→" Margin="8,0" Foreground="#94A3B8" VerticalAlignment="Center"/>
+                    <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="10,6">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="目标" Style="{StaticResource Caption}" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding TargetSummary}" Margin="6,0,0,0" Foreground="#0F172A"
+                                       MaxWidth="270" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ═══════════ 主体：左侧导轨 + 页面 ═══════════ -->
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MinWidth="380"/>
-                <ColumnDefinition Width="5"/>
+                <ColumnDefinition Width="218"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- ───── 左列：署名 / ① 连接 / ② 内容树 / ③ 目标与操作 ───── -->
-            <Grid Grid.Column="0">
+            <Border Grid.Column="0" Background="{StaticResource GlassRailBg}" BorderBrush="{StaticResource GlassBorderBrush}" BorderThickness="0,0,1,0">
+              <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-
-                <!-- 个人署名 -->
-                <TextBlock Grid.Row="0" Margin="4,0,0,3" HorizontalAlignment="Left">
-                    <Run Text="⚡ Axuanbest" FontWeight="Bold" Foreground="#2563EB"/>
-                    <Run Text=" 个人制作" Foreground="#94A3B8" FontSize="10"/>
-                </TextBlock>
-
-                <!-- ① 源电脑连接 -->
-                <GroupBox Grid.Row="1" Header="① 源电脑（旧电脑）连接" Style="{StaticResource GroupBoxStyle}">
+                <ListBox Grid.Row="0" x:Name="StepRailList" Style="{StaticResource StepRail}" ItemsSource="{Binding StepItems}"
+                         SelectedIndex="{Binding CurrentStep, Mode=OneWay}"
+                         SelectionChanged="StepRail_SelectionChanged">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Number}" FontSize="16" FontWeight="Bold"
+                                           Foreground="#2563EB" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{StaticResource GlassTitleBrush}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                        <Setter Property="Foreground" Value="{StaticResource GlassAccentBrush}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Caption}"
+                                               TextWrapping="Wrap" Margin="0,1,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <!-- 提示面板：原来挤在进度条下方，移到这里独立成块；清单可滚轮翻页。底栏不再重复显示状态文字 -->
+                <Border Grid.Row="1" Background="#FFF7F7" BorderBrush="#FECACA" BorderThickness="0,1,0,0" Padding="0,9,0,9">
+                    <!-- v0.3.8（缺陷 3）：有对象失败时整块变红（底色/边线/标题），不再是"失败了却像还在跑" -->
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="#FFF7F7"/>
+                            <Setter Property="BorderBrush" Value="#FECACA"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasObjectFailures}" Value="True">
+                                    <Setter Property="Background" Value="#FEF2F2"/>
+                                    <Setter Property="BorderBrush" Value="#DC2626"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <Label Content="IP 或电脑名："/>
-                        <TextBox Grid.Column="1" Grid.ColumnSpan="3" Height="28" VerticalAlignment="Center"
-                                 Text="{Binding Host, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="旧电脑的 IP 或主机名，如 192.168.1.50；也可直接粘贴 \\IP\共享名"/>
-                        <Button Grid.Column="4" Grid.RowSpan="2" Content="连接并列出共享" Height="28" VerticalAlignment="Center"
-                                Style="{StaticResource PrimaryButton}"
-                                Command="{Binding ConnectCommand}" CommandParameter="{Binding ElementName=PwdBox}"/>
-                        <Label Grid.Row="1" Content="用户名："/>
-                        <TextBox Grid.Row="1" Grid.Column="1" Height="28" VerticalAlignment="Center"
-                                 Text="{Binding Username, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="旧电脑的管理员账号，如 OLD-PC\Administrator 或 域名\账号；留空则用当前 Windows 凭据"/>
-                        <Label Grid.Row="1" Grid.Column="2" Content="密码："/>
-                        <PasswordBox Grid.Row="1" Grid.Column="3" x:Name="PwdBox" Height="28" VerticalAlignment="Center"
-                                     ToolTip="留空则尝试当前 Windows 凭据（会话缓存约 15 分钟有效）"/>
-                    </Grid>
-                </GroupBox>
-
-                <!-- ② 选择要迁移的内容：目录树 / 超大数据模式（排除规则） -->
-                <GroupBox Grid.Row="2" Style="{StaticResource GroupBoxStyle}">
-                    <GroupBox.Header>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="② 选择要迁移的内容"/>
-                            <CheckBox Content="超大数据模式" IsChecked="{Binding ExpertMode}"
-                                      Margin="14,0,0,0" VerticalAlignment="Center"
-                                      ToolTip="上亿文件 / 几十 TB 的服务器级迁移：目录树替换为排除规则输入，无需展开目录"/>
-                        </StackPanel>
-                    </GroupBox.Header>
-                    <Grid>
-                        <!-- 普通模式：级联三态目录树 -->
-                        <TreeView ItemsSource="{Binding DirTree}" BorderThickness="0"
-                                  Visibility="{Binding ExpertMode, Converter={StaticResource InvBoolVis}}"
-                                  VirtualizingStackPanel.IsVirtualizing="True"
-                                  VirtualizingStackPanel.VirtualizationMode="Recycling"
-                                  ToolTip="勾共享=整盘；点 ▶ 展开可精确勾选目录/文件">
-                            <TreeView.Resources>
-                                <!-- 目录 / 共享根节点：三态级联（点击由 code-behind 统一接管，绕过 WPF 默认三态循环） -->
-                                <HierarchicalDataTemplate DataType="{x:Type local:DirNode}" ItemsSource="{Binding Children}">
-                                    <StackPanel Orientation="Horizontal">
-                                        <CheckBox IsChecked="{Binding IsChecked, Mode=OneWay}" IsThreeState="True"
-                                                  VerticalAlignment="Center"
-                                                  PreviewMouseLeftButtonDown="NodeCheck_Toggle" PreviewKeyDown="NodeCheck_KeyToggle"/>
-                                        <TextBlock Text="{Binding Name}" Margin="4,0,0,0"/>
-                                    </StackPanel>
-                                </HierarchicalDataTemplate>
-                                <!-- 文件叶子节点 -->
-                                <DataTemplate DataType="{x:Type local:FileRow}">
-                                    <StackPanel Orientation="Horizontal">
-                                        <CheckBox IsChecked="{Binding IsChecked, Mode=OneWay}" VerticalAlignment="Center"
-                                                  PreviewMouseLeftButtonDown="NodeCheck_Toggle" PreviewKeyDown="NodeCheck_KeyToggle"/>
-                                        <TextBlock Text="{Binding Name}" Margin="4,0,0,0"/>
-                                        <TextBlock Text="{Binding SizeText}" Margin="8,0,0,0" Foreground="#9CA3AF" FontSize="11"/>
-                                    </StackPanel>
-                                </DataTemplate>
-                            </TreeView.Resources>
-                            <TreeView.ItemContainerStyle>
-                                <Style TargetType="TreeViewItem">
-                                    <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
-                                    <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
-                                    <EventSetter Event="TreeViewItem.Expanded" Handler="DirNode_Expanded"/>
+                        <TextBlock Grid.Row="0" Text="{Binding ErrorHeader}" Margin="16,0,14,5"
+                                   FontSize="12" FontWeight="SemiBold" Foreground="#B91C1C">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="#B91C1C"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasObjectFailures}" Value="True">
+                                            <Setter Property="Foreground" Value="#DC2626"/>
+                                            <Setter Property="FontSize" Value="13.5"/>
+                                            <Setter Property="FontWeight" Value="Bold"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
                                 </Style>
-                            </TreeView.ItemContainerStyle>
-                        </TreeView>
-
-                        <!-- 超大数据模式：共享勾选 + 排除规则 -->
-                        <Grid Visibility="{Binding ExpertMode, Converter={StaticResource BoolVis}}">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto" MaxHeight="150"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="*"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                            <TextBlock Text="勾选要迁移的共享（整盘）："/>
-                            <ListBox Grid.Row="1" ItemsSource="{Binding Shares}" BorderThickness="0"
-                                     Margin="0,2,0,4" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <ScrollViewer Grid.Row="1" MaxHeight="132" VerticalScrollBarVisibility="Auto"
+                                   HorizontalScrollBarVisibility="Disabled" Margin="16,0,14,4">
+                            <TextBlock Text="{Binding StatusMessage}"
+                                   FontSize="11" LineHeight="15" Foreground="#7F1D1D" TextWrapping="Wrap"
+                                   ToolTip="{Binding StatusMessage}"/>
+                        </ScrollViewer>
+                        <Grid Grid.Row="2">
+                            <TextBlock Text="✔ 暂无报错" Margin="16,2,14,0" FontSize="11" Foreground="#047857">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasErrors}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <!-- 滚轮必须用像素滚动：单条报错可能很高（长原因换行），
+                                 默认的按项滚动遇到"只有一个超高项"时会一格都动不了（用户实测反馈） -->
+                            <ListBox ItemsSource="{Binding FailItems}" MaxHeight="170" Margin="8,0,8,0"
+                                     Background="Transparent" BorderThickness="0"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     VirtualizingPanel.IsVirtualizing="True"
+                                     VirtualizingPanel.ScrollUnit="Pixel">
+                                <ListBox.ItemContainerStyle>
+                                    <!-- 去掉 WPF 默认的蓝色悬停/选中高亮：那会让深色报错文字落在浅蓝底上，越看越糊 -->
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Padding" Value="0"/>
+                                        <Setter Property="Focusable" Value="False"/>
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border x:Name="Bd" Background="Transparent" CornerRadius="4" Padding="4,2,4,3">
+                                                        <ContentPresenter/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="Bd" Property="Background" Value="#FEE2E2"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="Bd" Property="Background" Value="#FECACA"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.Style>
+                                    <Style TargetType="ListBox">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasErrors}" Value="False">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ListBox.Style>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <StackPanel Orientation="Horizontal">
-                                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" VerticalAlignment="Center"/>
-                                            <TextBlock Text="{Binding UncPath}" Margin="4,0,0,0"/>
-                                            <TextBlock Text="{Binding TypeText}" Margin="8,0,0,0" Foreground="#9CA3AF" FontSize="11"/>
+                                        <!-- 行内不要 ToolTip：悬停弹出的提示窗会盖住列表并吞掉滚轮事件（实测"滚不动"的原因之一），
+                                             路径本来就已完整显示在行首 -->
+                                        <StackPanel Margin="0,3">
+                                            <!-- 对象级失败（IsObjectLevel=true）整行红色加粗：一眼能看出"哪个对象死了、退出码什么意思" -->
+                                            <TextBlock Text="{Binding Location}" FontSize="10.5" FontFamily="Consolas"
+                                                       TextWrapping="Wrap">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="FontWeight" Value="SemiBold"/>
+                                                        <Setter Property="Foreground" Value="#7F1D1D"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsObjectLevel}" Value="True">
+                                                                <Setter Property="Foreground" Value="#DC2626"/>
+                                                                <Setter Property="FontWeight" Value="Bold"/>
+                                                                <Setter Property="FontSize" Value="11.5"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Reason}" FontSize="10.5" TextWrapping="Wrap" Margin="0,1,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="#92400E"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsObjectLevel}" Value="True">
+                                                                <Setter Property="Foreground" Value="#B91C1C"/>
+                                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
                                         </StackPanel>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
-                            <TextBlock Grid.Row="2" Text="排除规则（每行一条）："/>
-                            <TextBox Grid.Row="3" AcceptsReturn="True" TextWrapping="NoWrap"
-                                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                                     FontFamily="Consolas" FontSize="12" VerticalContentAlignment="Top"
-                                     Text="{Binding ExpertExclusions, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="4" Foreground="#6B7280" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
-                                       Text="语法：/XD 目录名或路径；/XF 文件名或通配符；裸词按目录处理；# 开头为注释。例：/XD node_modules　/XF *.tmp　/XF *.iso。规则与扫描、传输、验证同口径生效，并随任务存档。"/>
                         </Grid>
                     </Grid>
-                </GroupBox>
+                </Border>
 
-                <!-- ③ 目标与操作 -->
-                <GroupBox Grid.Row="3" Header="③ 目标与操作" Style="{StaticResource GroupBoxStyle}">
-                    <StackPanel>
+                <!-- 署名/品牌标签：常驻左下角，不占操作区 -->
+                <TextBlock Grid.Row="2" Margin="18,10,14,16" FontSize="11" LineHeight="16"
+                           Foreground="#94A3B8" TextWrapping="Wrap"
+                           ToolTip="https://github.com/Axuanbest"
+                           Text="由 郑子轩 个人制作"/>
+              </Grid>
+            </Border>
+
+            <Grid Grid.Column="1" Margin="14,12,14,10">
+
+                <!-- ══════ ① 连接源电脑 ══════ -->
+                <Grid x:Name="PageConnect" Visibility="{Binding IsStepConnect, Converter={StaticResource BoolVis}}" Style="{StaticResource PageFade}">
+        <Grid.Resources>
+            <StaticResource x:Key="GlassCardBg" ResourceKey="GlassCardBlue"/>
+        </Grid.Resources>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Margin="2,0,0,10">
+                        <TextBlock Text="① 连接旧电脑" Style="{StaticResource PageTitle}"/>
+                        <TextBlock Style="{StaticResource PageSub}" Text="填旧电脑的 IP/电脑名与账号，点右侧按钮建立连接并列出可迁移的共享。"/>
+                    </StackPanel>
+
+                    <Border Grid.Row="1" Style="{StaticResource Card}">
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <Label Content="目标路径："/>
-                            <TextBox Grid.Column="1" Height="28" VerticalAlignment="Center"
-                                     Text="{Binding TargetRoot, UpdateSourceTrigger=PropertyChanged}"
-                                     ToolTip="新电脑上接收数据的位置，例如 D:\Migrated 或 D:\"/>
-                            <Button Grid.Column="2" Content="浏览…" Height="28" VerticalAlignment="Center"
-                                    Style="{StaticResource NormalButton}" Command="{Binding BrowseTargetCommand}"/>
-                        </Grid>
-                        <Grid Margin="0,4,0,0">
-                            <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <Label Content="已有任务："/>
-                            <ComboBox Grid.Column="1" Height="28" VerticalAlignment="Center"
-                                      ItemsSource="{Binding ExistingJobs}" SelectedItem="{Binding SelectedExistingJob}"
-                                      DisplayMemberPath="DisplayText" ToolTip="可恢复之前未完成的任务"/>
-                            <Label Grid.Column="2" Content="线程数："/>
-                            <ComboBox Grid.Column="3" Width="76" Height="28" VerticalAlignment="Center"
-                                      ItemsSource="{Binding MtOptions}" SelectedItem="{Binding SelectedMt}"
-                                      ToolTip="robocopy /MT 多线程数。海量小文件或大文件多时调高（64/128）更快；机械硬盘或网络较差建议 8/16。存入任务，续传沿用。"/>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="IP 或电脑名" Style="{StaticResource FieldLabel}"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" Height="30"
+                                     Text="{Binding Host, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="旧电脑的 IP 或主机名，如 192.168.1.50；也可直接粘贴 \\IP\共享名"/>
+                            <Button Grid.Row="0" Grid.Column="4" Grid.RowSpan="2" Content="连接并列出共享"
+                                    Style="{StaticResource PrimaryButton}" MinWidth="150" Margin="12,0,0,0"
+                                    Command="{Binding ConnectCommand}" CommandParameter="{Binding ElementName=PwdBox}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="用户名" Style="{StaticResource FieldLabel}" Margin="0,8,8,0"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" Height="30" Margin="0,8,0,0"
+                                     Text="{Binding Username, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="旧电脑账号，如 域名\账号 或 电脑名\Administrator；留空用当前 Windows 凭据"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2" Text="密码" Style="{StaticResource FieldLabel}" Margin="12,8,8,0"/>
+                            <PasswordBox Grid.Row="1" Grid.Column="3" x:Name="PwdBox" Height="30" Margin="0,8,0,0"
+                                         ToolTip="留空则尝试当前 Windows 凭据（会话缓存约 15 分钟有效）"/>
+                            <CheckBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="5" Margin="0,10,0,0"
+                                      Content="连接时测速（向旧电脑写读 64MB 测试文件，建立正常速度基准）"
+                                      IsChecked="{Binding BenchmarkOnConnect}"
+                                      ToolTip="基准结果写进报告。正式迁移明显慢于基准时，优先怀疑安全软件实时扫描"/>
                         </Grid>
-                        <WrapPanel Margin="0,6,0,0">
-                            <Button Content="预检并生成计划" Style="{StaticResource NormalButton}"
-                                    Command="{Binding PrepareCommand}" CommandParameter="{Binding ElementName=PwdBox}"/>
-                            <Button Content="▶ 开始迁移" Style="{StaticResource PrimaryButton}"
-                                    Command="{Binding StartCommand}" IsEnabled="{Binding CanStart}"/>
-                            <Button Content="⏸ 暂停" Style="{StaticResource NormalButton}"
-                                    Command="{Binding PauseCommand}" IsEnabled="{Binding IsRunning}"
-                                    ToolTip="当前对象传完后停止，可续传"/>
-                            <Button Content="⏹ 立即停止" Style="{StaticResource NormalButton}"
-                                    Command="{Binding StopCommand}" IsEnabled="{Binding IsRunning}"
-                                    ToolTip="终止当前 robocopy，已传部分保留，可续传"/>
-                            <Button Content="↻ 恢复任务" Style="{StaticResource NormalButton}"
-                                    Command="{Binding ResumeCommand}" IsEnabled="{Binding CanResume}"/>
-                            <Button Content="✔ 验证" Style="{StaticResource NormalButton}"
-                                    Command="{Binding VerifyCommand}" IsEnabled="{Binding HasJob}"/>
-                            <Button Content="📄 打开报告" Style="{StaticResource NormalButton}"
-                                    Command="{Binding ReportCommand}" IsEnabled="{Binding HasJob}"/>
-                        </WrapPanel>
+                    </Border>
+
+                    <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="可用共享" Style="{StaticResource CardTitle}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" Style="{StaticResource Hint}" VerticalAlignment="Center"
+                                           Margin="10,0,0,0"
+                                           Text="勾选即选中整盘；展开左侧目录可精确到文件夹/文件。"/>
+                                <TextBox Grid.Column="2" Width="150" Height="28" VerticalAlignment="Center"
+                                         Text="{Binding ManualShareName, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="对方列不出共享时手动输入共享名——资源管理器地址栏 \\IP\ 后面那个名字（如 d、D$、Users）"/>
+                                <Button Grid.Column="3" Content="＋ 添加共享" Style="{StaticResource NormalButton}"
+                                        Margin="8,0,0,0" Height="28" Padding="12,0"
+                                        Command="{Binding AddManualShareCommand}" CommandParameter="{Binding ElementName=PwdBox}"/>
+                            </Grid>
+                            <ListBox Grid.Row="2" ItemsSource="{Binding Shares}" BorderThickness="0" Margin="0,10,0,0"
+                                     Background="#FBFDFF" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     VirtualizingPanel.IsVirtualizing="True">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" Margin="2,3">
+                                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding UncPath}" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#0F172A"/>
+                                            <TextBlock Text="{Binding TypeText}" Margin="10,0,0,0" Style="{StaticResource Caption}" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding Remark}" Margin="10,0,0,0" Style="{StaticResource Caption}"
+                                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="420"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Border>
+
+                    <Button Grid.Row="3" Content="下一步：选择要迁移的内容 →" Style="{StaticResource PrimaryButton}"
+                            HorizontalAlignment="Right" Margin="0,12,0,0" Padding="18,8"
+                            Command="{Binding GoStepCommand}" CommandParameter="1"/>
+                </Grid>
+
+                <!-- ═════ ② 选择数据与目标 ═════ -->
+                <Grid x:Name="PageSelect" Visibility="{Binding IsStepSelect, Converter={StaticResource BoolVis}}" Style="{StaticResource PageFade}">
+        <Grid.Resources>
+            <StaticResource x:Key="GlassCardBg" ResourceKey="GlassCardGreen"/>
+        </Grid.Resources>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Margin="2,0,0,10">
+                        <TextBlock Text="② 选择要迁移的内容" Style="{StaticResource PageTitle}"/>
+                        <TextBlock Style="{StaticResource PageSub}" Text="展开目录精确勾选，或勾选整个共享；右侧设定新电脑上的存放位置与线程数。"/>
                     </StackPanel>
-                </GroupBox>
-            </Grid>
 
-            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="#E0E3E8"/>
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" MinWidth="360"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="392"/>
+                        </Grid.ColumnDefinitions>
 
-            <!-- ───── 右列：对象明细 / 实时文件流 / 实时日志 / 报错 ───── -->
-            <Grid Grid.Column="2">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="27*"/>
-                    <RowDefinition Height="5"/>
-                    <RowDefinition Height="19*"/>
-                    <RowDefinition Height="5"/>
-                    <RowDefinition Height="27*"/>
-                    <RowDefinition Height="5"/>
-                    <RowDefinition Height="27*"/>
-                </Grid.RowDefinitions>
+                        <Border Grid.Column="0" Style="{StaticResource Card}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="内容目录" Style="{StaticResource CardTitle}" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" Text="{Binding Objects.Count, StringFormat=已规划对象 {0} 个}"
+                                               Style="{StaticResource Caption}" VerticalAlignment="Center"/>
+                                </Grid>
+                                <CheckBox Grid.Row="1" Margin="0,8,0,0" Content="超大数据模式（上亿文件 / 几十 TB：改用排除规则，不展开目录）"
+                                          IsChecked="{Binding ExpertMode}"
+                                          ToolTip="目录树替换为「共享勾选 + 排除规则」，避免展开目录卡死"/>
+                                <TreeView Grid.Row="2" ItemsSource="{Binding DirTree}" BorderThickness="0" Margin="0,8,0,0"
+                                          Background="#FBFDFF"
+                                          Visibility="{Binding ExpertMode, Converter={StaticResource InvBoolVis}}"
+                                          VirtualizingStackPanel.IsVirtualizing="True"
+                                          VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                          ToolTip="勾共享=整盘；点 ▶ 展开可精确勾选目录/文件">
+                                    <TreeView.Resources>
+                                        <HierarchicalDataTemplate DataType="{x:Type local:DirNode}" ItemsSource="{Binding Children}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <CheckBox IsChecked="{Binding IsChecked, Mode=OneWay}" IsThreeState="True"
+                                                          VerticalAlignment="Center"
+                                                          PreviewMouseLeftButtonDown="NodeCheck_Toggle" PreviewKeyDown="NodeCheck_KeyToggle"/>
+                                                <TextBlock Text="{Binding Name}" Margin="5,0,0,0"/>
+                                            </StackPanel>
+                                        </HierarchicalDataTemplate>
+                                        <DataTemplate DataType="{x:Type local:FileRow}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <CheckBox IsChecked="{Binding IsChecked, Mode=OneWay}" VerticalAlignment="Center"
+                                                          PreviewMouseLeftButtonDown="NodeCheck_Toggle" PreviewKeyDown="NodeCheck_KeyToggle"/>
+                                                <TextBlock Text="{Binding Name}" Margin="5,0,0,0"/>
+                                                <TextBlock Text="{Binding SizeText}" Margin="8,0,0,0" Style="{StaticResource Caption}"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </TreeView.Resources>
+                                    <TreeView.ItemContainerStyle>
+                                        <Style TargetType="TreeViewItem">
+                                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                                            <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
+                                            <EventSetter Event="TreeViewItem.Expanded" Handler="DirNode_Expanded"/>
+                                        </Style>
+                                    </TreeView.ItemContainerStyle>
+                                </TreeView>
 
-                <GroupBox Grid.Row="0" Header="对象明细" Style="{StaticResource GroupBoxStyle}">
-                    <DataGrid ItemsSource="{Binding Objects}" IsReadOnly="True" AutoGenerateColumns="False"
-                              HeadersVisibility="Column" BorderThickness="0" GridLinesVisibility="Horizontal">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="对象" Binding="{Binding ObjectId}" Width="105"/>
-                            <DataGridTextColumn Header="源" Binding="{Binding SourcePath}" Width="*"/>
-                            <DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="90"/>
-                            <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="130"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </GroupBox>
-                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#E0E3E8"/>
+                                <Grid Grid.Row="2" Margin="0,8,0,0" Visibility="{Binding ExpertMode, Converter={StaticResource BoolVis}}">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto" MaxHeight="160"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="勾选要迁移的共享（整盘）：" Style="{StaticResource FieldLabel}"/>
+                                    <ListBox Grid.Row="1" ItemsSource="{Binding Shares}" BorderThickness="0" Margin="0,4,0,6"
+                                             Background="#FBFDFF" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding UncPath}" Margin="6,0,0,0"/>
+                                                    <TextBlock Text="{Binding TypeText}" Margin="8,0,0,0" Style="{StaticResource Caption}"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <TextBlock Grid.Row="2" Text="排除规则（每行一条）：" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox Grid.Row="3" AcceptsReturn="True" TextWrapping="NoWrap"
+                                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                             FontFamily="Consolas" FontSize="12" VerticalContentAlignment="Top"
+                                             Text="{Binding ExpertExclusions, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <TextBlock Grid.Row="4" Style="{StaticResource Hint}" Margin="0,6,0,0"
+                                               Text="语法：/XD 目录名或路径；/XF 文件名或通配符；裸词按目录处理；# 开头为注释。例：/XD node_modules　/XF *.tmp。规则与扫描、传输、验证同口径生效，并随任务存档。"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
 
-                <GroupBox Grid.Row="2" Header="实时文件流（正在复制的文件）" Style="{StaticResource GroupBoxStyle}">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                        </Grid.RowDefinitions>
-                        <TextBlock Text="{Binding CurrentFileText}" Foreground="#0F766E" FontWeight="SemiBold"
-                                   FontFamily="Consolas" FontSize="11" TextTrimming="CharacterEllipsis"
-                                   Margin="2,0,2,3" ToolTip="{Binding CurrentFileText}"/>
-                        <ListBox x:Name="LiveFilesList" Grid.Row="1" ItemsSource="{Binding LiveFiles}"
-                                 BorderThickness="0" Background="#FAFAFA" FontFamily="Consolas" FontSize="11"
-                                 VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                            <ListBox.ItemContainerStyle>
-                                <Style TargetType="ListBoxItem">
-                                    <Setter Property="Padding" Value="2,0"/>
-                                    <Setter Property="Margin" Value="0"/>
-                                    <Setter Property="MinHeight" Value="0"/>
-                                </Style>
-                            </ListBox.ItemContainerStyle>
-                        </ListBox>
+                        <Grid Grid.Column="2">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="存放位置（新电脑）" Style="{StaticResource CardTitle}"/>
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Height="30" Text="{Binding TargetRoot, UpdateSourceTrigger=PropertyChanged}"
+                                                 ToolTip="新电脑上接收数据的位置，例如 D:\Migrated 或 D:\"/>
+                                        <Button Grid.Column="1" Content="浏览…" Style="{StaticResource NormalButton}"
+                                                Margin="8,0,0,0" Height="30" Padding="12,0"
+                                                Command="{Binding BrowseTargetCommand}"/>
+                                    </Grid>
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="110"/>
+                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="线程数" Style="{StaticResource FieldLabel}"/>
+                                        <ComboBox Grid.Column="1" Height="30" ItemsSource="{Binding MtOptions}" SelectedItem="{Binding SelectedMt}"
+                                                  ToolTip="robocopy /MT 线程数。海量小文件调高更快；机械硬盘或网络较差建议 8/16。存入任务，续传沿用。"/>
+                                        <TextBlock Grid.Column="2" Text="已有任务" Style="{StaticResource FieldLabel}" Margin="12,0,8,0"/>
+                                        <ComboBox Grid.Column="3" Height="30" ItemsSource="{Binding ExistingJobs}"
+                                                  SelectedItem="{Binding SelectedExistingJob}" DisplayMemberPath="DisplayText"
+                                                  ToolTip="可恢复之前未完成的任务"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="执行" Style="{StaticResource CardTitle}"/>
+                                    <Button Content="预检并生成计划" Style="{StaticResource NormalButton}" Margin="0,10,0,0"
+                                            Padding="14,8" HorizontalAlignment="Stretch"
+                                            Command="{Binding PrepareCommand}" CommandParameter="{Binding ElementName=PwdBox}"
+                                            ToolTip="检查源可达性、磁盘空间、排除策略，生成迁移计划（不复制数据）"/>
+                                    <Button Content="▶ 开始迁移" Style="{StaticResource PrimaryButton}" Margin="0,8,0,0"
+                                            Padding="14,9" HorizontalAlignment="Stretch"
+                                            Command="{Binding StartCommand}" IsEnabled="{Binding CanStart}"/>
+                                    <WrapPanel Margin="0,10,0,0">
+                                        <Button Content="⏸ 暂停" Style="{StaticResource NormalButton}" Margin="0,0,8,8"
+                                                Padding="12,6" Command="{Binding PauseCommand}" IsEnabled="{Binding IsRunning}"
+                                                ToolTip="当前对象传完后停止，可续传"/>
+                                        <Button Content="⏹ 立即停止" Style="{StaticResource NormalButton}" Margin="0,0,8,8"
+                                                Padding="12,6" Command="{Binding StopCommand}" IsEnabled="{Binding IsRunning}"
+                                                ToolTip="终止当前 robocopy，已传部分保留，可续传"/>
+                                        <Button Content="↻ 恢复任务" Style="{StaticResource NormalButton}" Margin="0,0,8,8"
+                                                Padding="12,6" Command="{Binding ResumeCommand}" IsEnabled="{Binding CanResume}"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0" VerticalAlignment="Top">
+                                <StackPanel>
+                                    <TextBlock Text="连接与安全提示" Style="{StaticResource CardTitle}"/>
+                                    <TextBlock Style="{StaticResource Hint}" Margin="0,8,0,0"
+                                               Text="· 凭据仅用于本次会话，不写入任务文件。&#x0a;· 旧电脑空闲时 SMB 会话会自动断开，恢复任务前请确认源共享仍然可访问。&#x0a;· 整盘迁移完成后，目标根目录若被源盘根属性标成隐藏，工具会自动解除，并可用「打开目标文件夹」直接查看。"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
                     </Grid>
-                </GroupBox>
-                <GridSplitter Grid.Row="3" Height="5" HorizontalAlignment="Stretch" Background="#E0E3E8"/>
+                </Grid>
 
-                <GroupBox Grid.Row="4" Header="实时日志（完整日志见 %ProgramData%\PCMig\Logs 与 Job 目录）"
-                          Style="{StaticResource GroupBoxStyle}">
-                    <TextBox Text="{Binding LogText, Mode=OneWay}" IsReadOnly="True" TextWrapping="NoWrap"
-                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                             FontFamily="Consolas" FontSize="11" BorderThickness="0" Background="#FAFAFA"/>
-                </GroupBox>
-                <GridSplitter Grid.Row="5" Height="5" HorizontalAlignment="Stretch" Background="#E0E3E8"/>
+                <!-- ══════ ③ 迁移进度 ══════ -->
+                <Grid x:Name="PageTransfer" Visibility="{Binding IsStepTransfer, Converter={StaticResource BoolVis}}" Style="{StaticResource PageFade}">
+        <Grid.Resources>
+            <StaticResource x:Key="GlassCardBg" ResourceKey="GlassCardPink"/>
+        </Grid.Resources>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Margin="2,0,0,10">
+                        <TextBlock Text="③ 迁移进度" Style="{StaticResource PageTitle}"/>
+                        <TextBlock Style="{StaticResource PageSub}" Text="实时进度、速度、剩余时间与文件流；失败位置与原因也在这里，处理完点「恢复任务」补齐。"/>
+                    </StackPanel>
 
-                <GroupBox Grid.Row="6" Header="⚠ 报错（失败的位置与原因，处理完点「恢复任务」即可补齐）"
-                          Style="{StaticResource GroupBoxStyle}" Foreground="#B91C1C">
-                    <DataGrid ItemsSource="{Binding FailItems}" IsReadOnly="True" AutoGenerateColumns="False"
-                              HeadersVisibility="Column" BorderThickness="0" GridLinesVisibility="Horizontal"
-                              Foreground="#374151">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="时间" Binding="{Binding Time}" Width="70"/>
-                            <DataGridTextColumn Header="位置（盘符\文件夹\文件）" Binding="{Binding Location}" Width="*"/>
-                            <DataGridTextColumn Header="原因" Binding="{Binding Reason}" Width="160"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </GroupBox>
+                    <Border Grid.Row="1" Style="{StaticResource Card}" Padding="18,16">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,20,0" MinWidth="118" Visibility="{Binding MigrationProgressVisibility}">
+                                <TextBlock Text="{Binding Percent, StringFormat={}{0:F1}%}" FontSize="42" FontWeight="Bold"
+                                           Foreground="#2563EB" HorizontalAlignment="Center"/>
+                                <TextBlock Text="总体进度" Style="{StaticResource Caption}" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <ProgressBar Style="{StaticResource BigProgress}" Value="{Binding Percent}" Visibility="{Binding MigrationProgressVisibility}"/>
+                                <!-- 「尝试修复」独立进度：只在修复期间出现，避免与迁移进度混淆 -->
+                                <Border Visibility="{Binding RepairVisibility}" Margin="0,10,0,0"
+                                        Background="#F5F8FF" BorderBrush="#D8E3F8" BorderThickness="1" CornerRadius="8" Padding="12,9">
+                                    <StackPanel>
+                                        <Grid>
+                                            <TextBlock Text="正在修复（从源共享重拷差异文件）" FontSize="12.5" FontWeight="SemiBold" Foreground="#1D4ED8"/>
+                                            <TextBlock HorizontalAlignment="Right" Text="{Binding RepairObjectText}" FontSize="12" Foreground="#64748B"/>
+                                        </Grid>
+                                        <ProgressBar Style="{StaticResource SlimProgress}" Value="{Binding RepairPercent}" Margin="0,7,0,0"/>
+                                        <TextBlock Text="{Binding RepairText}" FontSize="11.5" Foreground="#64748B" Margin="0,5,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding CurrentFileText}" FontFamily="Consolas" FontSize="11"
+                                               Foreground="#0F766E" TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding CurrentFileText}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding TargetSummary}" FontWeight="SemiBold" Foreground="#64748B"
+                                               MaxWidth="340" TextTrimming="CharacterEllipsis" ToolTip="{Binding TargetSummary}"/>
+                                </Grid>
+                                <!-- v0.3.8（缺陷 3）：当前对象 + 停滞提示。生产事故里"界面长时间不动"是用户判断卡死并手动终止的直接原因，
+                                     这一行明确写出"当前在传哪个对象、这个对象已传多少"，并在停滞/大文件场景解释"为什么数字不动"。 -->
+                                <TextBlock Text="{Binding CurrentObjectDetail}" Margin="0,7,0,0" FontSize="11.5"
+                                           Foreground="#334155" TextTrimming="CharacterEllipsis"
+                                           ToolTip="{Binding CurrentObjectDetail}"
+                                           Visibility="{Binding HasCurrentObjectDetail, Converter={StaticResource BoolVis}}"/>
+                                <Border Visibility="{Binding HasStallHint, Converter={StaticResource BoolVis}}"
+                                        Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="1"
+                                        CornerRadius="6" Padding="9,6" Margin="0,7,0,0">
+                                    <TextBlock Text="{Binding StallHintText}" FontSize="11.5" Foreground="#92400E"
+                                               TextWrapping="Wrap"/>
+                                </Border>
+                                <TextBlock Text="{Binding BalanceText}" Margin="0,8,0,0" FontSize="12.5" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" ToolTip="{Binding BalanceText}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="#0F766E"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasShortfall}" Value="True">
+                                                    <Setter Property="Foreground" Value="#B45309"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <UniformGrid Grid.Row="2" Rows="1" Columns="4" Margin="0,10,0,0">
+                        <Border Style="{StaticResource Card}" Margin="0,0,5,0">
+                            <StackPanel>
+                                <TextBlock Text="传输速度（网卡实时）" Style="{StaticResource Caption}"/>
+                                <TextBlock Text="{Binding NicSpeedText}" FontSize="19" FontWeight="Bold" Foreground="#0F172A" Margin="0,3,0,0"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
+                                    <TextBlock Text="任务实测（本次平均）" FontSize="12" Foreground="#64748B"/>
+                                    <TextBlock Text="{Binding EngineSpeedText}" FontSize="12" Foreground="#64748B" Margin="4,0,0,0"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Margin="5,0,5,0">
+                            <StackPanel>
+                                <TextBlock Text="预计剩余（按任务实测）" Style="{StaticResource Caption}"/>
+                                <TextBlock Text="{Binding EtaText}" FontSize="19" FontWeight="Bold" Foreground="#0F172A" Margin="0,3,0,0"
+                                           ToolTip="按本次任务自己的实测速率（已落盘字节 ÷ 用时）估算剩余时间，与网卡实时吞吐无关"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Margin="5,0,5,0">
+                            <StackPanel>
+                                <TextBlock Text="对象进度" Style="{StaticResource Caption}"/>
+                                <TextBlock Text="{Binding ObjectText}" FontSize="19" FontWeight="Bold" Foreground="#0F172A" Margin="0,3,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Margin="5,0,0,0">
+                            <StackPanel>
+                                <TextBlock Text="{Binding DataLabel}" Style="{StaticResource Caption}"/>
+                                <TextBlock Text="{Binding ActualBytesText}" FontSize="17" FontWeight="Bold" Foreground="#0F172A"
+                                           Margin="0,3,0,0" TextWrapping="Wrap"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
+                                    <TextBlock Text="计划" FontSize="12" Foreground="#64748B"/>
+                                    <TextBlock Text="{Binding PlanBytesText}" FontSize="12" Foreground="#64748B" Margin="4,0,0,0"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </UniformGrid>
+
+                    <Grid Grid.Row="3" Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="3*" MinWidth="330"/>
+                            <ColumnDefinition Width="10"/>
+                            <ColumnDefinition Width="2*" MinWidth="250"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Style="{StaticResource Card}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="对象明细" Style="{StaticResource CardTitle}"/>
+                                <DataGrid Grid.Row="1" Margin="0,8,0,0" ItemsSource="{Binding Objects}" IsReadOnly="True"
+                                          AutoGenerateColumns="False" HeadersVisibility="Column" BorderThickness="0"
+                                          GridLinesVisibility="Horizontal" Background="Transparent"
+                                          RowBackground="Transparent" AlternatingRowBackground="#FBFDFF">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="对象" Binding="{Binding ObjectId}" Width="100"/>
+                                        <DataGridTextColumn Header="源" Binding="{Binding SourcePath}" Width="*"/>
+                                        <DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="90"/>
+                                        <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="140"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </Border>
+                        <Border Grid.Column="2" Style="{StaticResource Card}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="正在复制的文件" Style="{StaticResource CardTitle}"/>
+                                <ListBox x:Name="LiveFilesList" Grid.Row="1" Margin="0,8,0,0" ItemsSource="{Binding LiveFiles}"
+                                         BorderThickness="0" Background="#FBFDFF" FontFamily="Consolas" FontSize="11"
+                                         VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="Padding" Value="2,0"/>
+                                            <Setter Property="Margin" Value="0"/>
+                                            <Setter Property="MinHeight" Value="0"/>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                </ListBox>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+
+                <!-- ═════ ④ 结果与校验 ══════ -->
+                <Grid x:Name="PageResult" Visibility="{Binding IsStepResult, Converter={StaticResource BoolVis}}" Style="{StaticResource PageFade}">
+        <Grid.Resources>
+            <StaticResource x:Key="GlassCardBg" ResourceKey="GlassCardPurple"/>
+        </Grid.Resources>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="10"/>
+                        <RowDefinition Height="230"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Margin="2,0,0,10">
+                        <TextBlock Text="④ 结果与校验" Style="{StaticResource PageTitle}"/>
+                        <TextBlock Style="{StaticResource PageSub}" Text="迁移完成后做完整性校验并出报告；失败的位置与原因都在这里。"/>
+                    </StackPanel>
+
+                    <Border Grid.Row="1" Style="{StaticResource Card}">
+                        <WrapPanel>
+                            <Button Content="✔ 验证完整性" Style="{StaticResource PrimaryButton}" Margin="0,0,10,0"
+                                    Command="{Binding VerifyCommand}" IsEnabled="{Binding HasJob}"
+                                    ToolTip="源与目标逐对象比对文件数/字节数（L1），可按需做抽样哈希（L2）"/>
+                            <Button Content="⚠ 尝试修复" Style="{StaticResource NormalButton}" Margin="0,0,8,0"
+                                    Command="{Binding RepairCommand}" IsEnabled="{Binding CanRepair}"
+                                    ToolTip="按验证结果把不一致/失败的对象从共享重新拉取、覆盖本地，随后自动重新校验并报出修复前后对比；不重传整个任务"/>
+                            <CheckBox Content="强制覆盖" Margin="0,0,12,0" VerticalAlignment="Center" FontSize="12"
+                                      IsChecked="{Binding RepairForceOverwrite}"
+                                      ToolTip="勾选（默认）：先把目标侧同名文件删掉，再从共享重新拉取覆盖——内容坏掉但大小/时间没变的文件只有这样才能修回来（robocopy 的 /IS /IT 实测无效）。不勾选：只补缺失/大小不同的文件（更快，但内容坏了而大小没变的会被跳过）"/>
+                            <Button Content="打开报告" Style="{StaticResource NormalButton}" Margin="0,0,10,0"
+                                    Command="{Binding ReportCommand}" IsEnabled="{Binding HasJob}"/>
+                            <Button Content="打开目标文件夹" Style="{StaticResource NormalButton}" Margin="0,0,10,0"
+                                    Command="{Binding OpenTargetCommand}" IsEnabled="{Binding HasJob}"
+                                    ToolTip="在资源管理器里打开迁移目标；若目标根被源盘根属性带成隐藏会自动解除"/>
+                            <Button Content="↻ 恢复任务" Style="{StaticResource NormalButton}" Margin="0,0,10,0"
+                                    Command="{Binding ResumeCommand}" IsEnabled="{Binding CanResume}"/>
+                        </WrapPanel>
+                    </Border>
+
+                    <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="⚠ 报错清单" Style="{StaticResource CardTitle}" Foreground="#B91C1C"/>
+                                <TextBlock Style="{StaticResource Caption}" Margin="10,0,0,0" VerticalAlignment="Center"
+                                           Text="失败的位置与原因；处理完（例如关掉旧电脑上占用文件的程序）点「恢复任务」即可补齐"/>
+                            </StackPanel>
+                            <DataGrid Grid.Row="1" Margin="0,8,0,0" ItemsSource="{Binding FailItems}" IsReadOnly="True"
+                                      AutoGenerateColumns="False" HeadersVisibility="Column" BorderThickness="0"
+                                      GridLinesVisibility="Horizontal" Background="Transparent"
+                                      RowBackground="Transparent" AlternatingRowBackground="#FFF7F7">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="时间" Binding="{Binding Time}" Width="80"/>
+                                    <DataGridTextColumn Header="位置（盘符\文件夹\文件）" Binding="{Binding Location}" Width="*"/>
+                                    <DataGridTextColumn Header="原因" Binding="{Binding Reason}" Width="320"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="4" Style="{StaticResource Card}" Background="#0F172A" BorderBrush="#1E293B">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="实时日志（完整日志见 %ProgramData%\PCMig\Logs 与任务目录）"
+                                       Foreground="#64748B" FontSize="11"/>
+                            <TextBox Grid.Row="1" Margin="0,8,0,0" Text="{Binding LogText, Mode=OneWay}" IsReadOnly="True"
+                                     TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                     FontFamily="Consolas" FontSize="11" BorderThickness="0"
+                                     Background="#0F172A" Foreground="#CBD5E1" CaretBrush="#CBD5E1"/>
+                        </Grid>
+                    </Border>
+                </Grid>
             </Grid>
         </Grid>
 
-        <!-- ═══════════ 底部通栏进度条 ═══════════ -->
-        <Border Grid.Row="1" Background="White" BorderBrush="#E0E3E8" BorderThickness="0,1,0,0"
-                Margin="2,4,2,2" Padding="12,8">
-            <StackPanel>
-                <!-- 进度条 + 运行时光波（一道光带把进度往前推的动效，仅运行时可见） -->
-                <Grid x:Name="WaveHost" Height="20" ClipToBounds="True">
-                    <ProgressBar Height="20" Minimum="0" Maximum="100" Value="{Binding Percent}"/>
-                    <Rectangle x:Name="WaveRect" Width="110" HorizontalAlignment="Left" RadiusX="3" RadiusY="3"
-                               IsHitTestVisible="False"
-                               Visibility="{Binding IsRunning, Converter={StaticResource BoolVis}}">
-                        <Rectangle.Fill>
-                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                <GradientStop Color="#00FFFFFF" Offset="0"/>
-                                <GradientStop Color="#CCFFFFFF" Offset="0.5"/>
-                                <GradientStop Color="#00FFFFFF" Offset="1"/>
-                            </LinearGradientBrush>
-                        </Rectangle.Fill>
-                        <Rectangle.RenderTransform>
-                            <TranslateTransform x:Name="WaveSlide" X="-120"/>
-                        </Rectangle.RenderTransform>
-                    </Rectangle>
-                </Grid>
-                <Grid Margin="0,5,0,0">
+        <!-- ═══════════ 底部状态栏（常驻） ═══════════ -->
+        <Border Grid.Row="2" Background="{StaticResource GlassPanelBg}" BorderBrush="{StaticResource GlassBorderBrush}" BorderThickness="0,1,0,0" Padding="18,10">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <ProgressBar Grid.Row="0" Style="{StaticResource SlimProgress}" Value="{Binding Percent}"/>
+                <Grid Grid.Row="1" Margin="0,8,0,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="58"/>
+                        <ColumnDefinition Width="188"/>
+                        <ColumnDefinition Width="248"/>
+                        <ColumnDefinition Width="152"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding ProgressText}" FontWeight="SemiBold"/>
-                    <TextBlock Grid.Column="1" Text="{Binding SpeedText}" HorizontalAlignment="Center"/>
-                    <TextBlock Grid.Column="2" Text="{Binding EtaText}" HorizontalAlignment="Center"/>
-                    <TextBlock Grid.Column="3" Text="{Binding ObjectText}" HorizontalAlignment="Right"/>
+                    <!-- 百分比与数据量同一字号、同一颜色、固定列宽：数值跳动时不会左右漂移；
+                         迁移页大号百分比已经显示同一个数字，这里隐藏（Hidden 保留占位，切页不跳动） -->
+                    <TextBlock Text="{Binding Percent, StringFormat={}{0:F1}%}" FontSize="14" VerticalAlignment="Center"
+                               Foreground="{StaticResource GlassAccentBrush}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="FontWeight" Value="Bold"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsStepTransfer}" Value="True">
+                                        <Setter Property="Visibility" Value="Hidden"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <TextBlock Grid.Column="1" Text="{Binding ProgressText}" FontSize="13" Foreground="#0F172A" VerticalAlignment="Center"/>
+                    <!-- 网速 = 真实网卡吞吐（任务管理器同源）+ 60 秒时间轴波形；占用与原文字一致，不额外加高 -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"
+                                ToolTip="{Binding NicSparkTip}">
+                        <TextBlock Text="⇅" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBlock Text="{Binding NicSpeedText}" FontSize="13" Foreground="#64748B" VerticalAlignment="Center"
+                                   MinWidth="76"/>
+                        <Polyline Points="{Binding NicSparkPoints}" Width="116" Height="20" Margin="8,0,0,0"
+                                  Stroke="#2563EB" StrokeThickness="1.4" StrokeLineJoin="Round"
+                                  VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="3" Text="{Binding EtaText}" FontSize="13" Foreground="#64748B" VerticalAlignment="Center"
+                               ToolTip="预计剩余时间：按本次任务自己的实测速率（已落盘字节 ÷ 用时）估算，与上面的网卡实时吞吐无关"/>
+                    <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,14,0">
+                        <TextBlock Text="网络" FontSize="{StaticResource FontStatus}" Foreground="{StaticResource GlassSubTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <Ellipse Width="8" Height="8" Fill="{StaticResource GlassSuccess}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <WrapPanel Grid.Column="5">
+                        <Button Content="▶ 开始迁移" Style="{StaticResource PrimaryButton}" Padding="12,5" Margin="0,0,8,0"
+                                Command="{Binding StartCommand}" IsEnabled="{Binding CanStart}"/>
+                        <Button Content=" 暂停" Style="{StaticResource NormalButton}" Padding="10,5" Margin="0,0,8,0"
+                                Command="{Binding PauseCommand}" IsEnabled="{Binding IsRunning}"/>
+                        <Button Content=" 停止" Style="{StaticResource NormalButton}" Padding="10,5" Margin="0,0,8,0"
+                                Command="{Binding StopCommand}" IsEnabled="{Binding IsRunning}"/>
+                        <Button Content="↻ 恢复" Style="{StaticResource NormalButton}" Padding="10,5"
+                                Command="{Binding ResumeCommand}" IsEnabled="{Binding CanResume}"/>
+                    </WrapPanel>
                 </Grid>
-                <TextBlock Text="{Binding StatusMessage}" Foreground="#2563EB" Margin="0,3,0,0"
-                           TextTrimming="CharacterEllipsis"/>
-            </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </Window>

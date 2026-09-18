@@ -1,0 +1,56 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:s="clr-namespace:System;assembly=mscorlib">
+    <!-- PCMig 玻璃主题 Design Token（v0.4.1 重整）：全 UI 视觉参数唯一来源；经典回退见 Classic.xaml（同键不同值） -->
+    <!-- ══ 颜色 ══ -->
+    <LinearGradientBrush x:Key="GlassWindowBg" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#F4F7FB" Offset="0"/><GradientStop Color="#FDF6F4" Offset="0.55"/><GradientStop Color="#F6F4FB" Offset="1"/>
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="GlassWashBg" Color="#14FFFFFF"/>
+    <SolidColorBrush x:Key="GlassRailBg" Color="#8CFFFFFF"/>
+    <SolidColorBrush x:Key="GlassPanelBg" Color="#80FFFFFF"/>
+    <SolidColorBrush x:Key="GlassCardBg" Color="#A6FFFFFF"/>
+    <SolidColorBrush x:Key="GlassSecondaryBg" Color="#66FFFFFF"/>
+    <SolidColorBrush x:Key="GlassBorderBrush" Color="#33FFFFFF"/>
+    <SolidColorBrush x:Key="GlassAccentBrush" Color="#0A84FF"/>
+    <SolidColorBrush x:Key="GlassAccentSoft" Color="#330A84FF"/>
+    <SolidColorBrush x:Key="GlassTitleBrush" Color="#0F172A"/>
+    <SolidColorBrush x:Key="GlassSubTextBrush" Color="#64748B"/>
+    <SolidColorBrush x:Key="GlassTextDisabled" Color="#9AA7B8"/>
+    <SolidColorBrush x:Key="GlassSuccess" Color="#34C759"/>
+    <SolidColorBrush x:Key="GlassWarning" Color="#FF9F0A"/>
+    <SolidColorBrush x:Key="GlassError" Color="#FF3B30"/>
+    <!-- 页面色相：极淡 tint，只给卡片底色 -->
+    <LinearGradientBrush x:Key="GlassCardBlue" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#DCEBFF" Offset="0"/><GradientStop Color="#EFF6FF" Offset="1"/></LinearGradientBrush>
+    <LinearGradientBrush x:Key="GlassCardGreen" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#DCF5E7" Offset="0"/><GradientStop Color="#EFFBF4" Offset="1"/></LinearGradientBrush>
+    <LinearGradientBrush x:Key="GlassCardPink" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFE4E8" Offset="0"/><GradientStop Color="#FFF3F4" Offset="1"/></LinearGradientBrush>
+    <LinearGradientBrush x:Key="GlassCardPurple" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#E9E2FB" Offset="0"/><GradientStop Color="#F5F2FD" Offset="1"/></LinearGradientBrush>
+
+    <!-- ══ 圆角 ══ -->
+    <CornerRadius x:Key="RadiusWindow">16</CornerRadius>
+    <CornerRadius x:Key="RadiusPanel">16</CornerRadius>
+    <CornerRadius x:Key="RadiusCard">14</CornerRadius>
+    <CornerRadius x:Key="RadiusControl">10</CornerRadius>
+    <CornerRadius x:Key="RadiusCapsule">999</CornerRadius>
+    <CornerRadius x:Key="RadiusProgress">7</CornerRadius>
+
+    <!-- ══ 阴影 ══ -->
+    <DropShadowEffect x:Key="GlassPanelShadow" BlurRadius="18" ShadowDepth="2" Direction="270" Opacity="0.10" Color="#0F172A"/>
+    <DropShadowEffect x:Key="GlassCardShadow" BlurRadius="14" ShadowDepth="1" Direction="270" Opacity="0.08" Color="#0F172A"/>
+    <DropShadowEffect x:Key="GlassHoverShadow" BlurRadius="22" ShadowDepth="4" Direction="270" Opacity="0.16" Color="#0F172A"/>
+
+    <!-- ══ 字体层级 ══ -->
+    <s:Double x:Key="FontPageTitle">26</s:Double>
+    <s:Double x:Key="FontSectionTitle">19</s:Double>
+    <s:Double x:Key="FontCardTitle">16</s:Double>
+    <s:Double x:Key="FontBody">13</s:Double>
+    <s:Double x:Key="FontCaption">11.5</s:Double>
+    <s:Double x:Key="FontStatus">10.5</s:Double>
+    <s:Double x:Key="FontNumber">42</s:Double>
+
+    <!-- ══ 间距 ══ -->
+    <Thickness x:Key="PageMargin">24,20,24,16</Thickness>
+    <Thickness x:Key="CardPadding">16,14</Thickness>
+    <Thickness x:Key="SectionSpacing">0,18,0,0</Thickness>
+    <Thickness x:Key="ControlSpacing">0,10,0,0</Thickness>
+</ResourceDictionary>
