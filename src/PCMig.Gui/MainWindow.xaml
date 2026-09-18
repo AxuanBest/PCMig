@@ -749,7 +749,7 @@
         
 
         <!-- ══════════ 顶栏：标题 + 源→目标 ═══════════ -->
-        <Border Grid.Row="0" Margin="14,14,14,0" Background="Transparent" BorderBrush="{DynamicResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,12">
+        <Border Grid.Row="0" Margin="14,14,14,0" Background="{DynamicResource SurfacePearl}" BorderBrush="{DynamicResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,12">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -811,7 +811,7 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Margin="14,12,0,0" Background="Transparent" BorderBrush="{DynamicResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}">
+            <Border Grid.Column="0" Margin="14,12,0,0" Background="{DynamicResource SurfacePearl}" BorderBrush="{DynamicResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}">
               <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
@@ -1534,7 +1534,7 @@
         </Grid>
 
         <!-- ═══════════ 底部状态栏（常驻） ═══════════ -->
-        <Border Grid.Row="2" Margin="14,12,14,14" Background="Transparent" BorderBrush="{DynamicResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,10">
+        <Border Grid.Row="2" Margin="14,12,14,14" Background="{DynamicResource SurfacePearl}" BorderBrush="{DynamicResource EdgeHighlight}" BorderThickness="1" CornerRadius="{StaticResource RadiusPanel}" Effect="{StaticResource Elevation2}" Padding="18,10">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>

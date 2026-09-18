@@ -248,6 +248,13 @@
         <GradientStop Color="#FF261E19" Offset="1"/>
     </LinearGradientBrush>
 
+    <!-- ══ Layer 1：SurfacePearl（深色版）══ -->
+    <LinearGradientBrush x:Key="SurfacePearl" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FF262C36" Offset="0"/>
+        <GradientStop Color="#FF232932" Offset="0.55"/>
+        <GradientStop Color="#FF1F242C" Offset="1"/>
+    </LinearGradientBrush>
+
     <s:Double x:Key="FontPageTitle">21</s:Double>
     <s:Double x:Key="FontSectionTitle">16</s:Double>
     <s:Double x:Key="FontCardTitle">13.5</s:Double>

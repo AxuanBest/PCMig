@@ -211,6 +211,9 @@
         <GradientStop Color="#FFE5EAF1" Offset="1"/>
     </LinearGradientBrush>
 
+    <!-- ══ Layer 1：SurfacePearl（经典主题，硬边无渐变）══ -->
+    <SolidColorBrush x:Key="SurfacePearl" Color="#FFF7F8FA"/>
+
     <s:Double x:Key="FontPageTitle">21</s:Double>
     <s:Double x:Key="FontSectionTitle">16</s:Double>
     <s:Double x:Key="FontCardTitle">13.5</s:Double>

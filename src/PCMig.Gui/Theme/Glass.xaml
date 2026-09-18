@@ -297,6 +297,17 @@
         <GradientStop Color="#FFFBEFE4" Offset="1"/>
     </LinearGradientBrush>
 
+    <!-- ══ Layer 1：SurfacePearl —— 悬浮实体模块的中性不透明表面 ══
+         用于顶栏 / 侧栏 / 底栏这类"悬浮在彩色 Root Background 上的实体模块"。
+         它不是纯白（纯白会让边缘失去参照），也不是灰色（会变脏），更不是透明（会变成空框）。
+         内部只有极微弱的中性渐变：左上略亮 → 右下略暗，与全局 45° 光源同向。
+         与 Root Background（L≈236~246）保持约 8~12 级亮度差，使模块一眼可辨。 -->
+    <LinearGradientBrush x:Key="SurfacePearl" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FFFDFDFE" Offset="0"/>
+        <GradientStop Color="#FFFAFAFC" Offset="0.55"/>
+        <GradientStop Color="#FFF6F6F9" Offset="1"/>
+    </LinearGradientBrush>
+
     <s:Double x:Key="FontPageTitle">21</s:Double>
     <s:Double x:Key="FontSectionTitle">16</s:Double>
     <s:Double x:Key="FontCardTitle">13.5</s:Double>
