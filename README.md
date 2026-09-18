@@ -1,8 +1,8 @@
-# PCMig — 企业内网 Windows 数据/用户环境迁移系统
+﻿# PCMig — 企业内网 Windows 数据/用户环境迁移系统
 
 > **直拉模式（Direct Pull）**：在新电脑上运行 PCMig，输入旧电脑 IP 或电脑名，通过 SMB 网络把旧电脑共享盘的数据完整拉到新电脑。
 
-**当前版本：v0.2.5** ｜ 设计 & 开发：郑子轩（[Axuanbest](https://github.com/Axuanbest)）
+**当前版本：v0.4.1** ｜ 设计 & 开发：郑子轩（[Axuanbest](https://github.com/Axuanbest)）
 
 ## 架构
 
@@ -107,4 +107,17 @@ list       列出所有任务
 
 ---
 
-© 2026 郑子轩 (Axuanbest). All rights reserved.
+郑子轩 (Axuanbest) 个人制作。
+
+## 发布流程
+
+**先写日志，再打包；没写日志就打不出包。**
+
+1. 先写三处：docs/更新日志.md（本版条目 + 版本对照表一行）、docs/使用说明.txt（本版段落）；
+2. 运行：
+
+       powershell -NoProfile -ExecutionPolicy Bypass -File "tools/release.ps1" -Version 0.2.26
+
+   脚本会校验上面三处，缺一项直接中止；然后自动写版本号、生成 docs/更新日志.txt、
+   打包安装包、交付并逐文件校验哈希。
+3. 详见 docs/发布流程.md（含发版后必做的验证清单与已踩过的坑）。
