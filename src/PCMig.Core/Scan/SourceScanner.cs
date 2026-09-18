@@ -15,6 +15,22 @@ public sealed class SourceScanner
     private readonly ILogger _log;
     public SourceScanner(ILogger log) { _log = log.ForContext<SourceScanner>(); }
 
+    /// <summary>
+    /// 扫描残缺告警（v0.3.8）：旧版只在对象日志里拼一句"[部分不可访问×N]"，没有任何地方拦人，
+    /// 于是"少扫了几百 GB"会一路走到"迁移完成"。这里把"多少处、哪些路径、为什么"写成显式告警。
+    /// </summary>
+    private static void AddIncompleteScanWarning(ObservedState observed)
+    {
+        if (observed.InaccessiblePaths.Count == 0) return;
+        var sample = observed.InaccessiblePaths.Take(5).Select(s => "　　· " + s);
+        observed.Warnings.Add(
+            $"⚠ 扫描存在不可访问的目录/文件（{observed.InaccessiblePaths.Count} 处）：" +
+            "这些位置里的数据既不在计划内、也不会被复制。默认不允许在此状态下开始迁移——" +
+            "请先修好权限/网络后重新扫描；确知风险仍要继续，必须显式确认（CLI: --allow-incomplete-scan；界面会弹窗）。" +
+            "前几处：\n" + string.Join("\n", sample) +
+            (observed.InaccessiblePaths.Count > 5 ? $"\n　　… 其余 {observed.InaccessiblePaths.Count - 5} 处见 observed-state.json" : ""));
+    }
+
     public async Task<ObservedState> ScanAsync(JobDefinition job, Matrix.MigrationMatrix matrix,
         IProgress<string>? progress = null, CancellationToken ct = default)
     {
@@ -23,6 +39,8 @@ public sealed class SourceScanner
         var exclDirs = new HashSet<string>(matrix.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
         var exclFiles = new HashSet<string>(
             matrix.ExcludedFileNames.Concat(matrix.SecurityBlockedFileNames), StringComparer.OrdinalIgnoreCase);
+        var exclFileMatch = FilePatternMatcher.Build(exclFiles);
+        var skipPlaceholders = string.Equals(matrix.CloudPlaceholderPolicy, "Skip", StringComparison.OrdinalIgnoreCase);
         var observed = new ObservedState { JobId = job.JobId };
         var seq = 0;
 
@@ -41,14 +59,20 @@ public sealed class SourceScanner
                     {
                         var id = $"object-{Interlocked.Increment(ref seq):000000}";
                         progress?.Report($"扫描 {path} …");
-                        var stat = await Task.Run(() => DirStat.Measure(path, threshold, exclDirs, exclFiles), ct);
+                        // 不可访问的位置必须带"哪条路径 + 为什么"记下来：扫描残缺会静默漏数据（v0.3.8 闸门）
+                        var inacc = new System.Collections.Concurrent.ConcurrentBag<string>();
+                        var stat = await Task.Run(() => DirStat.Measure(path, threshold, exclDirs, exclFiles,
+                            (p, why) => inacc.Add($"{id}｜{p}｜{why}"), skipPlaceholders), ct);
+                        foreach (var s in inacc) observed.InaccessiblePaths.Add(s);
                         observed.Objects.Add(new ScannedObject
                         {
                             ObjectId = id, Kind = ObjectKind.DataVolume, SourcePath = path,
                             Bytes = stat.Bytes, Files = stat.Files, Dirs = stat.Dirs,
                             HasLargeFiles = stat.HasLargeFiles,
                             HasCloudPlaceholders = stat.HasCloudPlaceholders,
-                            ScanIncomplete = stat.Incomplete
+                            ScanIncomplete = stat.Incomplete,
+                            LockRiskFiles = stat.LockRiskFiles,
+                            EncryptedFiles = stat.EncryptedFiles
                         });
                         _log.Information("对象 {Id}: {Path} = {Bytes} / {Files} 文件（显式选择目录）",
                             id, path, Format.Bytes(stat.Bytes), stat.Files);
@@ -57,7 +81,7 @@ public sealed class SourceScanner
                     {
                         var parent = Path.GetDirectoryName(path)!;
                         var name = Path.GetFileName(path);
-                        if (exclFiles.Contains(name)) { _log.Information("策略排除，跳过文件: {Path}", path); continue; }
+                        if (exclFileMatch(name)) { _log.Information("策略排除，跳过文件: {Path}", path); continue; }
                         var len = new FileInfo(path).Length;
                         if (!fileGroups.TryGetValue(parent, out var list)) fileGroups[parent] = list = new();
                         list.Add((name, len));
@@ -92,8 +116,19 @@ public sealed class SourceScanner
 
             observed.TotalBytes = observed.Objects.Where(o => o.Bytes > 0).Sum(o => o.Bytes);
             observed.TotalFiles = observed.Objects.Where(o => o.Files > 0).Sum(o => o.Files);
-            _log.Information("扫描完成(Custom): {Objects} 个对象, 共 {Bytes} / {Files} 文件",
-                observed.Objects.Count, Format.Bytes(observed.TotalBytes), observed.TotalFiles);
+            observed.LockRiskFiles = observed.Objects.Sum(o => o.LockRiskFiles);
+            observed.EncryptedFiles = observed.Objects.Sum(o => o.EncryptedFiles);
+            if (observed.LockRiskFiles > 0)
+                observed.Warnings.Add($"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件(.pst/.ost)：若旧电脑 Outlook 正在运行，它们会被锁定导致复制失败。建议迁移前让旧电脑用户关闭 Outlook。");
+            if (observed.EncryptedFiles > 0)
+                observed.Warnings.Add($"检测到 {observed.EncryptedFiles} 个 EFS 加密文件：内容可以正常复制，但在新机上将失去加密保护（明文可读）。如合规要求加密，请在新机上重新加密。");
+            AddIncompleteScanWarning(observed);
+            _log.Information("扫描完成(Custom): {Objects} 个对象, 共 {Bytes} / {Files} 文件（锁风险 {Lock} / EFS {Enc} / 不可访问 {Inacc}）",
+                observed.Objects.Count, Format.Bytes(observed.TotalBytes), observed.TotalFiles,
+                observed.LockRiskFiles, observed.EncryptedFiles, observed.InaccessiblePaths.Count);
+            if (observed.InaccessiblePaths.Count > 0)
+                _log.Warning("扫描存在不可访问位置 {Count} 处（默认拦截迁移，需修好或显式确认）: {First}",
+                    observed.InaccessiblePaths.Count, observed.InaccessiblePaths.First());
             return observed;
         }
 
@@ -114,6 +149,7 @@ public sealed class SourceScanner
             _log.Information("{Path} 下发现 {Count} 个一级目录对象", source.Path, dirs.Count);
 
             var objects = new ConcurrentBag<ScannedObject>();
+            var inaccessibleAll = new ConcurrentBag<string>();
 
             await Parallel.ForEachAsync(dirs,
                 new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct },
@@ -123,8 +159,11 @@ public sealed class SourceScanner
                     var id = $"object-{Interlocked.Increment(ref seq):000000}";
                     progress?.Report($"扫描 {name} …");
                     var inaccessible = 0;
+                    var inacc = new System.Collections.Concurrent.ConcurrentBag<string>();
                     var stat = await Task.Run(() => DirStat.Measure(dir, threshold, exclDirs, exclFiles,
-                        _ => Interlocked.Increment(ref inaccessible)), token);
+                        (p, why) => { Interlocked.Increment(ref inaccessible); inacc.Add($"{id}｜{p}｜{why}"); },
+                        skipPlaceholders), token);
+                    foreach (var s in inacc) inaccessibleAll.Add(s);
                     var obj = new ScannedObject
                     {
                         ObjectId = id,
@@ -135,7 +174,9 @@ public sealed class SourceScanner
                         Dirs = stat.Dirs,
                         HasLargeFiles = stat.HasLargeFiles,
                         HasCloudPlaceholders = stat.HasCloudPlaceholders,
-                        ScanIncomplete = stat.Incomplete
+                        ScanIncomplete = stat.Incomplete,
+                        LockRiskFiles = stat.LockRiskFiles,
+                        EncryptedFiles = stat.EncryptedFiles
                     };
                     objects.Add(obj);
                     _log.Information("对象 {Id}: {Path} = {Bytes} / {Files} 文件{Flags}",
@@ -146,29 +187,56 @@ public sealed class SourceScanner
 
             foreach (var o in objects.OrderBy(x => x.SourcePath, StringComparer.OrdinalIgnoreCase))
                 observed.Objects.Add(o);
+            foreach (var s in inaccessibleAll.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                observed.InaccessiblePaths.Add(s);
 
             // 源根散落文件 → 一个 RootFiles 对象
             if (DirStat.RootHasLooseFiles(source.Path))
             {
                 var id = $"object-{Interlocked.Increment(ref seq):000000}";
+                // 必须实测：旧实现写死 Bytes=-1 赌"根散落文件很小"，实测踩中 D 盘根目录 14.2GB 的素材.zip，
+                // 结果是计划总量漏计、进度显示 32.8GB/26.8GB(100%) 的假象。
+                var loose = DirStat.MeasureLooseFiles(source.Path, threshold, exclFiles, skipPlaceholders);
                 observed.Objects.Add(new ScannedObject
                 {
                     ObjectId = id,
                     Kind = ObjectKind.RootFiles,
                     SourcePath = source.Path,  // 特殊：以根路径+仅一级文件表达
-                    Bytes = -1, Files = -1     // 根散落文件体积通常很小，传输时以 robocopy 实测
+                    Bytes = loose.Bytes,
+                    Files = loose.Files,
+                    HasLargeFiles = loose.HasLargeFiles,
+                    HasCloudPlaceholders = loose.HasCloudPlaceholders,
+                    ScanIncomplete = loose.Incomplete,
+                    LockRiskFiles = loose.LockRiskFiles,
+                    EncryptedFiles = loose.EncryptedFiles
                 });
-                _log.Information("对象 {Id}: {Path} 根目录散落文件 (RootFiles)", id, source.Path);
+                if (loose.Incomplete)
+                    observed.InaccessiblePaths.Add($"{id}｜{source.Path}｜根目录散落文件枚举失败（权限/网络）");
+                _log.Information("对象 {Id}: {Path} 根目录散落文件 (RootFiles) = {Bytes} / {Files} 文件",
+                    id, source.Path, Format.Bytes(loose.Bytes), loose.Files);
             }
 
             if (observed.Objects.Any(o => o.HasCloudPlaceholders))
-                observed.Warnings.Add("检测到云占位符（OneDrive 等）：这些文件在源端未实际下载。建议改为迁移云同步配置并让新机重新同步，详见矩阵 cloudPlaceholder 策略。");
+                observed.Warnings.Add(skipPlaceholders
+                    ? "检测到云占位符（OneDrive 等）：已按矩阵策略 Skip 跳过（不复制、不触发云回源下载），新机登录账号后会自动同步。"
+                    : "检测到云占位符（OneDrive 等）：这些文件在源端未实际下载，复制会触发云端回源下载（可能拖慢网络）。建议把矩阵 cloudPlaceholderPolicy 改为 Skip 跳过它们，新机登录账号后自动同步。");
         }
 
         observed.TotalBytes = observed.Objects.Where(o => o.Bytes > 0).Sum(o => o.Bytes);
         observed.TotalFiles = observed.Objects.Where(o => o.Files > 0).Sum(o => o.Files);
-        _log.Information("扫描完成: {Objects} 个对象, 共 {Bytes} / {Files} 文件",
-            observed.Objects.Count, Format.Bytes(observed.TotalBytes), observed.TotalFiles);
+        observed.LockRiskFiles = observed.Objects.Sum(o => o.LockRiskFiles);
+        observed.EncryptedFiles = observed.Objects.Sum(o => o.EncryptedFiles);
+        AddIncompleteScanWarning(observed);
+        if (observed.LockRiskFiles > 0)
+            observed.Warnings.Add($"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件(.pst/.ost)：若旧电脑 Outlook 正在运行，它们会被锁定导致复制失败。建议迁移前让旧电脑用户关闭 Outlook。");
+        if (observed.EncryptedFiles > 0)
+            observed.Warnings.Add($"检测到 {observed.EncryptedFiles} 个 EFS 加密文件：内容可以正常复制，但在新机上将失去加密保护（明文可读）。如合规要求加密，请在新机上重新加密。");
+        _log.Information("扫描完成: {Objects} 个对象, 共 {Bytes} / {Files} 文件（锁风险 {Lock} / EFS {Enc} / 不可访问 {Inacc}）",
+            observed.Objects.Count, Format.Bytes(observed.TotalBytes), observed.TotalFiles,
+            observed.LockRiskFiles, observed.EncryptedFiles, observed.InaccessiblePaths.Count);
+        if (observed.InaccessiblePaths.Count > 0)
+            _log.Warning("扫描存在不可访问位置 {Count} 处（默认拦截迁移，需修好或显式确认）: {First}",
+                observed.InaccessiblePaths.Count, observed.InaccessiblePaths.First());
         return observed;
     }
 }

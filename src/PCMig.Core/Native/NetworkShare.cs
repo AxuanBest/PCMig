@@ -21,6 +21,7 @@ public static class NetworkShare
     private const int ERROR_EXTENDED_ERROR = 1208;
     private const int ERROR_SESSION_CREDENTIAL_CONFLICT = 1219;
     private const int ERROR_ALREADY_ASSIGNED = 85;
+    private const int ERROR_BAD_NET_NAME = 67;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private sealed class NETRESOURCE
@@ -40,6 +41,97 @@ public static class NetworkShare
 
     [DllImport("mpr.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern int WNetCancelConnection2(string name, int flags, bool force);
+
+    [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
+    private static extern int WNetOpenEnum(int dwScope, int dwType, int dwUsage, IntPtr lpNetResource, out IntPtr lphEnum);
+
+    [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
+    private static extern int WNetEnumResource(IntPtr hEnum, ref int lpcCount, IntPtr lpBuffer, ref int lpBufferSize);
+
+    [DllImport("mpr.dll")]
+    private static extern int WNetCloseEnum(IntPtr hEnum);
+
+    /// <summary>列出本机当前到指定服务器的全部现有连接（资源管理器/映射盘/之前连过的）。</summary>
+    private static List<string> ExistingConnectionsTo(string host)
+    {
+        var list = new List<string>();
+        var prefix = $"\\\\{host}\\";
+        const int RESOURCE_CONNECTED = 1;
+        if (WNetOpenEnum(RESOURCE_CONNECTED, RESOURCETYPE_DISK, 0, IntPtr.Zero, out var hEnum) != NERR_Success)
+            return list;
+        try
+        {
+            var bufSize = 16 * 1024;
+            var buf = Marshal.AllocHGlobal(bufSize);
+            try
+            {
+                while (true)
+                {
+                    var count = -1;
+                    var size = bufSize;
+                    if (WNetEnumResource(hEnum, ref count, buf, ref size) != NERR_Success || count <= 0) break;
+                    var itemSize = Marshal.SizeOf<NETRESOURCE>();
+                    for (var i = 0; i < count; i++)
+                    {
+                        var nr = Marshal.PtrToStructure<NETRESOURCE>(buf + i * itemSize);
+                        if (nr?.lpRemoteName != null &&
+                            nr.lpRemoteName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                            list.Add(nr.lpRemoteName);
+                    }
+                }
+            }
+            finally { Marshal.FreeHGlobal(buf); }
+        }
+        finally { _ = WNetCloseEnum(hEnum); }
+        return list;
+    }
+
+    /// <summary>
+    /// 断开到指定服务器的【全部】现有会话连接。
+    /// 1219 冲突的根源往往不只是 IPC$——资源管理器可能还占着 \\host\Users 之类的连接，
+    /// 只删 IPC$ 解决不了，必须把本会话到该机的所有连接清掉。
+    /// </summary>
+    private static void CancelAllConnectionsTo(string host)
+    {
+        foreach (var remote in ExistingConnectionsTo(host))
+            _ = WNetCancelConnection2(remote, 0, true);
+    }
+
+    /// <summary>本机当前是否已有到指定服务器的连接（可复用时不必再握手）。</summary>
+    public static bool HasExistingConnection(string host) => ExistingConnectionsTo(host).Count > 0;
+
+    // ---- 失败提示去重（v0.3.8，缺陷 5）----
+    // 生产事故日志里 "连接 \Szlt500781IPC$ 失败: Win32Error=67" 在几分钟内反复出现
+    // （预检一次 + 传输一次 + 直连回退各打一遍），用户以为"出了很多不同的错"。
+    // 同一主机 + 同一错误码只完整打印一次，重复降到 Debug，并在第 2/10/100… 次明确写"已重复 N 次"。
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> s_connNoticeCounts = new();
+
+    internal static void LogConnectFailureOnce(Serilog.ILogger? log, string what, string host, int code, string hint)
+    {
+        if (log == null) return;
+        var key = what + "|" + host + "|" + code;
+        var n = s_connNoticeCounts.AddOrUpdate(key, 1, (_, c) => c + 1);
+        if (n == 1)
+        {
+            log.Warning("{What} 失败: Win32Error={Code} {Hint}", what, code, hint);
+            return;
+        }
+        if (n is 2 or 10 or 100 or 1000)
+        {
+            log.Warning("{What} 再次失败（同一主机同一错误码已出现 {Count} 次，相同的提示不再重复刷屏）: Win32Error={Code}",
+                what, n, code);
+            return;
+        }
+        log.Debug("{What} 失败（第 {Count} 次，已折叠）: Win32Error={Code}", what, n, code);
+    }
+
+    /// <summary>从 UNC 路径提取共享根：\\host\share\a\b → \\host\share；不是 UNC 返回 null。</summary>
+    public static string? ShareRootOf(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !path.StartsWith(@"\\")) return null;
+        var parts = path.TrimStart('\\').Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 ? $@"\\{parts[0]}\{parts[1]}" : null;
+    }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct SHARE_INFO_1
@@ -92,8 +184,17 @@ public static class NetworkShare
 
         if (explicitCreds && err is ERROR_ALREADY_ASSIGNED or ERROR_SESSION_CREDENTIAL_CONFLICT)
         {
-            // 已存在会话：强制断开后用显式凭据重试一次
-            _ = WNetCancelConnection2(ipc, 0, true);
+            // 1219/85 冲突：本机已有到该服务器的其他连接（资源管理器窗口/映射盘/之前用别的账号连过）。
+            // 公司首测教训：绝不能先杀现有连接再重试——目标可能没有 IPC$，重试必败，
+            // 结果是把用户在资源管理器里打通的可用会话白白毁掉。有现存连接就直接复用。
+            if (HasExistingConnection(host))
+            {
+                log?.Warning("凭据与现有连接冲突（{Code}）——复用现有连接（本次未使用输入的凭据）。如需强制改用输入的凭据：先 net use \\\\{Host}\\ /delete 再重试", err, host);
+                return new ShareSession(null);
+            }
+            // 无现存连接却报冲突（残留句柄）→ 清理后重试一次
+            log?.Information("报冲突（{Code}）但无现存连接，清理残留句柄后重试", err);
+            CancelAllConnectionsTo(host);
             err = WNetAddConnection2(nr, string.IsNullOrEmpty(password) ? null : password, user, 0);
         }
 
@@ -102,6 +203,14 @@ public static class NetworkShare
             // 空凭据且已有会话：复用（当前身份之前已在别处连通过这台机器）
             log?.Information("复用现有会话 {Share}", ipc);
             return new ShareSession(ipc);
+        }
+
+        // 对方 SMB 不导出 IPC$（错误 67；精简/第三方 SMB 服务首测实测出现）：
+        // 只要本机已有到该机的连接，数据共享照样可能可用——复用现有连接，不算失败。
+        if (!explicitCreds && err is ERROR_BAD_NET_NAME or ERROR_BAD_NETPATH && HasExistingConnection(host))
+        {
+            log?.Information("对方无 IPC$（错误 {Code}），复用现有到 {Host} 的连接", err, host);
+            return new ShareSession(null); // 空会话：Dispose 不动现有连接
         }
 
         if (err != NERR_Success)
@@ -118,16 +227,96 @@ public static class NetworkShare
                     "登录失败。可能原因：① 该账号在旧电脑上不存在（用户名要填旧电脑上的账号）；② 该账号密码为空——" +
                     "Windows 默认安全策略禁止空密码账号进行网络登录（含 SMB），请给该账号设置密码；③ 该账号有密码但没填",
                 ERROR_LOGON_FAILURE => "用户名或密码错误（用户名需是旧电脑上的账号，格式：电脑名\\用户名 或 域\\用户名）",
+                ERROR_SESSION_CREDENTIAL_CONFLICT =>
+                    "与现有连接冲突（错误 1219）：这台电脑正用另一组凭据连着旧电脑（最常见：资源管理器开着 \\\\旧电脑 的窗口，且已自动重连）。" +
+                    "PCMig 已自动清理冲突连接；若仍看到此错误，请关闭所有访问旧电脑的资源管理器窗口和映射驱动器后重试",
                 ERROR_BAD_NETPATH => "网络路径不可达（检查 IP/电脑名、目标是否开机、防火墙是否放行文件和打印机共享 SMB-In）",
+                // v0.3.8（缺陷 5）：错误 67 说清"接下来会怎么做、凭据语义有没有变"，
+                // 生产事故日志里只有 "Win32Error=67 找不到网络名"，看不出这是"不影响迁移、将改直连共享"。
+                ERROR_BAD_NET_NAME => "找不到网络名（对方不导出 IPC$ 管理共享；精简/第三方 SMB 服务常见，NAS 也常见）。" +
+                    @"这**不等于**迁移会失败：PCMig 接着会改为【直连你要迁移的数据共享】（例如 \" + host + @"d$）建立会话，" +
+                    "仍然使用你输入的这一组账号密码；区别只是不再先建立 IPC$ 会话——" +
+                    "因此“实际用哪套凭据”以数据共享那次连接为准（若本机已有到该机的其他连接且凭据不同，会出现 1219 冲突）",
                 ERROR_EXTENDED_ERROR => "网络扩展错误（可能 SMB 协议协商失败）",
                 _ => new Win32Exception(err).Message
             };
-            log?.Warning("连接 {Share} 失败: Win32Error={Code} {Hint}", ipc, err, hint);
+            LogConnectFailureOnce(log, $"连接 {ipc}", host, err, hint);
             throw new IOException($"无法连接 {ipc}（错误 {err}）：{hint}");
         }
 
         log?.Information("已建立会话 {Share} (user={User})", ipc, explicitCreds ? user : "<当前 Windows 身份>");
         return new ShareSession(ipc);
+    }
+
+    /// <summary>
+    /// 为传输建立会话：优先走 IPC$；若对方不导出 IPC$（错误 67/53）但给了显式凭据，
+    /// 退而直接连接任务的源共享本身（很多精简 SMB 服务只导出数据共享）；
+    /// 仍不行但所有源路径此刻都可访问时，返回 null 表示"靠本机现有连接即可"，由调用方继续。
+    /// 彻底无法建立才抛异常。
+    /// </summary>
+    public static IDisposable? ConnectForTransfer(string host, string? user, string? password,
+        IReadOnlyList<string> sources, Serilog.ILogger? log = null)
+    {
+        try
+        {
+            return Connect(host, user, password, log);
+        }
+        catch (Exception ipcEx)
+        {
+            // 只完整说明一次"接下来怎么办"（v0.3.8）：IPC$ 只是管理共享，连不上不影响数据共享直连，
+            // 但会改变"凭据用在哪个资源上"的语义——必须说清楚，且不要每次刷屏。
+            LogConnectFailureOnce(log, $"IPC$ 会话（{host}）", host, 0,
+                ipcEx.Message + "　处理：无需操作，PCMig 会自动改为直连源数据共享；只影响凭据建立方式，不影响迁移能力。");
+            var directFails = new List<string>();
+            if (!string.IsNullOrEmpty(user))
+            {
+                foreach (var src in sources)
+                {
+                    var root = ShareRootOf(src);
+                    if (root == null) continue;
+                    try
+                    {
+                        var nr = new NETRESOURCE { lpRemoteName = root };
+                        var err = WNetAddConnection2(nr, string.IsNullOrEmpty(password) ? null : password, user, 0);
+                        if (err is ERROR_SESSION_CREDENTIAL_CONFLICT or ERROR_ALREADY_ASSIGNED)
+                        {
+                            // 有现存连接：源路径可访问就靠它跑（不打断资源管理器里正在用的会话）；
+                            // 源也不可达（现存连接凭据很可能已失效）才清理重建——这是最后手段。
+                            var ambientOk = sources.Count > 0 && sources.All(s => { try { return Directory.Exists(s); } catch { return false; } });
+                            if (ambientOk)
+                            {
+                                log?.Warning("直连冲突（{Code}）但源路径均可访问，复用现有连接继续", err);
+                                return null;
+                            }
+                            log?.Warning("直连冲突且源不可达，清理到 {Host} 的全部连接后用输入凭据重建", host);
+                            CancelAllConnectionsTo(host);
+                            err = WNetAddConnection2(nr, string.IsNullOrEmpty(password) ? null : password, user, 0);
+                        }
+                        if (err == NERR_Success)
+                        {
+                            log?.Information("已改为直连共享 {Share} 建立会话（user={User}）", root, user);
+                            return new ShareSession(root);
+                        }
+                        LogConnectFailureOnce(log, $"直连共享 {root}", host, err, "该共享直连失败（共享可能已关闭/改名，或凭据不对）");
+                        directFails.Add($"{root}（错误 {err}）");
+                    }
+                    catch (Exception ex) { log?.Warning(ex, "直连共享 {Share} 异常", root); directFails.Add($"{root}（{ex.Message}）"); }
+                }
+            }
+            // 最后的机会：所有源路径此刻已可访问（现有连接/凭据缓存）→ 靠现有连接跑
+            if (sources.Count > 0 && sources.All(s => { try { return Directory.Exists(s); } catch { return false; } }))
+            {
+                log?.Warning("源路径当前均可访问，依赖本机现有连接继续传输");
+                return null;
+            }
+            // 直连也失败时，把"哪个共享、什么错误"放前面（IPC$ 的错只是陪衬）——
+            // 实测案例：对方域策略刷新关掉了 D$，恢复时报的却是 IPC$ 的 67，误导排查方向。
+            if (directFails.Count > 0)
+                throw new IOException("源共享连接失败：" + string.Join("；", directFails) +
+                    "。对方共享可能已被关闭/改名或凭据失效——到旧电脑上运行 net share 确认共享还在（若共享名变了，可联系我们改任务源，或重新建任务选新共享），然后再点「恢复任务」。底层细节：" + ipcEx.Message);
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ipcEx).Throw();
+            throw; // 不可达：让编译器满意
+        }
     }
 
     /// <summary>
@@ -219,10 +408,11 @@ public static class NetworkShare
 
     private sealed class ShareSession : IDisposable
     {
-        private readonly string _path;
-        public ShareSession(string path) { _path = path; }
+        private readonly string? _path;
+        public ShareSession(string? path) { _path = path; }
         public void Dispose()
         {
+            if (_path == null) return; // 空会话（复用现有连接）：不断开别人的连接
             try { _ = WNetCancelConnection2(_path, 0, true); } catch { /* ignore */ }
         }
     }

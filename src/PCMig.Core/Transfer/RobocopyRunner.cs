@@ -9,7 +9,8 @@ namespace PCMig.Core.Transfer;
 
 public enum PassKind { Bulk, Large, RootFiles }
 
-public sealed record RobocopyRunResult(int ExitCode, bool Success, bool Killed, TimeSpan Duration, string? LastErrorLine);
+public sealed record RobocopyRunResult(int ExitCode, bool Success, bool Killed, TimeSpan Duration, string? LastErrorLine,
+    IReadOnlyList<string>? ErrorLines = null);
 
 /// <summary>
 /// Robocopy 执行器。
@@ -70,15 +71,110 @@ public sealed class RobocopyRunner
     /// <summary>命令行安全长度上限（Win32 命令行极限 32767，留足余量）。</summary>
     private const int MaxArgsLength = 30000;
 
+    /// <summary>
+    /// 把参数包装成 CreateProcess / CommandLineToArgvW 能正确还原的形式（必须成对加倍反斜杠）。
+    ///
+    /// 生产事故根因（v0.3.8，JOB-20260917-143154-dc9d）：旧实现是 <c>"' + path + '"'</c>，
+    /// 当路径以反斜杠结尾时（目标盘根 "D:\"、UNC 共享根 "\\host\share\"），
+    /// 结尾的 <c>\"</c> 被解析成"转义后的引号" → 引号不闭合 → **后面所有参数被吞进这一个路径里**。
+    /// 实测现象：robocopy 报 <c>ExitCode=16 无效参数 #2:"D:" *.* /LEV:1 /COPY:DAT …</c>，
+    /// 源盘根目录的散落文件一个都没传过去（对象 object-000007 100% 失败）。
+    /// 规则：引号前与字符串末尾的反斜杠必须成对加倍（<c>"D:\"</c> → 还原为 <c>D:\</c>）。
+    /// </summary>
+    public static string QuoteArg(string s)
+    {
+        var sb = new StringBuilder(s.Length + 8);
+        sb.Append('"');
+        var backslashes = 0;
+        foreach (var c in s)
+        {
+            if (c == '\\') { backslashes++; continue; }
+            if (c == '"') { sb.Append('\\', backslashes * 2 + 1).Append('"'); backslashes = 0; continue; }
+            sb.Append('\\', backslashes).Append(c);
+            backslashes = 0;
+        }
+        sb.Append('\\', backslashes * 2);   // 结尾反斜杠加倍：\"D:\" → \"D:\\"
+        sb.Append('"');
+        return sb.ToString();
+    }
+
+    // ---- 大文件通道模式（v0.3.8）----
+    public const string LargeChannelAuto = "auto";
+    public const string LargeChannelRestartable = "restartable";
+    public const string LargeChannelMultiThreaded = "multithreaded";
+
+    /// <summary>
+    /// 大文件通道决策：
+    ///   auto（默认）= /MT + /J（无缓冲、多线程；实测吞吐 ≈ 旧 /Z 单线程的 3 倍），
+    ///                 对象级重试（attempt ≥ 2）时自动退回 /Z —— 续传优先，断网/断电后能从文件内部续上；
+    ///   restartable = 恒用 /Z（文件内部可续传，代价是单线程、缓冲 I/O）；
+    ///   multithreaded = 恒用 /MT + /J。
+    /// 开关落 job.json（options.largeChannelMode），续传沿用同一取舍。
+    /// </summary>
+    public static bool UseRestartableZ(MigrationOptions opt, PassKind pass, int attempt)
+    {
+        if (pass != PassKind.Large) return false;
+        var mode = (opt.LargeChannelMode ?? LargeChannelAuto).Trim().ToLowerInvariant();
+        return mode switch
+        {
+            LargeChannelRestartable or "z" or "resume" => true,
+            LargeChannelMultiThreaded or "mt" or "j" => false,
+            _ => attempt > 1
+        };
+    }
+
+    /// <summary>本 pass 实际使用的通道文案（写日志/回执，事后审计"这一版到底用了哪个通道"）。</summary>
+    public static string ChannelText(PassKind pass, bool restartableZ, bool unbufferedJ = false) => pass switch
+    {
+        PassKind.Bulk => "/MT 多线程",
+        PassKind.RootFiles => "/MT 根目录散落文件",
+        PassKind.Large => restartableZ
+            ? "/Z 可续传（单线程）"
+            : (unbufferedJ ? "/MT + /J 无缓冲多线程（推荐于 SMB）" : "/MT 多线程（本机链路，不加 /J）"),
+        _ => pass.ToString()
+    };
+
+    /// <summary>路径是否落在网络上（UNC 或映射盘）。</summary>
+    public static bool IsNetworkPath(string? p)
+    {
+        if (string.IsNullOrWhiteSpace(p)) return false;
+        if (p.StartsWith(@"\\", StringComparison.Ordinal)) return true;
+        try
+        {
+            var root = Path.GetPathRoot(p);
+            if (string.IsNullOrEmpty(root)) return false;
+            return new DriveInfo(root).DriveType == DriveType.Network;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// 大文件通道是否额外加 /J（无缓冲 I/O）。
+    /// 依据（v0.3.8 实测）：/J 的意义在 SMB 高延迟链路上——不占用系统缓存、不做二次缓冲，
+    /// 生产事故场景（\\10.0.15.25\d → D:\）正是这种链路，所以"只要有任一端是网络路径"就用 /J。
+    /// 但 e/d 同机 NVMe 的 A/B 实测显示 /J 会让本地吞吐掉到 /Z 的 0.5~0.6 倍（绕过写合并、
+    /// 每个 1MB 直接落盘）：6GB 单文件 /Z 3.8~6.1s vs /MT+/J 7.6~8.0s。
+    /// 所以 auto 模式下本地链路只用 /MT、不加 /J；显式 multithreaded 模式仍然强制 /J。
+    /// </summary>
+    public static bool UseUnbufferedJ(string src, string dst, MigrationOptions opt)
+    {
+        var mode = (opt.LargeChannelMode ?? LargeChannelAuto).Trim().ToLowerInvariant();
+        if (mode is LargeChannelMultiThreaded or "mt" or "j") return true;
+        if (mode is LargeChannelRestartable or "z" or "resume") return false;
+        return IsNetworkPath(src) || IsNetworkPath(dst);
+    }
+
     public string BuildArguments(string src, string dst, MigrationOptions opt, MigrationMatrix matrix,
-        PassKind pass, string unicodeLogPath, IReadOnlyList<string>? fileList = null)
+        PassKind pass, string unicodeLogPath, IReadOnlyList<string>? fileList = null,
+        bool restartableLarge = false)
     {
         var sb = new StringBuilder();
-        sb.Append('"').Append(src).Append("\" \"").Append(dst).Append('"');
+        // 逐个用 QuoteArg：绝不能直接拼 '"' + path + '"'（尾反斜杠会让引号失效，见 QuoteArg 注释）
+        sb.Append(QuoteArg(src)).Append(' ').Append(QuoteArg(dst));
 
         if (fileList != null)
         {
-            foreach (var f in fileList) sb.Append(" \"").Append(f).Append('"');
+            foreach (var f in fileList) sb.Append(' ').Append(QuoteArg(f));
             // 显式文件清单：不递归（无 /E），大小分流仍由 /MAX /MIN 控制
         }
         else if (pass == PassKind.RootFiles)
@@ -91,6 +187,8 @@ public sealed class RobocopyRunner
         }
 
         sb.Append(" /COPY:DAT /DCOPY:T /XJ");
+        // 注：想让目标侧"大小+时间相同"的文件被源覆盖，/IS /IT 无济于事（实测字节行"复制=0"），
+        // 唯一可靠办法是先删掉目标那份（见 RepairPurge），故此处不再拼接任何强制覆盖开关。
         sb.Append($" /R:{opt.RetryCount} /W:{opt.RetryWaitSec}");
 
         var thresholdBytes = (long)(matrix.LargeFileThresholdMB > 0 ? matrix.LargeFileThresholdMB : opt.LargeFileThresholdMB) * 1024 * 1024;
@@ -101,32 +199,48 @@ public sealed class RobocopyRunner
         }
         else if (pass == PassKind.Large)
         {
-            sb.Append($" /Z /MIN:{thresholdBytes}");                              // /Z 与 /MT 刻意不同 pass
+            // v0.3.8：默认 /MT + /J —— 旧版恒用 /Z（单线程 + 缓冲 I/O），真实生产实测吞吐只有
+            // 用户手工 robocopy /MT:32 的 1/3（30 MB/s vs 90–137 MB/s）。
+            // /J = 无缓冲 I/O（大文件与 SMB 场景推荐，不污染系统缓存）；
+            // /Z 仍保留为"续传优先"通道（restartable 模式，或 auto 模式下对象级重试时自动退回）。
+            if (restartableLarge)
+                sb.Append($" /Z /MIN:{thresholdBytes}");
+            else
+            {
+                sb.Append($" /MT:{Math.Clamp(opt.Threads, 1, 128)}");
+                if (UseUnbufferedJ(src, dst, opt)) sb.Append(" /J");
+                sb.Append($" /MIN:{thresholdBytes}");
+            }
         }
 
-        foreach (var d in matrix.ExcludedDirectoryNames) sb.Append($" /XD \"{d}\"");
-        foreach (var f in matrix.ExcludedFileNames.Concat(matrix.SecurityBlockedFileNames)) sb.Append($" /XF \"{f}\"");
+        // 排除项也一律走 QuoteArg：条目里出现反斜杠结尾（如 "目录\"）时同样会让引号失效
+        foreach (var d in matrix.ExcludedDirectoryNames) sb.Append($" /XD {QuoteArg(d)}");
+        foreach (var f in matrix.ExcludedFileNames.Concat(matrix.SecurityBlockedFileNames)) sb.Append($" /XF {QuoteArg(f)}");
+        // 云占位符 Skip 策略：排除带 Offline 属性的文件（OneDrive Files-On-Demand 占位符），
+        // 避免 SMB 读取触发云端回源下载（可能把几百 GB 云数据拖到链路上）。
+        if (matrix.CloudPlaceholderPolicy.Equals("Skip", StringComparison.OrdinalIgnoreCase))
+            sb.Append(" /XA:O");
 
         // /NP 关百分比噪声；/TEE 双写；/UNILOG+ 追加写 Unicode 日志（中文环境不丢字）
-        sb.Append($" /NP /TEE /UNILOG+:\"{unicodeLogPath}\"");
+        sb.Append($" /NP /TEE /UNILOG+:{QuoteArg(unicodeLogPath)}");
         return sb.ToString();
     }
 
     public async Task<RobocopyRunResult> RunPassAsync(string src, string dst, MigrationOptions opt,
         MigrationMatrix matrix, PassKind pass, string unicodeLogPath, CancellationToken ct,
-        IReadOnlyList<string>? fileList = null)
+        IReadOnlyList<string>? fileList = null, bool restartableLarge = false)
     {
         // 文件清单过长时按命令行长度分批执行，聚合结果
         if (fileList != null && fileList.Count > 0)
         {
-            var batches = ChunkFileList(src, dst, opt, matrix, pass, fileList);
+            var batches = ChunkFileList(src, dst, opt, matrix, pass, fileList, restartableLarge);
             if (batches.Count > 1)
                 _log.Information("文件清单 {Count} 项，按命令行长度拆为 {Batches} 批执行", fileList.Count, batches.Count);
             var swAll = Stopwatch.StartNew();
             var worst = 0; string? lastErr = null; var killed = false;
             foreach (var batch in batches)
             {
-                var r = await RunSingleAsync(src, dst, opt, matrix, pass, unicodeLogPath, ct, batch);
+                var r = await RunSingleAsync(src, dst, opt, matrix, pass, unicodeLogPath, ct, batch, restartableLarge);
                 if (r.Killed) { killed = true; break; }
                 if (r.ExitCode > worst) { worst = r.ExitCode; lastErr = r.LastErrorLine; }
             }
@@ -134,15 +248,92 @@ public sealed class RobocopyRunner
             return new RobocopyRunResult(killed ? -1 : worst, !killed && IsSuccess(worst), killed, swAll.Elapsed, lastErr);
         }
 
-        return await RunSingleAsync(src, dst, opt, matrix, pass, unicodeLogPath, ct, null);
+        return await RunSingleAsync(src, dst, opt, matrix, pass, unicodeLogPath, ct, null, restartableLarge);
+    }
+
+    /// <summary>错误行最多保留多少条（防止亿级文件失败时吃光内存）。</summary>
+    private const int MaxErrorLines = 500;
+
+    private static readonly System.Text.RegularExpressions.Regex s_errCodeRx = new(
+        @"(?:错误|ERROR)\s+(?<code>\d+)|0x(?<hex>[0-9A-Fa-f]{8})",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// 把 robocopy 的一堆失败行汇总成"人话原因"：多少文件失败、主因是什么、举几个例子。
+    /// 实测（公司环境）：SystemCache 里 132 个被应用占用的 *.tmp 让整个对象判失败，
+    /// 而旧版本 GUI 只显示"复制失败"四个字，用户完全不知道是哪个文件、什么原因。
+    /// </summary>
+    public static string? SummarizeFailures(int exitCode, IReadOnlyList<string>? errorLines)
+    {
+        if (errorLines == null || errorLines.Count == 0) return null;
+        // 同一文件会被 robocopy 记"初次失败 + 每次重试"多行（/R:2 → 3 行），必须按路径去重，
+        // 否则"6 个文件失败"其实是 2 个文件各失败 3 次——实测踩中（T3 用例）。
+        var byCode = new Dictionary<int, int>();      // 错误码 → 去重后的文件数
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var samples = new List<string>();
+        var attempts = 0;
+        foreach (var line in errorLines)
+        {
+            var m = s_errCodeRx.Match(line);
+            if (!m.Success) continue;                 // 过滤 "错误: 超过重试限制。" 这类无码汇总行
+            attempts++;
+            var code = m.Groups["code"].Success
+                ? int.Parse(m.Groups["code"].Value)
+                : Convert.ToInt32(m.Groups["hex"].Value, 16);
+            var key = ExtractErrorPath(line) ?? line.Trim();
+            if (!seen.Add(key)) continue;             // 同一目标的重试不再重复计数
+            byCode[code] = byCode.TryGetValue(code, out var c) ? c + 1 : 1;
+            if (samples.Count < 3) samples.Add(ShortenPath(key));
+        }
+        if (byCode.Count == 0) return null;
+
+        var top = byCode.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key).ToList();
+        var main = PCMig.Core.Util.ErrorTranslator.ReasonForCode(top[0].Key);
+        var dist = string.Join("、", top.Take(3).Select(kv => $"{kv.Key}×{kv.Value}"));
+        var total = byCode.Values.Sum();
+        var sb = new StringBuilder();
+        sb.Append(total).Append(" 个文件复制失败：").Append(main).Append('（');
+        sb.Append(top.Count == 1 ? $"错误码 {top[0].Key}" : $"错误码分布 {dist}").Append('）');
+        if (attempts > total) sb.Append("，含重试共 ").Append(attempts).Append(" 次失败");
+        if (samples.Count > 0) sb.Append("；例如：").Append(string.Join("、", samples));
+        sb.Append("。robocopy 退出码 ").Append(exitCode)
+          .Append("（位掩码：8=有文件失败，1=有文件成功），已达重试上限，跳过这些文件继续其余数据。");
+        return sb.ToString();
+    }
+
+    /// <summary>从 robocopy 错误行里抠出出错路径（跳过本地化消息，兼容 UNC 与盘符，允许路径含空格）。</summary>
+    private static string? ExtractErrorPath(string line)
+    {
+        var hex = line.IndexOf("0x", StringComparison.Ordinal);
+        var tail = hex >= 0 ? line[hex..] : line;
+        var unc = tail.IndexOf(@"\\", StringComparison.Ordinal);
+        var drive = System.Text.RegularExpressions.Regex.Match(tail, @"[A-Za-z]:\\");
+        int start = -1;
+        if (unc >= 0 && (!drive.Success || unc < drive.Index)) start = unc;
+        else if (drive.Success) start = drive.Index;
+        if (start < 0) return null;
+        var p = tail[start..].Trim().TrimEnd('.', '。', ')', '）');
+        return p.Length > 0 ? p : null;
+    }
+
+    /// <summary>UNC 路径去掉 \\主机\共享 前缀便于阅读；过长则截断。</summary>
+    private static string ShortenPath(string path)
+    {
+        var s = path;
+        if (s.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            var parts = s.Split('\\');
+            if (parts.Length > 4) s = string.Join("\\", parts.Skip(4));
+        }
+        return s.Length > 80 ? s[..80] + "…" : s;
     }
 
     /// <summary>按累积命令行长度分批（中文名按 UTF-16 计 2 字节，近似保守）。</summary>
     private List<List<string>> ChunkFileList(string src, string dst, MigrationOptions opt,
-        MigrationMatrix matrix, PassKind pass, IReadOnlyList<string> fileList)
+        MigrationMatrix matrix, PassKind pass, IReadOnlyList<string> fileList, bool restartableLarge)
     {
         var batches = new List<List<string>>();
-        var baseLen = BuildArguments(src, dst, opt, matrix, pass, "x.log", (IReadOnlyList<string>?)null).Length;
+        var baseLen = BuildArguments(src, dst, opt, matrix, pass, "x.log", (IReadOnlyList<string>?)null, restartableLarge).Length;
         var current = new List<string>();
         var currentLen = baseLen;
         foreach (var f in fileList)
@@ -163,10 +354,11 @@ public sealed class RobocopyRunner
 
     private async Task<RobocopyRunResult> RunSingleAsync(string src, string dst, MigrationOptions opt,
         MigrationMatrix matrix, PassKind pass, string unicodeLogPath, CancellationToken ct,
-        IReadOnlyList<string>? fileList)
+        IReadOnlyList<string>? fileList, bool restartableLarge)
     {
-        var args = BuildArguments(src, dst, opt, matrix, pass, unicodeLogPath, fileList);
-        _log.Information("robocopy 启动 [{Pass}]: robocopy {Args}", pass, args);
+        var args = BuildArguments(src, dst, opt, matrix, pass, unicodeLogPath, fileList, restartableLarge);
+        _log.Information("robocopy 启动 [{Pass}/{Channel}]: robocopy {Args}", pass,
+            ChannelText(pass, restartableLarge, UseUnbufferedJ(src, dst, opt)), args);
 
         var psi = new ProcessStartInfo("robocopy.exe", args)
         {
@@ -181,6 +373,7 @@ public sealed class RobocopyRunner
 
         var sw = Stopwatch.StartNew();
         string? lastErrorLine = null;
+        var errorLines = new List<string>();   // 全部失败行（上限防爆内存），供"具体原因"汇总
 
         using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
         _killedByUs = false;
@@ -195,7 +388,11 @@ public sealed class RobocopyRunner
                 var trimmed = line.TrimEnd();
                 if (trimmed.Length == 0) return;
                 if (trimmed.Contains("ERROR", StringComparison.OrdinalIgnoreCase) ||
-                    trimmed.Contains("错误", StringComparison.Ordinal)) lastErrorLine = trimmed;
+                    trimmed.Contains("错误", StringComparison.Ordinal))
+                {
+                    lastErrorLine = trimmed;
+                    if (errorLines.Count < MaxErrorLines) errorLines.Add(trimmed);
+                }
                 // 进度解析：目录行记忆“当前目录”；文件行（新文件/已更改…）触发 FileCopied
                 var dm = s_dirLineRx.Match(trimmed);
                 if (dm.Success)
@@ -247,7 +444,7 @@ public sealed class RobocopyRunner
             var success = !killed && IsSuccess(code);
             _log.Information("robocopy 退出 [{Pass}]: ExitCode={Code} (0x{CodeHex:X2}) Success={Success} Killed={Killed} 耗时 {Elapsed}",
                 pass, code, code, success, killed, sw.Elapsed);
-            return new RobocopyRunResult(code, success, Killed: killed, sw.Elapsed, lastErrorLine);
+            return new RobocopyRunResult(code, success, Killed: killed, sw.Elapsed, lastErrorLine, errorLines);
         }
         catch (OperationCanceledException)
         {

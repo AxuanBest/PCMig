@@ -1,4 +1,4 @@
-namespace PCMig.Core.Util;
+﻿namespace PCMig.Core.Util;
 
 public static class Format
 {

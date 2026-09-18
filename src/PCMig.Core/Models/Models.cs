@@ -63,6 +63,15 @@ public sealed class JobDefinition
     public List<string> CustomExclusions { get; set; } = new();
 
     public string TargetRoot { get; set; } = "";     // 本地目标根，例如 D:\Migrated\OLD-PC
+
+    /// <summary>
+    /// true = 用户已显式确认“扫描存在不可访问目录，仍要继续”（v0.3.8 扫描残缺闸门）。
+    /// false（默认）= 存在不可访问目录时不允许开始迁移——这些目录里的文件既不在计划内、也不会被复制，
+    /// 事后再看报告只会看到“完成”（真实事故里 Prepare 就是被一次意外的网络 IOException 打掉的）。
+    /// 确认结果落 job.json，续传沿用，便于审计“当时是谁放行的”。
+    /// </summary>
+    public bool AllowIncompleteScan { get; set; }
+
     public MigrationOptions Options { get; set; } = new();
     public string CreatedBy { get; set; } = "";
     public string Notes { get; set; } = "";
@@ -86,6 +95,13 @@ public sealed class MigrationOptions
     public VerifyLevel VerifyLevel { get; set; } = VerifyLevel.L1_CountSize;
     public int SampleHashPercent { get; set; } = 1;  // L2 抽样比例
     public bool SplitLargeFiles { get; set; } = true;
+
+    /// <summary>
+    /// 大文件通道（v0.3.8）：auto（默认）= /MT + /J 无缓冲多线程，对象级重试时自动退回 /Z；
+    /// restartable = 恒用 /Z（文件内部可续传，单线程）；multithreaded = 恒用 /MT + /J。
+    /// 旧版恒用 /Z 单线程，真实生产实测吞吐只有手工 robocopy /MT:32 的 1/3（30 vs 90–137 MB/s）。
+    /// </summary>
+    public string LargeChannelMode { get; set; } = "auto";
 }
 
 // ------------------------------------------------------------
@@ -99,7 +115,19 @@ public sealed class ObservedState
     public List<ScannedObject> Objects { get; set; } = new();
     public long TotalBytes { get; set; }
     public long TotalFiles { get; set; }
+    public long LockRiskFiles { get; set; }          // 全源 .pst/.ost 合计（迁移前提醒用户关 Outlook）
+    public long EncryptedFiles { get; set; }         // 全源 EFS 加密合计
     public List<string> Warnings { get; set; } = new();
+
+    /// <summary>
+    /// 扫描时不可访问的目录/文件（v0.3.8）：每条 = "对象 object-000003｜\\主机\共享\目录｜原因"。
+    /// 旧版只把 Incomplete 置 true 并在日志里拼一句"[部分不可访问×N]"，没有任何地方拦人。
+    /// </summary>
+    public List<string> InaccessiblePaths { get; set; } = new();
+
+    /// <summary>是否存在不可访问目录（任一对象残缺，或已记录明细）。</summary>
+    [JsonIgnore]
+    public bool ScanIncomplete => InaccessiblePaths.Count > 0 || Objects.Any(o => o.ScanIncomplete);
 }
 
 public sealed class ScannedObject
@@ -113,6 +141,8 @@ public sealed class ScannedObject
     public bool HasLargeFiles { get; set; }
     public bool HasCloudPlaceholders { get; set; }   // OneDrive 等占位符
     public bool ScanIncomplete { get; set; }         // 部分目录不可访问
+    public long LockRiskFiles { get; set; }          // .pst/.ost 打开即锁的高危文件数
+    public long EncryptedFiles { get; set; }         // EFS 加密文件数
     /// <summary>非空 = 文件清单对象：SourcePath 目录下仅这些文件。</summary>
     public List<string>? FileList { get; set; }
 }

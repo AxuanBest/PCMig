@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using PCMig.Core.Jobs;
 using PCMig.Core.Matrix;
 using PCMig.Core.Models;
@@ -34,8 +34,11 @@ public sealed class Verifier
         var plan = _ctx.Plan ?? throw new InvalidOperationException("plan.json 不存在");
         var report = new VerifyReport { JobId = _ctx.JobId, Level = level };
         var exclDirs = new HashSet<string>(_matrix.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
-        var exclFiles = new HashSet<string>(
-            _matrix.ExcludedFileNames.Concat(_matrix.SecurityBlockedFileNames), StringComparer.OrdinalIgnoreCase);
+        // 文件排除支持 * ? 通配符（与扫描/传输同口径）
+        var exclFileMatch = FilePatternMatcher.Build(
+            _matrix.ExcludedFileNames.Concat(_matrix.SecurityBlockedFileNames));
+        // Skip 策略下占位符既没被复制（/XA:O），验证时也不应计入
+        var skipPlaceholders = string.Equals(_matrix.CloudPlaceholderPolicy, "Skip", StringComparison.OrdinalIgnoreCase);
 
         _log.Information("验证开始: Level={Level}, 对象数={Count}", level, plan.Objects.Count);
 
@@ -46,8 +49,8 @@ public sealed class Verifier
 
             var result = new ObjectVerifyResult { ObjectId = obj.ObjectId };
             // 目标侧先枚举（清单用于快速比对）；源侧只有在目标侧没溢出时才收集清单
-            var dstStat = await Task.Run(() => EnumerateSide(obj.TargetPath, obj, exclDirs, exclFiles, true), ct);
-            var srcStat = await Task.Run(() => EnumerateSide(obj.SourcePath, obj, exclDirs, exclFiles, !dstStat.Overflow), ct);
+            var dstStat = await Task.Run(() => EnumerateSide(obj.TargetPath, obj, exclDirs, exclFileMatch, skipPlaceholders, true), ct);
+            var srcStat = await Task.Run(() => EnumerateSide(obj.SourcePath, obj, exclDirs, exclFileMatch, skipPlaceholders, !dstStat.Overflow), ct);
 
             result.SourceFiles = srcStat.Files; result.SourceBytes = srcStat.Bytes;
             result.TargetFiles = dstStat.Files; result.TargetBytes = dstStat.Bytes;
@@ -74,7 +77,7 @@ public sealed class Verifier
                 // 流式模式（超大对象）：不存全量清单，第二遍流式过源，逐文件核对目标存在性 + 收集哈希样本
                 _log.Information("对象 {Id} 文件量超清单上限，切换流式核对（内存有界，结果同样精确）", obj.ObjectId);
                 progress?.Report($"验证 {obj.ObjectId} …（超大对象，流式核对）");
-                hashSamples = await Task.Run(() => StreamSourcePass(obj, result, samplePercent, exclDirs, exclFiles, ct), ct);
+                hashSamples = await Task.Run(() => StreamSourcePass(obj, result, samplePercent, exclDirs, exclFileMatch, skipPlaceholders, ct), ct);
             }
 
             if (level >= VerifyLevel.L2_SampleHash)
@@ -119,7 +122,7 @@ public sealed class Verifier
     }
 
     private SideStat EnumerateSide(string root, PlannedObject obj,
-        HashSet<string> exclDirs, HashSet<string> exclFiles, bool collectLists)
+        HashSet<string> exclDirs, Func<string, bool> exclFileMatch, bool skipPlaceholders, bool collectLists)
     {
         var stat = new SideStat();
 
@@ -128,7 +131,7 @@ public sealed class Verifier
         {
             foreach (var name in obj.FileList)
             {
-                if (exclFiles.Contains(name)) continue;
+                if (exclFileMatch(name)) continue;
                 var path = Path.Combine(root, name);
                 try
                 {
@@ -161,7 +164,9 @@ public sealed class Verifier
                     if ((e.Attributes & FileAttributes.ReparsePoint) != 0) continue;
                     if (e is FileInfo fi)
                     {
-                        if (exclFiles.Contains(fi.Name)) continue;
+                        if (exclFileMatch(fi.Name)) continue;
+                        if (skipPlaceholders && ((fi.Attributes & DirStat.CloudPlaceholderAttr) == DirStat.CloudPlaceholderAttr
+                            || (fi.Attributes & FileAttributes.Offline) == FileAttributes.Offline)) continue;
                         // RootFiles 对象只统计根层文件
                         if (obj.Kind == ObjectKind.RootFiles &&
                             !string.Equals(Path.GetDirectoryName(fi.FullName), root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
@@ -200,7 +205,7 @@ public sealed class Verifier
 
     /// <summary>流式过源：逐文件核对目标存在性（缺失样例）+ 确定性收集哈希样本，全程不存全量清单。</summary>
     private List<(string Relative, long Length)> StreamSourcePass(PlannedObject obj, ObjectVerifyResult result,
-        int samplePercent, HashSet<string> exclDirs, HashSet<string> exclFiles, CancellationToken ct)
+        int samplePercent, HashSet<string> exclDirs, Func<string, bool> exclFileMatch, bool skipPlaceholders, CancellationToken ct)
     {
         var samples = new List<(string Relative, long Length)>();
         var pending = new Stack<string>();
@@ -219,7 +224,9 @@ public sealed class Verifier
                     if ((e.Attributes & FileAttributes.ReparsePoint) != 0) continue;
                     if (e is FileInfo fi)
                     {
-                        if (exclFiles.Contains(fi.Name)) continue;
+                        if (exclFileMatch(fi.Name)) continue;
+                        if (skipPlaceholders && ((fi.Attributes & DirStat.CloudPlaceholderAttr) == DirStat.CloudPlaceholderAttr
+                            || (fi.Attributes & FileAttributes.Offline) == FileAttributes.Offline)) continue;
                         if (obj.Kind == ObjectKind.RootFiles &&
                             !string.Equals(Path.GetDirectoryName(fi.FullName), obj.SourcePath.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
                             continue;

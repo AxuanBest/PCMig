@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using PCMig.Core.Jobs;
 using PCMig.Core.Models;
 using PCMig.Core.State;
@@ -66,6 +66,27 @@ th{background:#eff6ff} tr:nth-child(even){background:#f9fafb}
         sb.Append("</div>");
         if (!string.IsNullOrWhiteSpace(state.LastError))
             sb.Append($"<p class='warn'>⚠ 最近错误：{E(state.LastError)}</p>");
+
+        // ---- 环境档案（实测基准：供跨机器对比、安全软件排查、验收归档） ----
+        {
+            var opts = job.Options;
+            var avgSpeed = totalDur.TotalSeconds > 1 && state.CompletedBytes > 0
+                ? state.CompletedBytes / totalDur.TotalSeconds : 0;
+            sb.Append("<h2>环境档案</h2><table>");
+            void Row(string k, string v) => sb.Append($"<tr><th style='width:190px'>{k}</th><td>{v}</td></tr>");
+            Row("源电脑", E(job.SourceHost));
+            Row("迁移账号", E(job.SourceUser ?? "<当前 Windows 身份>"));
+            Row("操作人", E(job.CreatedBy));
+            Row("目标路径", $"<span class='mono'>{E(job.TargetRoot)}</span>");
+            Row("任务创建时间", job.CreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"));
+            Row("robocopy 线程数", opts.Threads + "（/MT）");
+            Row("大文件阈值", $"{opts.LargeFileThresholdMB} MB（≥阈值走 /Z 可续传通道）");
+            Row("重试策略", $"{opts.RetryCount} 次 / 间隔 {opts.RetryWaitSec} 秒");
+            Row("平均传输速度", avgSpeed > 0 ? Format.Speed(avgSpeed) : "-");
+            Row("规模", $"{state.TotalObjects} 个对象 / {Format.Bytes(state.TotalBytes)}");
+            Row("自定义排除规则", job.CustomExclusions.Count > 0 ? $"{job.CustomExclusions.Count} 条（超大数据模式）" : "无");
+            sb.Append("</table>");
+        }
 
         // ---- 结论与建议（人话区，置顶） ----
         var incomplete = (_ctx.Plan?.Objects ?? [])

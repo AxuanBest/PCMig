@@ -7,17 +7,28 @@
     <Nullable>enable</Nullable>
     <AssemblyName>pcmig</AssemblyName>
     <RootNamespace>PCMig.Cli</RootNamespace>
-    <Version>0.2.5</Version>
-    <Description>PCMig 命令行：内网 Windows 用户环境/数据迁移</Description>
+    <Version>0.4.1</Version>
+    <AssemblyTitle>PCMig 迁移工具（命令行）</AssemblyTitle>
+    <Product>PCMig 迁移工具</Product>
+    <Description>由 郑子轩 个人制作 · 内网 Windows 用户环境/数据迁移命令行</Description>
     <Authors>郑子轩 (Axuanbest)</Authors>
     <Company>Axuanbest</Company>
-    <Copyright>© 2026 郑子轩 (Axuanbest). Crafted with care.</Copyright>
+    <Copyright>郑子轩 个人制作</Copyright>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\PCMig.Gui\Assets\pcmig.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\PCMig.Core\PCMig.Core.csproj" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 更新日志随命令行程序内置（程序目录没有 更新日志.txt 时的兜底） -->
+    <EmbeddedResource Include="..\..\docs\更新日志.md">
+      <LogicalName>PCMig.Cli.CHANGELOG.md</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>

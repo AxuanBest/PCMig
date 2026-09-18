@@ -13,7 +13,16 @@ public sealed record ProgressSnapshot(
     long TotalBytes, long CompletedBytes, double Percent,
     double BytesPerSecond, double EtaSeconds,
     string? CurrentObjectId, string? CurrentObjectPath,
-    string Message);
+    string Message,
+    // ---- v0.3.8（缺陷 3：失败/暂停/停滞在界面不刺眼）----
+    /// <summary>当前对象已落盘字节（"已传 A"）。</summary>
+    long CurrentObjectDoneBytes = 0,
+    /// <summary>当前对象计划字节（"共 B"）。0 = 未知。</summary>
+    long CurrentObjectTotalBytes = 0,
+    /// <summary>当前对象含大文件（≥分流阈值）→ 界面给出"可能数分钟无进度变化"的提示。</summary>
+    bool CurrentObjectHasLargeFile = false,
+    /// <summary>已有多少秒没看到落盘字节增长（≥45s 视为进度停滞）。</summary>
+    double StallSeconds = 0);
 
 /// <summary>
 /// 传输编排器：PCMig 的心脏。
@@ -32,6 +41,14 @@ public sealed class TransferOrchestrator
     /// <summary>robocopy 行级输出转发（UI 报错区用）。</summary>
     public event Action<string>? OutputLine;
 
+    /// <summary>引擎主动提示（如速度异常偏低，疑似安全软件实时扫描）：UI 状态栏/日志面板用。每个任务最多提示一次。</summary>
+    public event Action<string>? TransferNotice;
+
+    // ---- 速度异常检测（安全软件实时扫描的典型症状：吞吐被拖垮到峰值的几分之一）----
+    private double _peakSpeed;                          // 本任务速度 EMA 峰值
+    private DateTime _anomalySince = DateTime.MinValue; // 进入低速状态的时刻
+    private bool _anomalyNotified;                      // 每任务只提示一次
+
     // ---- 无枚举进度跟踪状态（超大磁盘：不反复全量枚举目标目录）----
     private long _bulkCopiedBytes;              // bulk/rootfiles 通道：按 robocopy 输出行累计近似字节
     private long _largeCompletedBytes;          // large(/Z) 通道：已切换到下一个文件的前序大文件入账字节
@@ -39,6 +56,8 @@ public sealed class TransferOrchestrator
     private long _largeFileStartLen;            // 该大文件开始前的已有长度（续传部分不重复计）
     private long _largeFileApproxSize;          // 当前大文件的近似大小（robocopy 输出解析值，兜底用）
     private PassKind _currentPass;
+    /// <summary>本 pass 是否走串行 /Z（只有串行才能按"当前大文件"精确入账；/MT+/J 走多文件并行，按行累计+枚举兜底）。</summary>
+    private bool _serialLargePass;
     private PlannedObject? _activeObject;
     private DateTime _lastFileEventAt = DateTime.MinValue; // 最近一次解析到文件行的时刻
     private DateTime _lastEnumAt = DateTime.MinValue;      // 最近一次回退枚举的时刻
@@ -53,13 +72,22 @@ public sealed class TransferOrchestrator
     private long _passFileAttempts;   // 本对象文件尝试数（含失败）
     private long _passErrors;         // 本对象文件错误数
     private string? _stormCode;       // 触发风暴终止的错误码（null=未触发）
+    private string? _spaceCode;       // 目标盘空间不足的错误码（T07 熔断：null=未触发）
+
+    // ---- 本次运行的累计速率口径（T01：自报 243 MB/s vs 实测 1115 MB/s，偏低 4.6 倍）----
+    // 旧的 BytesPerSecond 是"robocopy 日志解析出的 2 秒瞬时值 + 每对象清零的 EMA"：
+    // 单个对象 1–4 秒就结束，日志行到达时窗口早就过去了，于是自报值系统性偏低。
+    // 现在改为"本次运行真正新增的落盘字节 ÷ 本次运行的有效用时"，与界面文案"任务实测"一致。
+    private readonly System.Diagnostics.Stopwatch _runSw = new();
+    private long _runStartCompletedBytes;   // 本次运行开始时已完成的字节（续传时不算进速率）
+    private long _pausedTicks;              // 累计暂停等待时长（暂停不是传输慢，不计入分母）
 
     /// <summary>robocopy 每开始复制一个文件：bulk 通道累计近似字节；/Z 通道把前一个大文件入账并记录当前大文件。</summary>
     private void OnRunnerFileCopied(string sourcePath, long approxBytes)
     {
         _lastFileEventAt = DateTime.UtcNow;
         Interlocked.Increment(ref _passFileAttempts);
-        if (_currentPass == PassKind.Large)
+        if (_currentPass == PassKind.Large && _serialLargePass)
         {
             var obj = _activeObject;
             if (obj != null && sourcePath.StartsWith(obj.SourcePath, StringComparison.OrdinalIgnoreCase))
@@ -103,6 +131,17 @@ public sealed class TransferOrchestrator
                 if (string.Equals(_largeFileTarget, Path.Combine(obj.TargetPath, rel), StringComparison.OrdinalIgnoreCase))
                     _largeFileTarget = null;
             }
+        }
+
+        // ①.5 磁盘满熔断（T07）：ENOSPC 属于"根因没除、重试毫无意义"——继续跑只会对每个文件
+        //    反复重试（实测每个对象 3–33 次失败）并写一堆注定失败的数据。命中即主动终止当前 robocopy，
+        //    本次运行提前收尾；错误归为可恢复（Transient），释放空间后 resume 即可补齐。
+        if (_spaceCode == null && IsSpaceErrorCode(code))
+        {
+            _spaceCode = code;
+            _log.Error("目标盘空间不足（错误码 {Code}）：主动终止当前对象并提前结束本次运行，" +
+                       "避免对每个文件反复重试。释放目标盘空间后 resume 即可续传", code);
+            _runner.KillCurrent();
         }
 
         // ② 风暴判定：错误 ≥200 且错误率 ≥90%（几乎每个文件都在失败）→ 继续跑只会空转数小时
@@ -161,7 +200,18 @@ public sealed class TransferOrchestrator
         };
     }
 
-    public async Task<JobPhase> RunAsync(IProgress<ProgressSnapshot>? progress = null, CancellationToken ct = default)
+    /// <param name="onlyObjectIds">只跑这些对象（定向修复）；null = 跑全部。</param>
+    /// <param name="forceRecopy">true = 已"完全完成"的对象也重拷（验证发现不一致时用）；
+    /// robocopy 增量特性保证只补差异，已一致的文件秒级跳过。</param>
+    /// <summary>
+    /// true = 本次运行对每个对象追加 robocopy /IS /IT：连"大小与时间都一样"的文件也从源重新拉取并覆盖。
+    /// 修复场景专用（目标文件可能内容损坏但大小/时间未变，默认增量会判为"相同"直接跳过）。
+    /// 普通传输/续传保持 false：靠增量秒级跳过，不做无谓重传。
+    /// </summary>
+    public bool ForceOverwriteFromSource { get; set; }
+
+    public async Task<JobPhase> RunAsync(IProgress<ProgressSnapshot>? progress = null, CancellationToken ct = default,
+        IReadOnlyCollection<string>? onlyObjectIds = null, bool forceRecopy = false)
     {
         var plan = _ctx.Plan ?? throw new InvalidOperationException("plan.json 不存在：请先扫描并生成计划");
         var job = _ctx.Definition;
@@ -184,16 +234,38 @@ public sealed class TransferOrchestrator
         state.Phase = JobPhase.Running;
         state.LastError = null;
         _ctx.SaveState(state);
-        Report(progress, state, null, null, 0, "开始/继续传输");
 
-        _log.Information("传输开始: 共 {Total} 对象, 已完成 {Done}, 待传 {Bytes}",
-            plan.Objects.Count, completedIds.Count, Format.Bytes(Math.Max(0, plan.TotalBytes - baseBytes)));
+        // ---- 本次运行的速率口径与熔断状态复位 ----
+        _spaceCode = null;
+        _runStartCompletedBytes = state.CompletedBytes;
+        Interlocked.Exchange(ref _pausedTicks, 0);
+        _runSw.Restart();
+
+        // 目标根可见性：上一次整盘迁移可能被源盘根属性（Hidden+System）带成隐藏，开始前先修一次
+        TargetRootGuard.EnsureVisible(job.TargetRoot, _log);
+
+        // ---- 定向修复范围（验证发现不一致 / 上次失败的对象）----
+        var scoped = onlyObjectIds is { Count: > 0 }
+            ? new HashSet<string>(onlyObjectIds, StringComparer.OrdinalIgnoreCase)
+            : null;
+
+        Report(progress, state, null, null, 0, scoped != null ? "开始定向修复" : "开始/继续传输");
+
+        _log.Information("传输开始: 共 {Total} 对象, 已完成 {Done}, 待传 {Bytes}{Scope}",
+            plan.Objects.Count, completedIds.Count, Format.Bytes(Math.Max(0, plan.TotalBytes - baseBytes)),
+            scoped != null ? $", 定向修复 {scoped.Count} 个对象（强制复拷）" : "");
 
         var interrupted = false;
+        var spaceAborted = false;   // 目标盘满导致本次运行提前结束（可恢复）
 
         foreach (var obj in plan.Objects)
         {
-            if (completedIds.ContainsKey(obj.ObjectId)) continue;
+            // 定向修复：名单外的对象直接跳过
+            if (scoped != null && !scoped.Contains(obj.ObjectId)) continue;
+
+            var prevReceipt = completedIds.TryGetValue(obj.ObjectId, out var pr) ? pr : null;
+            var wasCompleted = prevReceipt != null;
+            if (wasCompleted && !forceRecopy) continue;
 
             // ---- 暂停检查点（对象边界，协作式暂停生效处）----
             var paused = await WaitIfPausedAsync(state, progress, ct);
@@ -201,30 +273,57 @@ public sealed class TransferOrchestrator
 
             state.CurrentObjectId = obj.ObjectId;
             _ctx.SaveState(state);
-            Report(progress, state, obj.ObjectId, obj.SourcePath, 0, $"开始对象 {obj.ObjectId}");
+            Report(progress, state, obj.ObjectId, obj.SourcePath, 0, $"开始对象 {obj.ObjectId}",
+                objTotal: Math.Max(obj.EstimatedBytes, 0), objLarge: obj.UseRestartablePass);
 
             var receipt = await RunOneObjectAsync(obj, job, state, baseBytes, progress, ct);
             if (receipt == null) { interrupted = true; break; }  // 取消/Immediate 暂停导致中断
 
             _ctx.SaveReceipt(receipt);
+            // 复拷已完成对象：先扣掉上一次计入的字节，避免同一对象被累计两次
+            if (wasCompleted) baseBytes -= prevReceipt!.TargetBytes;
             baseBytes += receipt.TargetBytes;
             state.CompletedBytes = Math.Min(baseBytes, Math.Max(plan.TotalBytes, baseBytes));
             if (receipt.Status == ObjectStatus.Completed)
             {
-                state.CompletedObjects++;
+                if (!wasCompleted) state.CompletedObjects++;
                 completedIds[obj.ObjectId] = receipt;
             }
+            else if (wasCompleted)
+            {
+                // 复拷后反而没完成（例如文件被占用）：如实回退计数，不制造"已完成"假象
+                state.CompletedObjects--;
+                completedIds.Remove(obj.ObjectId);
+            }
+            // RootFiles 通道的目标就是目标根目录本身：robocopy 刚把源盘根的 Hidden+System 写了上去。
+            // 立刻清掉——即使任务被中断，用户也能在资源管理器里看到已迁移的数据。
+            if (obj.Kind == ObjectKind.RootFiles) TargetRootGuard.EnsureVisible(job.TargetRoot, _log);
+
             state.Percent = Percent(state);
             _ctx.SaveState(state);
             Report(progress, state, obj.ObjectId, obj.SourcePath, 0,
-                $"对象 {obj.ObjectId} {receipt.Status}（{Format.Bytes(receipt.TargetBytes)}）");
+                $"对象 {obj.ObjectId} {receipt.Status}（{Format.Bytes(receipt.TargetBytes)}）",
+                objDone: receipt.TargetBytes, objTotal: Math.Max(obj.EstimatedBytes, receipt.TargetBytes),
+                objLarge: obj.UseRestartablePass);
 
             if (receipt.Status == ObjectStatus.Interrupted) { interrupted = true; break; }
+            // 目标盘满：本次运行到此为止（剩余对象不再逐个白试），释放空间后 resume 接着跑
+            if (_spaceCode != null) { spaceAborted = true; break; }
         }
 
         // ---- 收尾 ----
         state.CurrentObjectId = null;
-        if (interrupted || ct.IsCancellationRequested)
+        if (spaceAborted || _spaceCode != null)
+        {
+            // 磁盘满不是"任务被中断"，而是"可恢复失败"：阶段如实记为 CompletedWithErrors，
+            // 把该做的下一步（释放空间 → resume）写进 LastError，绝不假装完成。
+            state.FailedObjects = Math.Max(0, state.TotalObjects - state.CompletedObjects);
+            state.Phase = JobPhase.CompletedWithErrors;
+            state.LastError = "目标磁盘空间不足：本次运行已提前停止（避免对每个文件反复重试）。" +
+                "请释放目标盘空间后执行 resume，已完成的对象不会重传。";
+            _log.Error("传输提前结束：目标盘空间不足（完成 {Done}/{Total} 对象）", state.CompletedObjects, state.TotalObjects);
+        }
+        else if (interrupted || ct.IsCancellationRequested)
         {
             state.Phase = File.Exists(_ctx.PauseRequestPath) ? JobPhase.Paused : JobPhase.Interrupted;
             state.LastError = "任务被暂停或中断；可用 resume 续传（已完成的对象不会重传）";
@@ -233,15 +332,28 @@ public sealed class TransferOrchestrator
         {
             // 保持 Paused（等待 resume 后再进入下一轮 RunAsync）
         }
+        else if (state.TotalObjects == 0)
+        {
+            // 空计划绝不能报"完成"（绿勾错觉防线）：所有选定路径都不存在/不可访问时，0 对象 ≠ 成功。
+            // 真实环境实测踩中：粘贴的源路径少一个反斜杠 → 全部被跳过 → 若显示"迁移完成"会酿成事故。
+            state.Phase = JobPhase.Failed;
+            state.LastError = "计划为空：所有选定路径均不存在或不可访问，没有任何数据被迁移。请核对源路径/共享名后重新预检。";
+            _log.Error("传输终止：计划为空（0 对象），按失败处理以防绿勾错觉");
+        }
         else
         {
             // 失败数 = 未完全完成的对象数（跨多次 resume 精确收敛，不重复计尝试次数）
             state.FailedObjects = state.TotalObjects - state.CompletedObjects;
             state.Phase = state.FailedObjects > 0 ? JobPhase.CompletedWithErrors : JobPhase.Completed;
         }
+        TargetRootGuard.EnsureVisible(job.TargetRoot, _log);   // 收尾再兜一次，杜绝"数据在但看不见"
         state.Percent = Percent(state);
+        state.BytesPerSecond = CumulativeSpeed(state.CompletedBytes);  // 收尾速率 = 本次运行的平均值（status 显示同源）
         _ctx.SaveState(state);
-        Report(progress, state, null, null, 0, $"阶段结束: {state.Phase}");
+        Report(progress, state, null, null, state.BytesPerSecond,
+            _spaceCode != null
+                ? "阶段结束: 目标磁盘空间不足，本次运行已提前停止（释放空间后 resume）"
+                : $"阶段结束: {state.Phase}");
         _log.Information("传输阶段结束: {Phase}（完成 {Done}/{Total} 对象，失败 {Failed}）",
             state.Phase, state.CompletedObjects, state.TotalObjects, state.FailedObjects);
         return state.Phase;
@@ -276,6 +388,17 @@ public sealed class TransferOrchestrator
         _activeObject = obj; _currentPass = passKind;
         _lastFileEventAt = DateTime.MinValue; _lastEnumAt = DateTime.MinValue;
 
+        // ---- 强制覆盖（修复专用）：先删目标侧同名文件，逼 robocopy 从共享重新拉取 ----
+        // 不删的话，robocopy 对"大小+时间相同"的文件一律跳过（实测 /IS /IT 也无效）。
+        if (ForceOverwriteFromSource)
+        {
+            var (pf, pb, pskip) = RepairPurge.PurgeTargetCopies(obj, job.Options, _matrix, _log);
+            if (pf > 0 || pskip > 0)
+                _log.Information("强制覆盖: 对象 {Id} 已删除目标侧 {Files} 个同名文件（{Bytes}），将从共享重新拉取{Skip}",
+                    obj.ObjectId, pf, Format.Bytes(pb),
+                    pskip > 0 ? $"；{pskip} 个大于分流阈值且本次不走 /Z 通道的文件已跳过不删" : "");
+        }
+
         // 进度轮询任务：周期性实测目标目录字节增长 → 更新 CompletedBytes/速度/ETA
         using var pollCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var speedState = new SpeedTracker();
@@ -289,15 +412,20 @@ public sealed class TransferOrchestrator
             _currentPass = passKind;
             var bulk = await RunPassWithRetryAsync(obj, passKind, roboLog, attempts, maxAttempts, receipt, ct);
             receipt.RobocopyExitCodeBulk = bulk?.ExitCode ?? -1;
+            if (_spaceCode != null) return MarkSpaceFailed(receipt);     // 目标盘满：可恢复失败，不重试不续跑
             if (_stormCode != null) return MarkStormFailed(receipt);     // 错误风暴：主动终止，不重试不续跑
             if (bulk == null) return MarkInterrupted(receipt);           // 取消
             if (!bulk.Success)
             {
                 receipt.ErrorClass = Classify(bulk);
-                receipt.ErrorDetail = bulk.LastErrorLine;
+                // 具体原因优先用"多少文件失败 + 主因 + 举例"的汇总；只留最后一行则等于没说（实测的"复制失败"投诉）
+                receipt.ErrorDetail = RobocopyRunner.SummarizeFailures(bulk.ExitCode, bulk.ErrorLines)
+                                      ?? bulk.LastErrorLine;
                 receipt.Status = ObjectStatus.Failed;
                 receipt.CompletedUtc = DateTime.UtcNow;
-                _log.Error("对象 {Id} Bulk 通道失败: Exit={Code} {Err}", obj.ObjectId, bulk.ExitCode, bulk.LastErrorLine);
+                _log.Error("对象 {Id} {Pass} 通道失败: Exit={Code}（{Meaning}） {Err}",
+                    obj.ObjectId, passKind, bulk.ExitCode,
+                    PCMig.Core.Util.ErrorTranslator.ExitCodeText(bulk.ExitCode), receipt.ErrorDetail);
                 return receipt;
             }
 
@@ -307,12 +435,14 @@ public sealed class TransferOrchestrator
                 _currentPass = PassKind.Large;
                 var large = await RunPassWithRetryAsync(obj, PassKind.Large, roboLog, attempts, maxAttempts, receipt, ct);
                 receipt.RobocopyExitCodeLarge = large?.ExitCode ?? -1;
+                if (_spaceCode != null) return MarkSpaceFailed(receipt);
                 if (_stormCode != null) return MarkStormFailed(receipt);
                 if (large == null) return MarkInterrupted(receipt);
                 if (!large.Success)
                 {
                     receipt.ErrorClass = Classify(large);
-                    receipt.ErrorDetail = large.LastErrorLine;
+                    receipt.ErrorDetail = RobocopyRunner.SummarizeFailures(large.ExitCode, large.ErrorLines)
+                                          ?? large.LastErrorLine;
                     receipt.Status = ObjectStatus.CompletedWithErrors; // 主体已成，大文件有问题单独标记
                     receipt.CompletedUtc = DateTime.UtcNow;
                     MeasureTarget(receipt, obj);
@@ -356,13 +486,23 @@ public sealed class TransferOrchestrator
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             receipt.Attempt = attempt;
+            // v0.3.8 大文件通道：auto 下首次用 /MT+/J（吞吐），重试时退 /Z（续传优先）
+            var restartable = RobocopyRunner.UseRestartableZ(_ctx.Definition.Options, pass, attempt);
+            _serialLargePass = pass == PassKind.Large && restartable;
+            if (pass == PassKind.Large)
+                _log.Information("对象 {Id} 大文件通道: {Channel}（第 {Attempt} 次尝试）",
+                    obj.ObjectId,
+                    RobocopyRunner.ChannelText(pass, restartable,
+                        RobocopyRunner.UseUnbufferedJ(obj.SourcePath, obj.TargetPath, _ctx.Definition.Options)),
+                    attempt);
             var result = await _runner.RunPassAsync(obj.SourcePath, obj.TargetPath, _ctx.Definition.Options,
-                _matrix, pass, roboLog, ct, obj.FileList);
+                _matrix, pass, roboLog, ct, obj.FileList, restartable);
             if (result.Killed) return null;
             if (result.Success) return result;
 
             var cls = Classify(result);
-            if (cls == ErrorClass.Transient && attempt < maxAttempts)
+            // 目标盘满时对象级重试毫无意义（空间不会因为等待而变多）→ 交给上面的熔断路径提前收尾
+            if (cls == ErrorClass.Transient && attempt < maxAttempts && _spaceCode == null)
             {
                 var backoff = TimeSpan.FromSeconds(10.0 * attempt);
                 _log.Warning("对象 {Id} [{Pass}] 失败(第{A}次, Transient): {Err}；{Backoff} 后重试",
@@ -434,12 +574,16 @@ public sealed class TransferOrchestrator
         Report(progress, state, state.CurrentObjectId, null, 0, "已暂停（等待 resume）");
         _log.Information("任务已暂停（{Mode}），等待 resume 或取消", _ctx.ReadPauseRequest() ?? "Cooperative");
 
+        var pauseSw = System.Diagnostics.Stopwatch.StartNew();
         while (File.Exists(_ctx.PauseRequestPath))
         {
             if (ct.IsCancellationRequested) return PauseOutcome.Canceled;
             try { await Task.Delay(1000, ct); }
             catch (OperationCanceledException) { return PauseOutcome.Canceled; }
         }
+        // 暂停等待时间不计入"本次运行平均速率"的分母：暂停不是传得慢（T01 速率口径的一部分）
+        pauseSw.Stop();
+        Interlocked.Add(ref _pausedTicks, pauseSw.Elapsed.Ticks);
 
         state.Phase = JobPhase.Running;
         _ctx.SaveState(state);
@@ -483,6 +627,9 @@ public sealed class TransferOrchestrator
         var baseline = hasPriorReceipt ? MeasureCurrentTargetBytes(obj) : 0;
         long lastBytes = baseline;
         var lastTime = DateTime.UtcNow;
+        // 进度停滞检测（v0.3.8）："界面长时间不动"是用户判断"卡死"并手动终止的直接原因，
+        // 必须由引擎如实报出"已经多少秒没有落盘字节增长"，而不是让用户自己猜。
+        var lastChangeAt = DateTime.UtcNow;
 
         while (!ct.IsCancellationRequested)
         {
@@ -514,18 +661,57 @@ public sealed class TransferOrchestrator
             var dt = (now - lastTime).TotalSeconds;
             var effBytes = Math.Max(nowBytes, lastBytes); // 进度单调，不回退
             if (dt > 0 && effBytes > lastBytes)
+            {
                 speed.Push((effBytes - lastBytes) / dt);
+                lastChangeAt = now;      // 有增长 = 没停滞
+            }
             lastBytes = effBytes; lastTime = now;
+            var stallSeconds = (now - lastChangeAt).TotalSeconds;
+
+            // 速度异常检测：当前 EMA 持续低于本任务峰值的 30%（且峰值曾 >5MB/s）超过 45 秒 → 提示
+            // （企业环境里最常见的原因是杀软/EDR 正在实时扫描每一个落盘文件）
+            if (speed.Current > _peakSpeed) _peakSpeed = speed.Current;
+            var slow = _peakSpeed > 5 * 1024 * 1024 && speed.Current > 0 && speed.Current < _peakSpeed * 0.3;
+            if (slow)
+            {
+                if (_anomalySince == DateTime.MinValue) _anomalySince = now;
+                else if (!_anomalyNotified && now - _anomalySince > TimeSpan.FromSeconds(45))
+                {
+                    _anomalyNotified = true;
+                    var pct = speed.Current / _peakSpeed * 100;
+                    _log.Warning("速度异常：当前 {Cur} 仅为峰值 {Peak} 的 {Pct:0}%（疑似安全软件实时扫描或源盘瓶颈）",
+                        Format.Speed(speed.Current), Format.Speed(_peakSpeed), pct);
+                    TransferNotice?.Invoke($"速度异常：当前 {Format.Speed(speed.Current)}，仅为本任务峰值 {Format.Speed(_peakSpeed)} 的 {pct:0}%。" +
+                        "常见原因：安全软件正在实时扫描传输的文件（可联系 IT 将 PCMig/robocopy 加入白名单），或旧电脑硬盘到达瓶颈。迁移仍在正常继续。");
+                }
+            }
+            else { _anomalySince = DateTime.MinValue; }
 
             // baseBytes = 之前已完成对象的字节；effBytes = 本对象当前落盘（含续传基线）
             state.CompletedBytes = baseBytes + Math.Max(0, effBytes);
             state.Percent = Percent(state);
-            state.BytesPerSecond = speed.Current;
+            // 对外一律报"本次运行的累计平均速率"（T01：旧口径偏低 4.6 倍，用户会误判剩余时间）；
+            // speed.Current 只用于上面的速度异常检测，不再出现在给用户看的数字里。
+            var shown = CumulativeSpeed(state.CompletedBytes);
+            if (shown <= 0) shown = speed.Current;   // 起步不足 0.5 秒时的兜底
+            state.BytesPerSecond = shown;
             _ctx.SaveState(state);
-            Report(progress, state, obj.ObjectId, obj.SourcePath, speed.Current,
-                $"复制中 {obj.ObjectId}（{Format.Speed(speed.Current)}）");
+            // 停滞超过 45 秒：把"当前对象 / 已传 A / 共 B"和"大文件可能数分钟无进度变化"一并报出去，
+            // 让用户知道引擎还活着、在等的是大文件而不是卡死（生产事故里用户据此误判并终止了任务）。
+            var msg = stallSeconds >= StallWarnSeconds
+                ? $"⏳ 进度停滞 {stallSeconds:0} 秒（未出现落盘字节增长）：当前对象 {obj.SourcePath}，已传 {Format.Bytes(Math.Max(0, effBytes - baseline))}/{Format.Bytes(Math.Max(obj.EstimatedBytes, 0))}。" +
+                  (obj.UseRestartablePass ? "该对象含大文件，复制期间可能数分钟无进度变化，属正常，请勿终止。" : "正在重试或等待源端响应，请查看日志。")
+                : $"复制中 {obj.ObjectId}（本次平均 {Format.Speed(shown)}）";
+            Report(progress, state, obj.ObjectId, obj.SourcePath, shown, msg,
+                objDone: Math.Max(0, effBytes - baseline),
+                objTotal: Math.Max(obj.EstimatedBytes, 0),
+                objLarge: obj.UseRestartablePass,
+                stall: stallSeconds);
         }
     }
+
+    /// <summary>进度停滞多久算"值得提示"（秒）。取 45 秒：小于最常见的"大文件首字节延迟"窗口。</summary>
+    public const double StallWarnSeconds = 45;
 
     private long MeasureCurrentTargetBytes(PlannedObject obj)
     {
@@ -555,6 +741,13 @@ public sealed class TransferOrchestrator
 
     private static ErrorClass Classify(RobocopyRunResult r)
     {
+        // 目标盘空间不足 → 可恢复（Transient）：空间是外部条件，释放后 resume 就该重试（T07）。
+        // 注意：它不进入"对象级退避重试"——磁盘满时等待 10/20/30 秒毫无意义，
+        // 由 _spaceCode 熔断路径提前结束本次运行（见 RunPassWithRetryAsync 的重试条件）。
+        if (IsSpaceErrorText(r.LastErrorLine)
+            || (r.ErrorLines != null && r.ErrorLines.Any(IsSpaceErrorText)))
+            return ErrorClass.Transient;
+
         var detail = r.LastErrorLine ?? "";
         // 网络类错误（53/64/59/1219/1236 等）→ Transient；其余默认 Permanent
         string[] transientHints = ["ERROR 53", "ERROR 59", "ERROR 64", "ERROR 1219", "ERROR 1236",
@@ -563,14 +756,53 @@ public sealed class TransferOrchestrator
             ? ErrorClass.Transient : ErrorClass.Permanent;
     }
 
+    /// <summary>目标盘空间不足的错误码：112=磁盘空间不足，39=磁盘已满，0x70/0x27 为等价十六进制写法。</summary>
+    private static bool IsSpaceErrorCode(string? code) => code is "112" or "39"
+        or "0x00000070" or "0x70" or "0x00000027" or "0x27";
+
+    /// <summary>错误文本里是否写着"磁盘空间不足"（无错误码时的兜底判据）。</summary>
+    private static bool IsSpaceErrorText(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        return System.Text.RegularExpressions.Regex.IsMatch(text,
+            @"(?:错误|ERROR)s+(?:112|39)|0x0*70|0x0*27|磁盘空间不足|磁盘已满|insufficient disk space",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
+    /// <summary>磁盘满熔断：对象记为"可恢复失败"（Transient），并如实说明已提前终止、怎么继续。</summary>
+    private ObjectReceipt MarkSpaceFailed(ObjectReceipt receipt)
+    {
+        receipt.ErrorClass = ErrorClass.Transient;   // 可恢复：空间是外部条件，不是数据/权限问题
+        receipt.Status = ObjectStatus.Failed;
+        receipt.CompletedUtc = DateTime.UtcNow;
+        receipt.ErrorDetail = $"目标磁盘空间不足（错误码 {_spaceCode}）：已主动终止本对象并提前结束本次运行，" +
+            "避免对每个文件反复重试。请先释放目标盘空间（或更换目标盘）再执行 resume——" +
+            "已完成的对象不会重传，失败对象会自动重试。";
+        _log.Error("对象 {Id} 因目标盘空间不足终止：{Detail}", receipt.ObjectId, receipt.ErrorDetail);
+        return receipt;
+    }
+
+    /// <summary>
+    /// 本次运行的平均速率 = 本次运行真正新增的落盘字节 ÷ 本次运行的有效用时（不含暂停等待）。
+    /// 与界面上的"任务实测"文案同一口径；不再用 robocopy 日志解析出的滞后瞬时值。
+    /// </summary>
+    private double CumulativeSpeed(long completedBytes)
+    {
+        var elapsed = _runSw.Elapsed - TimeSpan.FromTicks(Interlocked.Read(ref _pausedTicks));
+        if (elapsed.TotalSeconds < 0.5) return 0;
+        var done = completedBytes - _runStartCompletedBytes;
+        if (done <= 0) return 0;
+        return done / elapsed.TotalSeconds;
+    }
+
     private void Report(IProgress<ProgressSnapshot>? progress, JobState s, string? objId, string? objPath,
-        double speed, string msg)
+        double speed, string msg, long objDone = 0, long objTotal = 0, bool objLarge = false, double stall = 0)
     {
         var eta = speed > 0 && s.TotalBytes > 0 ? Math.Max(0, s.TotalBytes - s.CompletedBytes) / speed : double.NaN;
         progress?.Report(new ProgressSnapshot(
             s.Phase, s.TotalObjects, s.CompletedObjects, s.FailedObjects,
             s.TotalBytes, s.CompletedBytes, Percent(s),
-            speed, eta, objId, objPath, msg));
+            speed, eta, objId, objPath, msg, objDone, objTotal, objLarge, stall));
     }
 
     private sealed class SpeedTracker

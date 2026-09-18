@@ -1,4 +1,4 @@
-using Serilog;
+﻿using Serilog;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -22,7 +22,8 @@ public sealed class MigrationMatrix
     /// <summary>全局排除的文件名（不区分大小写），将作为 robocopy /XF 传入。</summary>
     public List<string> ExcludedFileNames { get; set; } = new()
     {
-        "pagefile.sys", "hiberfil.sys", "swapfile.sys", "DumpStack.log.tmp", "desktop.ini"
+        "pagefile.sys", "hiberfil.sys", "swapfile.sys", "DumpStack.log.tmp", "desktop.ini", "Thumbs.db",
+        "~$*", ".~lock*#"  // Office/WPS/LibreOffice 瞬态锁文件（通配符，与 robocopy /XF 同语义）
     };
 
     /// <summary>凭据/安全类内容永不迁移（Policy 级，双重保险：既不复制也不写入目标）。</summary>
@@ -32,7 +33,7 @@ public sealed class MigrationMatrix
         "Login Data", "Login Data-journal", "Cookies", "Cookies-journal", "Web Data", "Web Data-journal"
     };
 
-    /// <summary>云占位符策略：Warn=记录警告并继续（默认）；Skip=不复制（robocopy 层面无法直接过滤，靠枚举期标记）。</summary>
+    /// <summary>云占位符策略：Warn=记录警告并继续（默认）；Skip=不复制（robocopy /XA:O 排除脱机文件，扫描/验证同口径剔除）。</summary>
     public string CloudPlaceholderPolicy { get; set; } = "Warn";
 
     public int LargeFileThresholdMB { get; set; } = 512;
