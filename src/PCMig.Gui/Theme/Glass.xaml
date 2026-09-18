@@ -278,7 +278,7 @@
     <SolidColorBrush x:Key="ScrollThumb"        Color="#2E5A6472"/>
     <SolidColorBrush x:Key="ScrollThumbHover"   Color="#4A5A6472"/>
     <SolidColorBrush x:Key="ScrollThumbPressed" Color="#665A6472"/>
-    <s:Double x:Key="RadiusScroll">4</s:Double>
+    <CornerRadius x:Key="RadiusScroll">4</CornerRadius>
     <RadialGradientBrush x:Key="EdgeHighlightThin" GradientOrigin="0.06,0.08" Center="0.06,0.08" RadiusX="1.25" RadiusY="1.25">
         <GradientStop Color="#47FFFFFF" Offset="0"/>
         <GradientStop Color="#1FFFFFFF" Offset="0.30"/>
