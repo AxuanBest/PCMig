@@ -23,7 +23,7 @@
 
 **`I:\K\deepseek work` 是旧的工作文件（移动硬盘镜像副本），只可作覆盖目标，绝不可作为事实依据、代码来源或判断基准。**
 
-工作区根目录纪律：根目录只允许 `PCMig\`、`AGENTS.md` 与 `labs\`/`archive\`/`projects\`/`dsh-data\` 四个分类目录，一次性脚本一律写进 `archive\scripts\`。
+工作区根目录纪律：根目录只允许 `PCMig\`、`AGENTS.md`、`INDEX.md` 与 `labs\`/`archive\`/`projects\`/`dsh-data` 四个分类目录，一次性脚本一律写进 `archive\scripts\`。
 
 ## 三、九条不可违反的死律（详见 `docs/发版铁律.md`）
 
