@@ -43,7 +43,7 @@ public sealed class RobocopyRunner
     private volatile string? _currentDir;
 
     /// <summary>robocopy 体积列（"669.5 m" / "2.0 g" / 裸字节）→ 近似字节数（仅供进度展示）。</summary>
-    private static long ParseRoboSize(string num, string unit)
+    internal static long ParseRoboSize(string num, string unit)
     {
         num = num.Replace(",", "");
         if (!double.TryParse(num, System.Globalization.NumberStyles.Float,
@@ -302,7 +302,7 @@ public sealed class RobocopyRunner
     }
 
     /// <summary>从 robocopy 错误行里抠出出错路径（跳过本地化消息，兼容 UNC 与盘符，允许路径含空格）。</summary>
-    private static string? ExtractErrorPath(string line)
+    internal static string? ExtractErrorPath(string line)
     {
         var hex = line.IndexOf("0x", StringComparison.Ordinal);
         var tail = hex >= 0 ? line[hex..] : line;

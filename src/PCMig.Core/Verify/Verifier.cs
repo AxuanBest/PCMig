@@ -252,7 +252,7 @@ public sealed class Verifier
         return samples;
     }
 
-    private static int StableHash(string s)
+    internal static int StableHash(string s)
     {
         // FNV-1a：跨进程稳定的字符串哈希，保证抽样集合确定性
         unchecked

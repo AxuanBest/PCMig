@@ -284,11 +284,11 @@ public sealed class PreflightChecker
     }
 
     /// <summary>从 IOException/Win32Exception 中提取 Win32 错误码（NetworkShare 消息格式为 "（错误 N）"）。</summary>
-    private static int ExtractWin32Error(Exception? ex)
+    internal static int ExtractWin32Error(Exception? ex)
     {
         if (ex is System.ComponentModel.Win32Exception w) return w.NativeErrorCode;
         if (ex == null) return -1;
-        var m = System.Text.RegularExpressions.Regex.Match(ex.Message, @"错误 (d+)");
+        var m = System.Text.RegularExpressions.Regex.Match(ex.Message, @"错误\s*(\d+)");
         return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : -1;
     }
 

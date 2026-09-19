@@ -757,15 +757,15 @@ public sealed class TransferOrchestrator
     }
 
     /// <summary>目标盘空间不足的错误码：112=磁盘空间不足，39=磁盘已满，0x70/0x27 为等价十六进制写法。</summary>
-    private static bool IsSpaceErrorCode(string? code) => code is "112" or "39"
+    internal static bool IsSpaceErrorCode(string? code) => code is "112" or "39"
         or "0x00000070" or "0x70" or "0x00000027" or "0x27";
 
     /// <summary>错误文本里是否写着"磁盘空间不足"（无错误码时的兜底判据）。</summary>
-    private static bool IsSpaceErrorText(string? text)
+    internal static bool IsSpaceErrorText(string? text)
     {
         if (string.IsNullOrEmpty(text)) return false;
         return System.Text.RegularExpressions.Regex.IsMatch(text,
-            @"(?:错误|ERROR)s+(?:112|39)|0x0*70|0x0*27|磁盘空间不足|磁盘已满|insufficient disk space",
+            @"(?:错误|ERROR)\s+(?:112|39)|0x0*70\b|0x0*27\b|磁盘空间不足|磁盘已满|insufficient disk space",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 
