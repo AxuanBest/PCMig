@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>pcmig</AssemblyName>
     <RootNamespace>PCMig.Cli</RootNamespace>
-    <Version>0.4.5</Version>
+    <Version>0.4.6</Version>
     <AssemblyTitle>PCMig 迁移工具（命令行）</AssemblyTitle>
     <Product>PCMig 迁移工具</Product>
     <Description>由 郑子轩 个人制作 · 内网 Windows 用户环境/数据迁移命令行</Description>
