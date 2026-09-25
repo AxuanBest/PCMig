@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>PCMig.WinUI</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <UseWinUI>true</UseWinUI>
+    <!-- Unpackaged 普通桌面应用：免 MSIX / 免商店身份 -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <!-- Windows App SDK 运行时随包自带：终端用户无需另外安装 Windows App Runtime -->
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 固定 Stable 版本：避免浮动版本在企业网络下的长时间解析/大包重试。 -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PCMig.Core\PCMig.Core.csproj" />
+    <None Include="..\..\matrix\migration-matrix.yaml" Link="matrix\migration-matrix.yaml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <!--
+    WinUI 3 已知缺口：self-contained publish 不会把应用自身的资源索引 <App>.pri 带进发布目录，
+    表现为发布版启动即 XamlParseException("XAML parsing failed")，而 bin 目录下的程序正常。
+    这里显式把 $(TargetDir)$(TargetName).pri 复制进发布目录；不改动任何运行时行为。
+  -->
+  <Target Name="PcmigWinUICopyAppPriToPublish" AfterTargets="Publish">
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pri"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(TargetDir)$(TargetName).pri')" />
+  </Target>
+</Project>
