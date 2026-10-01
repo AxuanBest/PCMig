@@ -23,8 +23,8 @@
 | 测试基线 | **Core 290 / Diagnostics 286 = 576 通过 / 0 失败** |
 | Build | sln **0 error / 4 warning**（既有：xUnit2031 ×1 + WMC1506 ×3，无新增） |
 | Solution | `PCMig.sln` 现含 **8 个工程**（已补齐 WinUI 与 Diagnostics） |
-| Git | checkpoint `2c0183b` → solution `7ba2bc1` → governance `c5e668c`（详见 §二） |
-| tracked | 100 → **390**（checkpoint）→ **391**（governance） |
+| Git | checkpoint `2c0183b` → solution `7ba2bc1` → governance `c5e668c` → 最终交接 `73fcb05`（详见 §二） |
+| tracked | 100 → **390**（checkpoint）→ **391**（governance）→ **393**（最终交接） |
 | docs 顶层 `.md` | 83 → **29** |
 | 当前交接 | **本文档**（`docs\工作交接-20261001-Workspace治理完成与D6.2起点.md`） |
 | 唯一文档入口 | `docs\INDEX.md` |
@@ -46,7 +46,7 @@
 | **M3** | 历史 / QA / 已取代文档治理（人类总结留 docs，机器证据留 archive） | 新建 `docs\qa\history\` 移入 **7 篇** QA 历史；新建 `docs\archive\` 移入 **7 项**历史交付/审计/旧清单 |
 | **M4** | P-G6 合并 + P-G9 文档状态债 | `docs\公司域环境验证清单.md` 两块独有内容（IT 申请话术、安全团队评审要点）合并进 `docs\First-Day-Company-Test-Checklist.md` §八/§九后归档；PMML 页眉 `FREEZE CANDIDATE` → `PMML v1.0 — FROZEN`；诊断架构方案页眉 `DRAFT / 未获实施授权` → `APPROVED / IMPLEMENTED THROUGH D6.1 — D6.2 VALIDATION PENDING` |
 | **S1** | 修 `PCMig.sln` 治理缺口（P-G1） | 补入 `PCMig.WinUI`、`PCMig.Diagnostics`，现 **8 工程**；未改任何 csproj 业务属性 |
-| **G2** | Workspace Governance Commit | `7ba2bc1`（sln membership）+ `c5e668c`（governance，69 条：A 1 / M 12 / R 56，+299 / −41） |
+| **G2** | Workspace Governance Commit | `7ba2bc1`（sln membership）+ `c5e668c`（governance，69 条：A 1 / M 12 / R 56，+299 / −41）+ `73fcb05`（最终交接与第二轮报告：4 files changed, +480 / −6，含 1 条 R100 归档 rename） |
 | **完整验证** | 结构修改后完整 Build/Test | sln **0 error / 4 warning**（既有）；**576 / 0** |
 | **C1/C2/C3** | 最后清可重建产物 | 释放 **1,174,088,631 B ≈ 1.09 GiB**（明细见 §五） |
 
@@ -55,13 +55,16 @@
 ## 二 三个 Commit 与 Git 现状
 
 ```
+73fcb05  docs: add governance completion handover and second-round report (2026-10-01 13:47:29 +0800)
 c5e668c  chore: govern workspace and documentation layout      (2026-10-01 13:45:12 +0800)
 7ba2bc1  chore: complete PCMig solution membership             (2026-10-01 13:45:11 +0800)
 2c0183b  checkpoint: preserve v0.5.0 PMML frozen and Diagnostics D6.1  (2026-10-01 13:39:12 +0800)
 c9aef30  v0.5.0 WinUI technical baseline before visual reconstruction   ← 治理前的旧 HEAD
 ```
 
-- 完整 hash：checkpoint `2c0183beebcd6b06d3c1c2e903204a739f1bc104`；solution `7ba2bc19bbd42229be798b3ce43087cde459bc31`；governance `c5e668cda016801427b329fd3e45ec21205fd952`。
+- 完整 hash：checkpoint `2c0183beebcd6b06d3c1c2e903204a739f1bc104`；solution `7ba2bc19bbd42229be798b3ce43087cde459bc31`；governance `c5e668cda016801427b329fd3e45ec21205fd952`；最终交接 `73fcb05c005a10d80f6f6e486f58f28089fcbe5a`。
+
+> 上表为**本轮治理的功能提交**。其后一次纯文档同步提交（"docs: sync commit hashes"）仅修正本报告与交接文档中的 hash 引用，不含任何内容变更。
 - 分支：`feature/winui-v0.5.0`；仓库根 = `E:\Project\deepseek work\PCMig` 本身。
 - `2c0183b` 的含义：**"Workspace Cleanup 开始之前，真实、可恢复的 PCMig 当前产品状态"**——PMML v1.0、Diagnostics D1–D6.1、当前 WinUI/Core、当前测试、当前正式文档全部进入 Git。
 - 治理后 `git status --porcelain` 仅剩 `?? archive/`：`archive/`（备份、证据、截图、历史安装包、探针工程）**有意不纳管**，按用户明令"不要为了全部纳管把数百 MB raw evidence 强塞进 Git"。
@@ -175,7 +178,7 @@ docs\
 - **回退路径**：`git stash`（未提交改动）/ `git revert <hash>`（已提交改动）。
 - **严禁**：`git reset --hard`、`git checkout .`、`git restore .`、`git clean -fd`。
 - 结构变更全部是 rename + 索引 + 文档 metadata + solution membership；代码业务逻辑零改动、PMML 正文零改动、Diagnostics 行为零改动。
-- 若不满意本轮治理，可 `git revert c5e668c 7ba2bc1`（checkpoint `2c0183b` 保留全部工作成果，不会丢失）。
+- 若不满意本轮治理，可 `git revert 73fcb05 c5e668c 7ba2bc1`（checkpoint `2c0183b` 保留全部工作成果，不会丢失）。
 - 本轮**未发版**、**未跑 `tools\release.ps1`**、**未改 tools 三脚本**、**未执行任何破坏性 git 命令**。
 - 交付区 `E:\Project\PCMig`、工作副本 `D:\PCMig`、镜像 `I:\K\deepseek work` 本轮完全未动。
 
@@ -190,7 +193,7 @@ D6.2 的既有事实（承接 D6.1 交接，见 `docs\handover\history\工作交
 - 需要先补的事件口径：23 个 `Reserved` 事件、`DIA.SerializationFailed` 事件化、`FS.FileReadFailure` 口径、Preflight code 派生规则。
 - 未决问题清单 P-1…P-15 见 D6.1 交接 §十一。
 
-**干净起点已就绪**：Git 可恢复（391 tracked / 3 commits）、Solution 代表完整产品（8 工程）、docs 有唯一入口、顶层不再被 39 篇交接淹没、历史与证据零损失、构建垃圾已清、历史安装包全保留。
+**干净起点已就绪**：Git 可恢复（393 tracked / 4 commits）、Solution 代表完整产品（8 工程）、docs 有唯一入口、顶层不再被 39 篇交接淹没、历史与证据零损失、构建垃圾已清、历史安装包全保留。
 
 ---
 

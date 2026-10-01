@@ -74,10 +74,10 @@ PCMig\
 
 | 项目 | Before | After |
 |---|---|---|
-| HEAD | `c9aef30`（v0.5.0 WinUI technical baseline） | `c5e668c`（chore: govern workspace and documentation layout） |
+| HEAD | `c9aef30`（v0.5.0 WinUI technical baseline） | `73fcb05`（docs: add governance completion handover and second-round report） |
 | 分支 | `feature/winui-v0.5.0` | 同左 |
 | `git status --porcelain` | **190** 条 | **1** 条（`?? archive/`，有意不纳管） |
-| 提交 | 未提交 | 3 个新 commit（§九） |
+| 提交 | 未提交 | 4 个新 commit（§九） |
 
 ---
 
@@ -85,12 +85,12 @@ PCMig\
 
 | 项目 | Before | After |
 |---|---|---|
-| tracked 文件数 | **100** | **391**（+ 本轮新增交接与报告 → 393） |
+| tracked 文件数 | **100** | **393** |
 | porcelain 未跟踪条目 | 144 | 1（`archive/`） |
 | 未跟踪文件总数（`--untracked-files=all`） | ~1900（折叠显示为 144 条目录条目） | **2238**，**全部位于 `archive\` 下**，非 archive 未跟踪 = **0** |
 | ignored | 43 | 43（`**/bin/`、`**/obj/`、`dist/`、`.vs/`、`lab/*.txt|png|iso` 等，未改） |
 
-tracked 100 → 390 由 checkpoint `2c0183b` 完成（`M 46 / A 290`，explicit allowlist，**UNKNOWN = ∅**，无 `git add -A`）；governance `c5e668c` 增加 1 个新文件（`docs\INDEX.md`）。
+tracked 100 → 390 由 checkpoint `2c0183b` 完成（`M 46 / A 290`，explicit allowlist，**UNKNOWN = ∅**，无 `git add -A`）；governance `c5e668c` 增加 1 个新文件（`docs\INDEX.md`）；最终交接与第二轮报告由 `73fcb05` 提交（`4 files changed, +480 / −6`，含 D6.1 旧交接的 R100 归档 rename）。
 
 ---
 
@@ -189,6 +189,9 @@ tracked 100 → 390 由 checkpoint `2c0183b` 完成（`M 46 / A 290`，explicit 
 | `2c0183beebcd6b06d3c1c2e903204a739f1bc104` | 2026-10-01 13:39:12 | `checkpoint: preserve v0.5.0 PMML frozen and Diagnostics D6.1` | 336 files, +70,992 / −1,327 |
 | `7ba2bc19bbd42229be798b3ce43087cde459bc31` | 2026-10-01 13:45:11 | `chore: complete PCMig solution membership` | `PCMig.sln` +15 / −1 |
 | `c5e668cda016801427b329fd3e45ec21205fd952` | 2026-10-01 13:45:12 | `chore: govern workspace and documentation layout` | 69 条：A 1 / M 12 / R 56，+299 / −41 |
+| `73fcb05c005a10d80f6f6e486f58f28089fcbe5a` | 2026-10-01 13:47:29 | `docs: add governance completion handover and second-round report` | 4 files changed, +480 / −6（A 2 / M 1 / R 1） |
+
+> 上表为**本轮治理的功能提交**。其后一次纯文档同步提交（"docs: sync commit hashes"）仅修正本报告与交接文档中的 hash 引用，不含任何内容变更。
 
 `git diff --cached` 复核：主要呈现 **rename 56 / 索引登记 / 文档 metadata / solution membership**，无大规模业务代码变化（最大单文件改动是 `docs\INDEX.md` 新增 220 行）。**密钥扫描：staged diff 886 行宽匹配 14 处，全部是"关于口令的说明文字"，无任何真实凭据**；无私钥块、无 IP 明文。
 

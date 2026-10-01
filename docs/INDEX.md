@@ -31,7 +31,7 @@
 | 测试基线 | `PCMig.Core.Tests` 290 + `PCMig.Diagnostics.Tests` 286 = **576 / 0** |
 | Solution | `PCMig.sln` **8 个工程**（2026-10-01 补齐 WinUI 与 Diagnostics；见下文 §十） |
 | 构建基线 | `dotnet build PCMig.sln -c Release` → **0 error / 4 warning**（既有：xUnit2031 ×1 + WMC1506 ×3，无新增） |
-| Git 分支 / Commits | `feature/winui-v0.5.0` · checkpoint **`2c0183b`**（治理前真实产品状态）→ solution **`7ba2bc1`** → governance **`c5e668c`** |
+| Git 分支 / Commits | `feature/winui-v0.5.0` · checkpoint **`2c0183b`**（治理前真实产品状态）→ solution **`7ba2bc1`** → governance **`c5e668c`** → 最终交接·报告 **`73fcb05`** |
 | Workspace 治理 | **COMPLETE**（2026-10-01 第二轮：docs 顶层 `.md` 83 → 29；清出 ≈1.09 GiB 可重建产物） |
 | 当前工作交接 | `docs\工作交接-20261001-Workspace治理完成与D6.2起点.md` |
 | 文档入口 | 本文件（`docs\INDEX.md`） |
