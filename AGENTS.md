@@ -7,7 +7,43 @@
 
 **PCMig** —— 企业内网 Windows 换机数据迁移工具（C#/.NET 8，WPF GUI + CLI，Robocopy 双通道引擎）。
 在新电脑运行，输入旧电脑 IP/电脑名 + 凭据，经 SMB 把旧机共享盘数据"直拉"过来。
-当前版本 **v0.4.8**（2026-09-19）。
+**当前状态（2026-10-01 Workspace 治理后）**。开工前以 `docs\INDEX.md` 与当前工作交接为准；下表哈希与数字均为治理当时从工作区实读，不凭记忆。旧状态（如「当前版本 v0.4.8（2026-09-19）」「PMML 仍是 Freeze Candidate」「Diagnostics 未获实施授权」「docs 顶层历史交接才是入口」「Solution 不完整」）**一律作废**。
+
+| 项 | 当前值 |
+|---|---|
+| 权威工作区（唯一事实来源） | `E:\Project\deepseek work\PCMig`（交付区 `E:\Project\PCMig`；`I:\K\deepseek work` 永不作为事实依据或代码来源） |
+| 文档入口 | `docs\INDEX.md`（**唯一导航入口**） |
+| 当前工作交接（Current Handover） | `docs\工作交接-20261001-Workspace治理完成与D6.2起点.md`（旧的 D6.1 交接已归档在 `docs\handover\history\`，**只作历史追溯，不再是 Current**） |
+| Workspace Governance Phase 2 | **COMPLETE** |
+| Git Recovery Baseline | **ESTABLISHED** |
+| Solution Governance | **COMPLETE** —— `PCMig.sln` 覆盖当前 **8 个工程**（含 `src\PCMig.WinUI` 与 `src\PCMig.Diagnostics`；治理前只有 6 个） |
+| Docs Governance | **COMPLETE** —— docs 顶层 `.md` 83 → **29**；历史交接在 `docs\handover\history\`（42 篇），只作追溯 |
+| PMML | **v1.0 — FROZEN** |
+| Diagnostics | **D6.1 — COMPLETE** |
+| 发布线 / 开发线 | 发布 **v0.4.9**；开发 **v0.5.0 WinUI**（分支 `feature/winui-v0.5.0`，**未发版**） |
+| 当前 Git | 分支 `feature/winui-v0.5.0`：checkpoint **`2c0183b`** → solution **`7ba2bc1`** → governance **`c5e668c`** → 交接与报告 **`73fcb05`** / **`6f002ac`** / **`beb2902`** → **HEAD `f592d8c`** |
+| 验证基线 | Build `dotnet build PCMig.sln -c Release` → **0 error / 4 warning**（全部既有：xUnit2031 ×1 + WMC1506 ×3）；Tests **Core 290 + Diagnostics 286 = 576 / 0**。证据：`archive\pcmig-governance-20261001\s1-build.log`、`s1-test.log` |
+| 下一步 | **D6.2 Real World Validation**（等用户明确触发语；未获授权前不得开始） |
+| Stage B | **NOT AUTHORIZED / NOT STARTED** |
+| 三 VM / 210 万文件 / 大规模故障注入 | **NOT STARTED** |
+| Mnemon memory sync | **PARTIAL / Provider path available** —— 当前状态摘要已写入 Mnemon Documents（Document `57fe2a88-20ee-4c6b-ac7a-6cacf95cb4d1`）；CLI 直写路径在本机不可用（缺 `mnemon.exe`，Memory Space 写入被拒）。**这不代表治理未完成**，待 Provider 可用后再补同步 |
+
+## 一点五、新会话必读链（开工顺序，强制）
+
+任何新的 PCMig 会话 / Agent，开工前按下列顺序读，不得跳读、不得在几十篇历史 Markdown 里随手挑一篇当依据：
+
+1. `E:\Project\deepseek work\AGENTS.md`（工作区最高约束）
+2. `E:\Project\deepseek work\PCMig\AGENTS.md`（本文件：死律 + 权限条款 + PMML 入口 + 当前状态）
+3. `docs\INDEX.md`（当前文档**唯一导航入口**）
+4. 由 `docs\INDEX.md` 指向的 **Current Handover**
+5. 再按任务类型读对应专项文档：
+   - **UI / 视觉 / 动效** → PMML 链：`docs\PCMig-Visual-Motion-Language.md` → `docs\PMML-UI修改硬性规范.md` → `docs\PMML-Implementation-Audit.md` → `docs\PMML-Legacy-Deviations.md`
+   - **Diagnostics** → `docs\方案-诊断中心与自诊断架构.md` + `docs\诊断系统实施-阶段证据.md` / `诊断系统实施-事件覆盖矩阵.md` / `诊断系统实施-配置项接线审计.md` / `诊断系统实施-D6.1-进度.md`
+   - **QA / Testing** → `docs\qa\` + `docs\测试报告-公司环境.md` + `docs\First-Day-Company-Test-Checklist.md` + `docs\首日实测检查表.md`
+   - **Release** → `docs\发版铁律.md` + `docs\发布流程.md` + `docs\稳定性守则.md` + `docs\稳定性验收标准.md`
+   - **History** → `docs\handover\history\` + `docs\archive\`（**只作历史追溯，不得当作当前规则或当前状态依据**）
+
+`docs\INDEX.md` 是当前文档的唯一导航入口，但**它不是最高约束**：最高约束仍是本文件、工作区根 `AGENTS.md`、`docs\发版铁律.md` 及 PMML 等专项强制规则，INDEX 与当前交接都不得覆盖它们，冲突时以约束层为准。INDEX 只解决一件事：防止新会话在几十篇历史 Markdown 中随机挑文档。
 
 ## 二、坐标（唯一权威，不许用错）
 
@@ -41,7 +77,7 @@
 
 ## 三点五、权限放宽不构成豁免（AI 强制条款，v0.4.7 起）
 
-本节为**工具权限与项目纪律的边界条款**，与工作区根 `I:\deepseek work\AGENTS.md` 同名条款互为补充，冲突时**以更严者为准**。
+本节为**工具权限与项目纪律的边界条款**，与工作区根 `E:\Project\deepseek work\AGENTS.md` 同名条款互为补充，冲突时**以更严者为准**。
 
 会话权限预设切到 **完全权限**（`danger-full-access` + 审批 `never`）、或 DSH 客户端以**管理员身份**启动、或文件沙箱不再限制工作区外写入时，本条自动生效：
 
