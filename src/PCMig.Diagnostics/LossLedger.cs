@@ -66,6 +66,13 @@ public readonly record struct LossLedgerSnapshot(
     public long OperationalEpoch { get; init; }
 
     public long CriticalEpoch { get; init; }
+
+    /// <summary>
+    /// ★ D6.3 §9（审计 P2-1）★ 保留性淘汰数（内存环按容量覆盖）。
+    /// **不属于丢失** ⇒ 既不进 <see cref="TotalEvicted"/>，也不让健康降级；
+    /// 但它必须可见（否则就成了"悄悄丢"），且与"环只保最近一段"的窗口级 partial 各说各话。
+    /// </summary>
+    public long RetentionEvictionCount { get; init; }
 }
 
 /// <summary>
@@ -94,6 +101,18 @@ public sealed class LossLedger
     private long _stickyCriticalLost;
     private long _retentionEvictions;
     private long _coalescedDrops;
+
+    /// <summary>
+    /// ★ D6.3 §3 ★ 一次丢弃被记账后触发（<c>branch, sequence</c>）。
+    ///
+    /// 用途：让**连续确认水位**（<see cref="SequenceLedger"/>）知道"某序号已确定不会落盘"，
+    /// 从而跨过它继续前进 —— 已知丢弃与未知缺口必须区分开：前者进台账可解释，
+    /// 后者是"说不清"的证据洞。
+    ///
+    /// 纯保留策略（<see cref="LossKind.FlightOverwrite"/>：内存环按容量覆盖）**不**触发：
+    /// 环覆盖不代表那条证据没落盘。序号为 0（家族级记账）也照常触发，由订阅方自行按序号过滤。
+    /// </summary>
+    public event Action<string, long>? Dropped;
 
     /// <summary>全局丢失世代（任何丢失都会 +1）。**规则不应直接用它判完整性**，用分档世代。</summary>
     public long Epoch => Interlocked.Read(ref _epoch);
@@ -170,9 +189,6 @@ public sealed class LossLedger
                 Kind = kind,
             };
 
-            if (evicted) Interlocked.Increment(ref _totalEvicted);
-            else Interlocked.Increment(ref _totalDropped);
-
             // ★ 分档推进：只有"该级或更高级"的证据真的被丢，才推进该档世代 ★
             //
             // ★ D6.1 §4 关键区分 ★
@@ -181,11 +197,20 @@ public sealed class LossLedger
             //   · Coalesced（队列 DropOldest 合并）：条目**已被接受**后又被合并掉 ⇒ 该分支的
             //     证据确实不完整（可见、要降级），但它不是故障，也不置 sticky critical。
             //   · 其余（Verbose/Operational/Critical 丢失、analyzer/writer 丢失）：按档推进。
+            //
+            // ★ D6.3 §9（审计 P2-1）★ 保留策略**不得**计进"证据不完整"那一档：
+            //   环覆盖以前会推进 TotalEvicted，而 TotalEvicted 正是健康快照的 EventsEvicted，
+            //   于是同一件事在 Coverage 里叫"不是丢失"、在 Health 里叫"EvidenceIncomplete"。
+            //   现在两份账目唯一：RetentionEvictions（保留，可见但不降级）与
+            //   TotalEvicted/TotalDropped（真的丢了，降级）。**先返回，再记账。**
             if (kind == LossKind.FlightOverwrite)
             {
                 Interlocked.Increment(ref _retentionEvictions);
                 return;
             }
+
+            if (evicted) Interlocked.Increment(ref _totalEvicted);
+            else Interlocked.Increment(ref _totalDropped);
 
             Interlocked.Increment(ref _epoch);                                  // Verbose 档
             if (deliveryClass != DeliveryClass.Verbose)
@@ -202,6 +227,10 @@ public sealed class LossLedger
 
             _branchEpoch[branch] = (_branchEpoch.TryGetValue(branch, out var be) ? be : 0) + 1;
         }
+
+        // ★ D6.3 §3 ★ 锁外通知：这条序号已确定不会落盘（含原因码），连续水位可以跨过它。
+        //   放在锁外调用，避免订阅方回调里再进台账造成自锁。
+        Dropped?.Invoke(branch, sequence);
     }
 
     private static LossKind Classify(string branch, DeliveryClass deliveryClass, string reasonCode, bool evicted)
@@ -237,6 +266,7 @@ public sealed class LossLedger
                 VerboseEpoch = Interlocked.Read(ref _epoch),
                 OperationalEpoch = Interlocked.Read(ref _epochOperational),
                 CriticalEpoch = Interlocked.Read(ref _epochCritical),
+                RetentionEvictionCount = Interlocked.Read(ref _retentionEvictions),
             };
         }
     }

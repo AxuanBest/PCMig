@@ -28,7 +28,29 @@ public static class SegmentRecovery
         if (info.Length > MaxRecoverableBytes)
             return new SegmentRecoveryResult(true, 0, info.Length, 0, 0); // 过大 ⇒ 不读，交给上层标记
 
-        var bytes = File.ReadAllBytes(path);
+        // ★ D6.3 ★ 共享模式必须允许"另一个进程/实例正持有这个段的写句柄"。
+        // File.ReadAllBytes 以 FileAccess.Read + FileShare.Read 打开：共享检查是双向的，
+        // 它拒绝其它写句柄 ⇒ 只要上一段会话**仍然存活**（或上一次进程还没退净），
+        // 这里就抛 IOException "being used by another process"；调用方一旦把它吞掉，
+        // "上次未确认正常关闭"就会**静默消失**（实测缺陷，见 D6.3 报告）。
+        // 恢复扫描是只读的，不该独占；ComputeSha256 早已用同一共享模式。
+        byte[] bytes;
+        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        {
+            if (stream.Length > MaxRecoverableBytes)
+                return new SegmentRecoveryResult(true, 0, stream.Length, 0, 0); // 过大 ⇒ 不读，交给上层标记
+
+            bytes = new byte[stream.Length];
+            var read = 0;
+            while (read < bytes.Length)
+            {
+                var n = stream.Read(bytes, read, bytes.Length - read);
+                if (n <= 0) break;
+                read += n;
+            }
+            if (read < bytes.Length) Array.Resize(ref bytes, read);
+        }
+
         var lastNewline = Array.LastIndexOf(bytes, (byte)'\n');
         var truncatedTail = lastNewline < 0 ? bytes.Length : bytes.Length - (lastNewline + 1);
 

@@ -35,6 +35,18 @@ public readonly record struct BranchStats(
     /// "队列里有东西但没人取"必须能被分辨：是**没被调度/已退出**，还是**正在处理很慢**。
     /// </summary>
     public bool PumpAlive { get; init; }
+
+    /// <summary>★ D6.3 §7 ★ 摄入端一共收下了多少条（Accepted 的真话就是 Enqueued）。</summary>
+    public long Accepted => Enqueued;
+
+    /// <summary>★ D6.3 §7 ★ 真正处理成功的条数。
+    /// `Processed` 在 `finally` 里前进，所以它同时包含"处理成功"和"sink 抛异常"两种结局；
+    /// 相减才是成功数。审计要求这三个数在**每个分支**上各自可见，而不是只有一个全局 fault 计数。</summary>
+    public long ProcessedSuccessfully => Processed - SinkFaults;
+
+    /// <summary>★ D6.3 §7 ★ 处理失败的条数（消费者抛过异常的条数）。
+    /// 每一条都意味着**该证据没有被记录**：它既不在产物里，也不该被算作"已处理"。</summary>
+    public long ProcessingFailed => SinkFaults;
 }
 
 /// <summary>

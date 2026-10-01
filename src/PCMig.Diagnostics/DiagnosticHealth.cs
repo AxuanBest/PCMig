@@ -38,12 +38,107 @@ public readonly record struct DiagnosticHealthSnapshot(
     bool StorageDegraded,
     string? LastStorageReason)
 {
-    /// <summary>不健康 = 有 DurableCritical 丢失、有存储故障、或有任何丢弃/替换（证据不完整）。</summary>
-    public bool IsDegraded => StickyCriticalLost || StorageDegraded
-                              || EventsDropped > 0 || EventsEvicted > 0 || CriticalLost > 0;
+    /// <summary>
+    /// ★ D6.3 §7 ★ 维护调度器是否仍在运行。
+    ///
+    /// 为什么必须可见：维护循环（期望到期判定、刷盘、飞行窗口、保留、丢失发布）原来只有**一个**
+    /// try/catch 包住整个循环体，任何一步抛异常都会让循环**整体退出**，此后：
+    /// 没人再判超时、没人再刷盘、没人再发布损耗事件 —— 而健康计数看起来一切正常，
+    /// 于是诊断会对着一个"已经半死"的会话继续宣称 Healthy + EvidenceComplete（审计 P1-2）。
+    /// 单个子任务失败只记 <see cref="MaintenanceFaults"/> 并如实写原因；整体退出才置 false。
+    /// </summary>
+    public bool MaintenanceAlive { get; init; } = true;
 
-    /// <summary>证据完整性：任何丢失都让"缺事件"类规则必须降置信度。</summary>
-    public bool EvidenceComplete => LossEpoch == 0 && EventsDropped == 0 && EventsEvicted == 0;
+    /// <summary>最近一次**完整成功**的维护节拍（Unix ms；0 = 未跑过或已停止）。</summary>
+    public long LastSuccessfulMaintenanceUnixMs { get; init; }
+
+    /// <summary>被隔离的维护子任务失败次数（单步失败不拖死循环，但必须可见）。</summary>
+    public long MaintenanceFaults { get; init; }
+
+    /// <summary>
+    /// ★ D6.3 §7 ★ 健康快照的**唯一**投影点。
+    ///
+    /// 为什么必须集中：审计发现"自检自己坏掉了，快照却仍然报健康"这类谎话，
+    /// 根因就是判据与投影各写各的。运行时与回归测试现在都走这一处 ——
+    /// 以后新增任何"自己坏掉"的事实，只可能漏一次，不可能漏两处。
+    /// </summary>
+    public static DiagnosticHealthSnapshot Capture(DiagnosticHealth health, LossLedgerSnapshot loss) => new(
+        health.EventsProduced,
+        health.EventsAccepted,
+        health.EventsFiltered,
+        health.EventsWritten,
+        loss.TotalDropped,
+        loss.TotalEvicted,
+        loss.CriticalLost,
+        loss.StickyCriticalLost,
+        loss.Epoch,
+        health.PublishFaults,
+        health.SerializationFailures,
+        health.StorageFailures,
+        health.SinkFaults,
+        health.IngressCriticalDepth,
+        health.IngressOperationalDepth,
+        health.IngressVerboseDepth,
+        health.WriterDepth,
+        health.AnalyzerDepth,
+        health.ViewerDepth,
+        health.RingBytes,
+        health.RingEvents,
+        health.AnalyzerPending,
+        health.AnalyzerLagMs,
+        health.UiPending,
+        health.WriterLatencyMs,
+        health.FlushLatencyMs,
+        health.LastSuccessfulFlushUnixMs,
+        health.LastWriteUnixMs,
+        health.WrittenBytes,
+        health.Rotations,
+        health.StorageDegraded,
+        health.LastStorageReason)
+    {
+        MaintenanceAlive = health.MaintenanceAlive,
+        LastSuccessfulMaintenanceUnixMs = health.LastSuccessfulMaintenanceUnixMs,
+        MaintenanceFaults = health.MaintenanceFaults,
+        LastMaintenanceFaultReason = health.LastMaintenanceFaultReason,
+        RetentionEvictions = loss.RetentionEvictionCount,
+    };
+
+    /// <summary>
+    /// ★ D6.3 §9（审计 P2-1）★ 保留性淘汰（内存环按容量覆盖）：**可见，但不算丢失**。
+    ///
+    /// 收口前这一件事有两份互相矛盾的账：<c>EvidenceCoverage</c> 说"保留策略不是丢失"，
+    /// 而健康快照把它算进 <see cref="EventsEvicted"/> ⇒ <see cref="EvidenceComplete"/> 直接为假。
+    /// 现在两份账目唯一：本属性只出现在这里（以及导出里的 <c>retentionEvictions</c>），
+    /// 既不进 <see cref="IsDegraded"/>，也不进 <see cref="EvidenceComplete"/>。
+    /// 窗口级"环只保了最近一段"的诚实口径由飞行窗口自己的 <c>partial</c> 承担。
+    /// </summary>
+    public long RetentionEvictions { get; init; }
+
+    /// <summary>最近一次维护失败的位置与原因（只用于解释"哪里坏了"）。</summary>
+    public string? LastMaintenanceFaultReason { get; init; }
+
+    /// <summary>
+    /// 不健康 = 有 DurableCritical 丢失、有存储故障、有任何真实丢弃/合并（证据不完整）、
+    /// 有 sink 故障（某个消费者把事件吞了）、或维护调度器已经半死/已退出。
+    /// <para>
+    /// ★ D6.3 §9 ★ 保留性淘汰（<see cref="RetentionEvictions"/>：内存环按容量覆盖）**不**让健康降级 ——
+    /// 它可见、可导出，但不是故障；否则"环只保最近一段"会被读成"诊断系统坏了"。
+    /// </para>
+    /// </summary>
+    public bool IsDegraded => StickyCriticalLost || StorageDegraded
+                              || EventsDropped > 0 || EventsEvicted > 0 || CriticalLost > 0
+                              || SinkFaults > 0 || MaintenanceFaults > 0 || !MaintenanceAlive;
+
+    /// <summary>
+    /// 证据完整性：任何丢失都让"缺事件"类规则必须降置信度；
+    /// **自身故障同样算账** —— 消费者把一条事件吞掉（SinkFaults）等于那条证据不存在，
+    /// 维护调度器退出等于后续的判定根本没发生，这两者都不许再宣称"证据完整"。
+    ///
+    /// ★ D6.3 §9 ★ 保留性淘汰（<see cref="RetentionEvictions"/>）**不在**判据里：
+    /// 它是"环只保最近一段"的正常保留策略，不是"系统丢了证据"（与 EvidenceCoverage 同口径）。
+    /// </summary>
+    public bool EvidenceComplete => LossEpoch == 0 && EventsDropped == 0 && EventsEvicted == 0
+                                    && SinkFaults == 0 && MaintenanceAlive;
 }
 
 /// <summary>
@@ -81,6 +176,12 @@ public sealed class DiagnosticHealth
     private long _rotations;
     private long _storageDegraded;
     private string? _lastStorageReason;
+
+    // ★ D6.3 §7 ★ 维护调度器的存活与失败必须是**一等事实**（原来只有一个全局 sink 计数）。
+    private long _maintenanceFaults;
+    private long _lastSuccessfulMaintenanceUnixMs;
+    private string? _lastMaintenanceFaultReason;
+    private long _maintenanceAlive = 1;
 
     public long EventsProduced => Interlocked.Read(ref _produced);
     public long EventsAccepted => Interlocked.Read(ref _accepted);
@@ -170,6 +271,40 @@ public sealed class DiagnosticHealth
     }
 
     public void MarkStorageRecovered() => Interlocked.Exchange(ref _storageDegraded, 0);
+
+    // ─────────────── ★ D6.3 §7 维护调度器自身 ───────────────
+
+    /// <summary>维护调度器是否仍在跑（false = 已整体退出，后续判定不会再发生）。</summary>
+    public bool MaintenanceAlive => Interlocked.Read(ref _maintenanceAlive) != 0;
+
+    /// <summary>被隔离的维护子任务失败次数。</summary>
+    public long MaintenanceFaults => Interlocked.Read(ref _maintenanceFaults);
+
+    /// <summary>最近一次**完整成功**的维护节拍（Unix ms）。</summary>
+    public long LastSuccessfulMaintenanceUnixMs => Interlocked.Read(ref _lastSuccessfulMaintenanceUnixMs);
+
+    /// <summary>最近一次维护失败的位置与原因。</summary>
+    public string? LastMaintenanceFaultReason => Volatile.Read(ref _lastMaintenanceFaultReason);
+
+    /// <summary>一个维护节拍完整跑完（含所有子任务）才允许调用。</summary>
+    public void MarkMaintenanceSucceeded(long unixMs)
+        => Interlocked.Exchange(ref _lastSuccessfulMaintenanceUnixMs, unixMs);
+
+    /// <summary>
+    /// 某个维护子任务抛异常：**只隔离这一步**，记下位置与原因供解释，绝不因此让整个调度退出。
+    /// </summary>
+    public void MarkMaintenanceFault(string stage, Exception exception)
+    {
+        Interlocked.Increment(ref _maintenanceFaults);
+        Volatile.Write(ref _lastMaintenanceFaultReason, stage + ":" + exception.GetType().Name);
+    }
+
+    /// <summary>维护调度器真的退出了（此时它再也不会推进任何判定）。</summary>
+    public void MarkMaintenanceStopped(string reason)
+    {
+        Interlocked.Exchange(ref _maintenanceAlive, 0);
+        Volatile.Write(ref _lastMaintenanceFaultReason, reason);
+    }
 
     public long IngressCriticalDepth => Interlocked.Read(ref _depthIngressCritical);
     public long IngressOperationalDepth => Interlocked.Read(ref _depthIngressOperational);

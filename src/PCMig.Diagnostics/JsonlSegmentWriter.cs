@@ -41,6 +41,7 @@ public sealed class JsonlSegmentWriter
     private readonly DiagnosticHealth _health;
     private readonly LossLedger _loss;
     private readonly DiagnosticMeters? _meters;
+    private readonly SequenceLedger? _ledger;
     private readonly string _family;
     private readonly string _familyDir;
     private readonly List<SegmentManifest> _sealed = new();
@@ -77,13 +78,15 @@ public sealed class JsonlSegmentWriter
         DiagnosticHealth health,
         LossLedger loss,
         DiagnosticMeters? meters = null,
-        string family = "events")
+        string family = "events",
+        SequenceLedger? ledger = null)
     {
         _store = store;
         _options = options;
         _health = health;
         _loss = loss;
         _meters = meters;
+        _ledger = ledger;
         _family = family;
         _familyDir = family == "events" ? store.EventsDir : Path.Combine(store.SessionDir, family);
         _segmentIndex = NextSegmentIndex(_familyDir, family);
@@ -139,6 +142,10 @@ public sealed class JsonlSegmentWriter
             _health.AddWrittenBytes(written);
             _meters?.OnWritten();
             Interlocked.Exchange(ref _writtenWatermark, evt.Sequence);
+
+                // ★ D6.3 §3 ★ 连续确认水位：只有真的写进文件才结算"已落盘"，
+                //   而不是"把最大序号抄下来"（后者会把中间的洞当成已覆盖）。
+                _ledger?.SettleWritten(evt.Sequence);
 
             var latencyMs = DiagnosticClock.TicksToMs(Stopwatch.GetTimestamp() - evt.MonotonicTimestamp);
             if (latencyMs >= 0)
@@ -377,6 +384,10 @@ public sealed class JsonlSegmentWriter
                 _health.IncWritten();
                 _health.AddWrittenBytes(span.Length + 1);
                 Interlocked.Exchange(ref _writtenWatermark, evt.Sequence);
+
+                // ★ D6.3 §3 ★ 连续确认水位：只有真的写进文件才结算"已落盘"，
+                //   而不是"把最大序号抄下来"（后者会把中间的洞当成已覆盖）。
+                _ledger?.SettleWritten(evt.Sequence);
             }
 
             var sealedOk = SealActiveLocked(partial: false);

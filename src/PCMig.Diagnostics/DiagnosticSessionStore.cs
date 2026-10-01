@@ -50,6 +50,15 @@ public sealed record DiagnosticCleanShutdownMarker
 
     /// <summary>保留性淘汰（环覆盖/队列合并）——不是丢失，但可见。</summary>
     public long RetentionEvictions { get; init; }
+
+    /// <summary>
+    /// ★ D6.3 §7 ★ 关闭那一刻，诊断**自己**坏过多少次。
+    /// 消费者吞掉事件 = 那条证据不存在；维护步骤抛异常 = 那一秒的判定没发生。
+    /// 这些不是"业务没说清楚"，而是"记录者本身有故障"，所以必须与 clean 一起写下来。
+    /// </summary>
+    public long SinkFaults { get; init; }
+
+    public long MaintenanceFaults { get; init; }
 }
 
 /// <summary>上次会话未确认正常关闭时得到的信息（**不等于"崩溃"**）。</summary>
@@ -214,7 +223,23 @@ public sealed class DiagnosticSessionStore
     /// 明确**不**回答"是不是崩溃"：用户强杀、断电、系统关机、诊断写失败都会是这个形态。
     /// </summary>
     public static PreviousSessionInfo? FindPreviousUncleanSession(string root, Guid currentSessionId, bool currentProcessIsOnlyInstance = true)
+        => FindPreviousUncleanSession(root, currentSessionId, currentProcessIsOnlyInstance, out _);
+
+    /// <summary>
+    /// 同 <see cref="FindPreviousUncleanSession(string, Guid, bool)"/>，但把"**判定本身失败了**"
+    /// 与"没有上一段会话"区分开：
+    ///   · 返回 null 且 <paramref name="scanFailureReason"/> 为 null ⇒ 确实没有需要报告的上一段会话；
+    ///   · 返回 null 且 <paramref name="scanFailureReason"/> 非 null ⇒ **读不出来**（例如另一实例仍持有
+    ///     段文件句柄），此时调用方**不得**当作"上次会话一切正常"，必须如实说明判定失败。
+    /// ★ D6.3 ★ 原实现把任何异常吞成 null，等于"证据读不到 ⇒ 什么都不说"（实测缺陷）。
+    /// </summary>
+    public static PreviousSessionInfo? FindPreviousUncleanSession(
+        string root,
+        Guid currentSessionId,
+        bool currentProcessIsOnlyInstance,
+        out string? scanFailureReason)
     {
+        scanFailureReason = null;
         try
         {
             if (!Directory.Exists(root)) return null;
@@ -272,8 +297,11 @@ public sealed class DiagnosticSessionStore
                 MarkerWriteFailed: false,
                 TailCompleteLines: tailComplete);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            // ★ D6.3 ★ 不静默：如实记下"判定失败"的原因码，交给调用方发布
+            //（异常类型足够定位，不带任何路径）。
+            scanFailureReason = "previous-session-scan-failed:" + ex.GetType().Name;
             return null;
         }
     }
