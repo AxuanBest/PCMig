@@ -221,6 +221,7 @@ tracked 100 → 390 由 checkpoint `2c0183b` 完成（`M 46 / A 290`，explicit 
 5. **Diagnostics 事件口径遗留**（承接 D6.1）：23 个事件仍 `Reserved`；`DIA.SerializationFailed` 只有计数器没有事件；`FS.FileReadFailure` 口径缺失；Preflight 用中文检查名派生 code；1 条偶发未复现测试。
 6. **未做的真实环境验证**：Deep Trace 端到端 / 高 DPI / 面板动效逐帧、性能实测（现数字全是候选值）、Stage B、三 VM、210 万文件级迁移。
 7. **`archive\` 有意不纳管**：2238 个未跟踪文件全部位于 `archive\`，属用户 §四明示决定。
+8. **Mnemon 长期记忆写入未完成（环境阻塞）**：本机缺 `mnemon.exe`（`mnemon_status.commandFound = false`；`mnemon_memory_body_create` 返回 `spawn mnemon ENOENT`），Memory Space 目录为空，导致 `mnemon_runtime_memory` 拒绝写入（`catalog=0, writable=0`）。用户 §二十二 要求写入的内容已完整落在 `docs\工作交接-20261001-Workspace治理完成与D6.2起点.md` §〇/§九 与 `docs\INDEX.md`；待 Mnemon 可用后补写。
 
 ---
 
