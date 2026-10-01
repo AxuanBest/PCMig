@@ -3,7 +3,7 @@
 > 版本：**v2（2026-09-19 用户决策后更新）** ｜ 基线：v0.4.6
 > 性质：**设计蓝图**。**尚未创建任何 VM、未安装域控、未下载任何介质。**
 > 用户决策（2026-09-19）：**做**；可准备 Windows Server 2025 Evaluation；**但先 Blueprint，再创建 VM**。
-> 配套：`Private-Test-Lab-Final-Report.md`（L0–L2 执行结果）｜`Coverage-Matrix-V046.md`｜`First-Day-Company-Test-Checklist.md`
+> 配套：`Private-Test-Lab-Final-Report.md`（L0–L2 执行结果）｜`Coverage-Matrix-V046.md`｜`..\First-Day-Company-Test-Checklist.md`
 
 ---
 

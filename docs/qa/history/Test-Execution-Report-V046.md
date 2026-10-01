@@ -310,8 +310,8 @@
 ```
  M tests/PCMig.Core.Tests/PCMig.Core.Tests.csproj
  M tests/PCMig.Core.Tests/RealWorldLogSampleTests.cs
-?? docs/Coverage-Matrix-V046.md
-?? docs/Private-Test-Lab-Blueprint.md
+?? docs/qa/history/Coverage-Matrix-V046.md
+?? docs/qa/history/Private-Test-Lab-Blueprint.md
 ?? tests/PCMig.Core.Tests/SourceTreeHygieneTests.cs
 ```
 

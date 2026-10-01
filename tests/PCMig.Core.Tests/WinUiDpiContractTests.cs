@@ -210,7 +210,7 @@ public sealed class WinUiDpiContractTests
     /// 冻结范围锚点：外壳不得引用 WPF GUI，也不得**自带第二套迁移引擎**（双引擎是最危险的静默退化）。
     ///
     /// 【判据与意图的关系 —— 改这个用例前必读】
-    /// 本用例的原始意图（`docs\工作交接-20260925-WinUI-Step1视觉Pass2.md` 第 4 条：锁定 "…**无迁移引擎复制**…"）
+    /// 本用例的原始意图（`docs\handover\history\工作交接-20260925-WinUI-Step1视觉Pass2.md` 第 4 条：锁定 "…**无迁移引擎复制**…"）
     /// 是**禁止在 WinUI 内复制/再造一份迁移引擎**。
     /// 在 Step 1 阶段（外壳根本不需要引擎）「禁复制」与「禁出现该类型名」恰好等价，
     /// 于是当时写成了对 <c>TransferOrchestrator</c> 的**禁词断言**。

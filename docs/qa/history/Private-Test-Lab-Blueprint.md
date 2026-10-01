@@ -197,7 +197,7 @@ runs\<yyyyMMdd-HHmmss>-<SCENARIO-ID>\
 | **B7** | `COMPOSITE-01` | 组合故障 | L2 | 视情 | ⏳ |
 | **B8** | `ONEDRIVE-01` | 占位符（`Offline` 位可本地造） | L1 | 否 | ⏳ |
 | **L3** | 见 §七 | Corporate Simulation | **L3** | 是 | ⏳ 需授权 |
-| **L4** | 见 `First-Day-Company-Test-Checklist.md` | 企业环境 | **L4** | — | COMPANY_ONLY |
+| **L4** | 见 `..\First-Day-Company-Test-Checklist.md` | 企业环境 | **L4** | — | COMPANY_ONLY |
 
 ---
 

@@ -1,7 +1,7 @@
 # Final Polish 完成度审计 · 20260928
 
 > **审计对象**：`E:\Project\deepseek work\PCMig` 分支 `feature/winui-v0.5.0`（HEAD `c9aef30`）的**当前未提交工作树**，范围 = `src\PCMig.WinUI\`。
-> **审计依据**：`docs\FinalPolish-用户指令原文-20260927.md`（2556 行，已全文读完）。
+> **审计依据**：`docs\archive\FinalPolish-用户指令原文-20260927.md`（2556 行，已全文读完）。
 > **审计方式**：只读。逐条以**亲眼看到的代码/文件**为判据；不采信注释、命名、交接文档自述。
 > **本次未修改、未创建、未删除任何文件**（唯一新增即本报告）。未执行破坏性 git 命令、未启动应用、未改代码。
 > **审计时环境事实**：`PCMig.WinUI` 进程**正在运行（PID 234376）** —— 任何 `dotnet build` 前必须先结束该进程。
@@ -112,7 +112,7 @@
 > 均给出双方原文证据。**注意**：两份交接之间大量"首批说未完成 → 第二批说已完成"属正常时间推进，单列在第 4 条。
 
 ### 不符 A（严重 · 互相矛盾，无法自行裁决）：本机实测过的 DPI 档位
-- **第二批交接**（`工作交接-20260927-FinalPolish后半程实现与DPI验收卡点.md:104`）："本机：**单显示器 1920×1080、`GetDpiForWindow = 96`（100%）、无 `PerMonitorSettings` 覆盖**"；`:133` "**DPI 125% / 150% 真实实测：完全未做**"。
+- **第二批交接**（`handover\history\工作交接-20260927-FinalPolish后半程实现与DPI验收卡点.md:104`）："本机：**单显示器 1920×1080、`GetDpiForWindow = 96`（100%）、无 `PerMonitorSettings` 覆盖**"；`:133` "**DPI 125% / 150% 真实实测：完全未做**"。
 - **代码侧（测试文件）**：`tests\PCMig.Core.Tests\WinUiDpiContractTests.cs:14`："本机只实测过 **125%（120 DPI）** 一种缩放率（100% / 150% 均无实测条件）"（该文件 mtime **09-26 19:07**，早于 09-27 的实测）。
 - **裁决依据**：真实证据 `archive\screenshots\final-polish-20260927\dpi-matrix-results.txt`（09-27 15:49）明确 `GetDpiForWindow: 96`、`scale 1 (100%)` → **09-27 当时确实只有 100%**。但 09-26 是否真在 125% 下跑过，**本审计无法确认**（机器缩放可能被改过）。→ **两处陈述至少有一处失真，需当事人澄清**；建议把 `WinUiDpiContractTests.cs:14` 的注释改为与 dpi-matrix-results.txt 一致，否则未来读者会以为 125% 已有实测覆盖。
 

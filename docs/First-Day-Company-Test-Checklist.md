@@ -1,8 +1,8 @@
 # PCMig 首日公司环境验证清单（First-Day Company Test Checklist）
 
-> 生成日期：**2026-09-19** ｜ 基线：**v0.4.6**
+> 生成日期：**2026-09-19** ｜ 基线：**v0.4.6** ｜ 治理整理：**2026-10-01**（Workspace Cleanup & Governance：合并已取代的《公司域环境验证清单》两块独有内容；C-01…C-15 条目正文未改动）
 > 用途：**到公司后只需执行本清单**。私人环境能验证的部分已在 L0–L2 完成并留证，本清单**只保留私人环境无法可靠模拟的项目**。
-> 配套证据：`Test-Execution-Report-V046.md`、`Test-Execution-Report-V046-AddendumA.md`、`Coverage-Matrix-V046.md`、`Private-Test-Lab-Final-Report.md`
+> 配套证据：`qa\history\Test-Execution-Report-V046.md`、`qa\history\Test-Execution-Report-V046-AddendumA.md`、`qa\history\Coverage-Matrix-V046.md`、`qa\history\Private-Test-Lab-Final-Report.md`
 > 结果词表：`PASS` / `FAIL` / `NOT_RUN` / `BLOCKED` / `RUNTIME_VERIFIED` / `COMPANY_ONLY`
 
 ---
@@ -137,7 +137,7 @@
 - [ ] 携带 `I:\PCMig\PCMigSetup-0.4.6.exe`（**SHA256 见交付清单**）
 - [ ] 携带 `I:\PCMig\Portable\`（免安装版，公司机器可能不允许安装）
 - [ ] 携带 `docs\更新日志.txt`、`docs\使用说明.txt`
-- [ ] 携带本清单 + `Private-Test-Lab-Final-Report.md`
+- [ ] 携带本清单 + `qa\history\Private-Test-Lab-Final-Report.md`
 - [ ] 确认测试用旧机与目标机的**电脑名/IP/共享名**（凭据见某处，不落纸）
 - [ ] 准备一台**非管理员域账号**用于 C-10
 - [ ] 若要验证 C-08：提前与 IT 沟通 EDR 白名单流程
@@ -167,6 +167,30 @@
 1. 私人环境 **L3 Corporate Simulation 尚未执行**（无 Windows Server 介质）→ AD/DNS/域用户/GPO **全部仍是 `COMPANY_ONLY`**。
 2. 私人环境的 SMB 结论只覆盖 **Windows 原生 SMB 服务端 + 本机回环**；第三方 SMB/NAS/精简服务端未覆盖。
 3. 私人环境**无法**声称"已等于公司环境"；只能说"已尽可能覆盖 Windows 企业环境中可复现的部分"。
+
+---
+
+## 八、向 IT 申请的资源（合并自已取代并归档的 `docs\archive\公司域环境验证清单.md`，原意保留）
+
+| 资源 | 说明 |
+|---|---|
+| 旧测试机 | Win10 或 Win7，已加域，装有典型办公软件（Office/浏览器/ERP 客户端），放入测试用文件 |
+| 新测试机 | Win11，已加域，标准镜像 |
+| 测试账号 | 域管理员账号（首选）或两台机器的本地管理员 |
+| 网络 | 两台机器互通即可（同 VLAN 即可，无需特殊配置） |
+| 申请话术 | "验证一个内部迁移工具，只读旧机数据、写入新机，不改系统配置，全部操作有日志" |
+
+预期耗时：半天。需要 IT 配合：2 台测试机 + 1 个测试账号。
+
+---
+
+## 九、给安全团队的说明要点（合并自已取代并归档的 `docs\archive\公司域环境验证清单.md`，原意保留）
+
+- 不持久化任何密码（凭据仅当次会话使用）
+- 不迁移凭据/Cookie/证书（策略矩阵强制排除）
+- 所有状态文件原子写入，Receipt 不可变，日志三份（应用/任务/robocopy）
+- 传输通道即企业内网 SMB，与人工复制文件同等权限语义
+- Job 数据落盘位置：`C:\ProgramData\PCMig\Jobs\`，可按保留策略清除
 
 ---
 

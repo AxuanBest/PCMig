@@ -3,7 +3,7 @@
 > 完成日期：**2026-09-19** ｜ 基线：**v0.4.6**（tag `v0.4.6` → `9a77381`，起点 HEAD `d818f95`）
 > 备份基线：tag `v0.4.6-before-testlab` → `d818f95`（2026-09-19 14:21）
 > 性质：**私人电脑可验证范围的执行结果汇总**。未执行项一律如实标注，不伪装成已验证。
-> 副产品：`Private-Test-Lab-Blueprint.md`（L0–L2 设计）｜ `Corporate-Simulation-Blueprint.md`（L3 设计）｜ `Test-Execution-Report-V046.md` + `-AddendumA.md`（逐场景详情）｜ `Coverage-Matrix-V046.md`（矩阵）｜ `First-Day-Company-Test-Checklist.md`（公司边界）
+> 副产品：`Private-Test-Lab-Blueprint.md`（L0–L2 设计）｜ `Corporate-Simulation-Blueprint.md`（L3 设计）｜ `Test-Execution-Report-V046.md` + `-AddendumA.md`（逐场景详情）｜ `Coverage-Matrix-V046.md`（矩阵）｜ `..\First-Day-Company-Test-Checklist.md`（公司边界）
 
 ---
 
@@ -17,7 +17,7 @@
 | **FAIL** | **2**（均非产品缺陷：1 个"设计未定义"观察项、1 个测试脚本定位问题） |
 | **NOT_RUN** | **4**（打断/注入窗口未命中 4 个） |
 | **BLOCKED** | **2**（回环密码校验、FAT32 迁移期 Error 82 设计不可达） |
-| **COMPANY_ONLY** | **15 项**（见 `First-Day-Company-Test-Checklist.md`：C-01…C-15） |
+| **COMPANY_ONLY** | **15 项**（见 `..\First-Day-Company-Test-Checklist.md`：C-01…C-15） |
 | **合计有效场景** | **27**（含 B2 全部收敛） |
 
 > 另有 60 个"脚手架调试期"run（修测试脚本 bug 过程中的中间结果），**不作为产品结论**；每个 run 目录内含 `classification.json`，索引见 `J:\pcmig-lab\reports\run-index.json`。
@@ -253,7 +253,7 @@
 | `Test-Execution-Report-V046.md` | B0/B1 逐场景详情 |
 | `Test-Execution-Report-V046-AddendumA.md` | B3 详情 |
 | `Coverage-Matrix-V046.md` | Scenario × Type × Level × Status 矩阵 |
-| `First-Day-Company-Test-Checklist.md` | **公司环境最终边界（C-01…C-15）** |
+| `..\First-Day-Company-Test-Checklist.md` | **公司环境最终边界（C-01…C-15）** |
 | **`Private-Test-Lab-Final-Report.md`** | **本文件** |
 
 ---
@@ -274,7 +274,7 @@
 | Kill / Resume 有证据 | ⚠ **部分** | 后果断言全 PASS；**打断时机未命中 → 如实 NOT_RUN** |
 | 数据完整性有证据 | ✅ **最强项** | 全量 SHA256 + 目录结构，覆盖边界/压力/SMB/恢复各场景 |
 | GUI 没有明显回归 | ✅ **基本** | 四页导航真实切换、更新日志可开、**零 crash / 零 Binding Error / 零资源键缺失**；2 项因脚手架定位问题未完成 |
-| 留下真正需要公司验证的项目 | ✅ | `First-Day-Company-Test-Checklist.md`（C-01…C-15） |
+| 留下真正需要公司验证的项目 | ✅ | `..\First-Day-Company-Test-Checklist.md`（C-01…C-15） |
 
 ### 9.2 下一步（按优先级）
 

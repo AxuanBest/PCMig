@@ -1,7 +1,7 @@
 # PCMig Material Motion Language v1.0
 
-> **PMML = PCMig Material Motion Language** ｜ 状态：**FREEZE CANDIDATE — Pending Final Approval**（PMML v1.0，2026-09-30）
-> ⚠ **FROZEN 只能由项目所有者（用户）宣布**；在此之前本规范为 Freeze Candidate，任何「已冻结」表述都不构成合入依据。
+> **PMML = PCMig Material Motion Language** ｜ 状态：**PMML v1.0 — FROZEN**（由项目所有者于 2026-09-30 宣布冻结；2026-10-01 仅为文档状态纠正，规范正文未改动）
+> **FROZEN 只能由项目所有者（用户）宣布**：该宣布已于 2026-09-30 完成（PMML v1.0 FROZEN）。本行原为「宣布前」的约束说明，2026-10-01 仅做状态纠正，不构成对规范正文的修订。
 > 适用范围：`PCMig.WinUI`（v0.5.0）现有全部 UI。
 > 本文件是 **PCMig 项目内部设计语言规范**。文中术语为项目自有命名，**不是** Apple / Microsoft / WinUI 的官方规范；
 > 对应的行业概念与底层技术在每节以「对应底层技术」注明。

@@ -3,7 +3,7 @@
 > 基线：**v0.4.6**（tag `v0.4.6` → `9a77381`）｜最后更新：**2026-09-19 17:20**
 > 口径：**最终有效 Run**（每场景取最后一次成功产出 `result.json` 的 run）；调试期 run 单独分类，不作产品结论
 > 证据根：`J:\pcmig-lab\runs\`｜索引：`J:\pcmig-lab\reports\run-index.json`
-> 配套：`Private-Test-Lab-Final-Report.md`｜`Private-Test-Lab-Blueprint.md`｜`Corporate-Simulation-Blueprint.md`｜`First-Day-Company-Test-Checklist.md`
+> 配套：`Private-Test-Lab-Final-Report.md`｜`Private-Test-Lab-Blueprint.md`｜`Corporate-Simulation-Blueprint.md`｜`..\First-Day-Company-Test-Checklist.md`
 
 ---
 
@@ -107,7 +107,7 @@
 
 ## 五、Company Only 清单（L4）
 
-完整清单见 **`First-Day-Company-Test-Checklist.md`**（C-01 … C-15）。核心项：
+完整清单见 **`..\First-Day-Company-Test-Checklist.md`**（C-01 … C-15）。核心项：
 
 | # | 项 | 为什么本机不可模拟 |
 |---|---|---|
@@ -135,7 +135,7 @@
 | **FAIL** | **2** | `SRC-TGT-01`（设计未定义）、`GUI-SMOKE-01`（脚手架定位） |
 | **NOT_RUN** | **4** | `KILL-01`/`KILL-02`/`KILL-03`（打断窗口未命中）、`SRCMUT-01`（注入窗口未命中） |
 | **BLOCKED** | **2** | `SMB-BADUSER-04` 密码校验、`FAT32-DIRFULL-01` 迁移期 Error 82 |
-| **COMPANY_ONLY** | **15 项** | `First-Day-Company-Test-Checklist.md` |
+| **COMPANY_ONLY** | **15 项** | `..\First-Day-Company-Test-Checklist.md` |
 
 > **2 个 FAIL 均非产品缺陷**：
 > ① `SRC-TGT-01` 是产品**确实没有** Source/Target 关系校验（属"设计未定义"，需人工拍板而非自行修改产品）；
