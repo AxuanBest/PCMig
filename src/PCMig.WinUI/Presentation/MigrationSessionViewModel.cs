@@ -12,6 +12,7 @@ using PCMig.Core.Report;
 using PCMig.Core.Scan;
 using PCMig.Core.Transfer;
 using PCMig.Core.Util;
+using PCMig.Core.Diagnostics;
 using PCMig.Core.Verify;
 using PCMig.Diagnostics.Abstractions;
 using PCMig.Diagnostics.Abstractions.Events;
@@ -1226,14 +1227,44 @@ public sealed class MigrationSessionViewModel : ObservableObject
         }
     }
 
+    // ─────────── D6.3 §11：动作的**实际业务结果**（纯观察态，不参与任何业务分支）───────────
+    // 审计 P1-4：页面原先在 `await XxxAsync()` 之后直接写 Succeeded（"方法返回了"当成功）。
+    // 这里由 VM 在各**既有分支**如实记下事实，页面只读这里的结果落 UI.ActionCompleted；
+    // 判定口径统一在 PCMig.Core.Diagnostics.ActionOutcomePolicy（可单测）。
+
+    /// <summary>最近一次验证的实际业务结果（初值 = 未观察到 ⇒ Unknown）。</summary>
+    public ActionOutcomeDecision LastVerifyOutcome { get; private set; } = ActionOutcomePolicy.NotRun;
+
+    /// <summary>最近一次修复的实际业务结果（初值 = 未观察到 ⇒ Unknown）。</summary>
+    public ActionOutcomeDecision LastRepairOutcome { get; private set; } = ActionOutcomePolicy.NotRun;
+
+    /// <summary>最近一次开始/恢复迁移的实际业务结果（初值 = 未观察到 ⇒ Unknown）。</summary>
+    public ActionOutcomeDecision LastRunOutcome { get; private set; } = ActionOutcomePolicy.NotRun;
+
+    /// <summary>最近一次暂停请求的实际业务结果（初值 = 未观察到 ⇒ Unknown）。</summary>
+    public ActionOutcomeDecision LastPauseOutcome { get; private set; } = ActionOutcomePolicy.NotRun;
+
+    /// <summary>最近一次停止请求的实际业务结果（初值 = 未观察到 ⇒ Unknown）。</summary>
+    public ActionOutcomeDecision LastStopOutcome { get; private set; } = ActionOutcomePolicy.NotRun;
+
     // ────────────────────────── 方法：执行 / 暂停 / 停止 / 恢复 ──────────────────────────
 
     /// <summary>开始迁移（当前任务）。只跑已完成的计划；缺计划时如实拒绝。</summary>
     public Task RunAsync(string? password, IProgress<string>? progress = null, CancellationToken ct = default)
     {
         var ctx = Ctx;
-        if (ctx is null) { StatusMessage = "尚无任务：不能开始迁移（请先在 Step 2 生成计划）。"; return Task.CompletedTask; }
-        if (ctx.Plan is null || ctx.Plan.Objects.Count == 0) { StatusMessage = "计划里没有任何对象：不能开始迁移。"; return Task.CompletedTask; }
+        if (ctx is null)
+        {
+            StatusMessage = "尚无任务：不能开始迁移（请先在 Step 2 生成计划）。";
+            LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-no-task", null));
+            return Task.CompletedTask;
+        }
+        if (ctx.Plan is null || ctx.Plan.Objects.Count == 0)
+        {
+            StatusMessage = "计划里没有任何对象：不能开始迁移。";
+            LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-no-plan-objects", null));
+            return Task.CompletedTask;
+        }
         return RunTransferCoreAsync(ctx, password, onlyObjectIds: null, forceRecopy: false, progress, ct);
     }
 
@@ -1243,7 +1274,13 @@ public sealed class MigrationSessionViewModel : ObservableObject
     public Task ResumeAsync(string? password, IProgress<string>? progress = null, CancellationToken ct = default)
     {
         var ctx = Ctx;
-        if (ctx is null) { StatusMessage = "请先选择要恢复的任务（Step 2/4 的未完成任务列表）。"; Log("WARN", "恢复任务被拒绝：尚未选择要恢复的任务。"); return Task.CompletedTask; }
+        if (ctx is null)
+        {
+            StatusMessage = "请先选择要恢复的任务（Step 2/4 的未完成任务列表）。";
+            Log("WARN", "恢复任务被拒绝：尚未选择要恢复的任务。");
+            LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-no-task", null));
+            return Task.CompletedTask;
+        }
         // ★ A.5（P1-5）★ 恢复同属"不可被节流延迟的量"：先 Flush（让"用户确认恢复"这行动作
         //   排在它之前的批量引擎行之后），再由 RunTransferCoreAsync 重新启泵。
         FlushPendingNow();
@@ -1260,7 +1297,13 @@ public sealed class MigrationSessionViewModel : ObservableObject
     public Task PauseAsync(bool immediate = false)
     {
         var ctx = Ctx;
-        if (ctx is null || !IsRunning) { StatusMessage = "当前没有正在进行的迁移，无需暂停。"; return Task.CompletedTask; }
+        if (ctx is null || !IsRunning)
+        {
+            StatusMessage = "当前没有正在进行的迁移，无需暂停。";
+            // 没有在跑的运行 ⇒ 暂停请求不可能被受理：如实 Rejected（不写 Succeeded）。
+            LastPauseOutcome = ActionOutcomePolicy.ForRequest(honored: false, "pause-requested", "pause-not-running");
+            return Task.CompletedTask;
+        }
         try
         {
             // ★ A.5（P1-5）★ 用户即时操作的反馈属"绝对不可被节流延迟的量"：
@@ -1275,14 +1318,23 @@ public sealed class MigrationSessionViewModel : ObservableObject
             StatusMessage = immediate
                 ? "已请求立即暂停：引擎正在终止当前 robocopy…"
                 : "已请求暂停：当前对象跑完即停（已完成的对象不会重传）。";
+            // D6.3 §11：请求已受理；**真停不停是异步的**（Core 的 PauseObserved），所以只写 Accepted。
+            LastPauseOutcome = ActionOutcomePolicy.ForRequest(honored: true, "pause-requested", "pause-not-running");
         }
-        catch (Exception ex) { StatusMessage = $"暂停请求写入失败：{ex.Message}"; _log.Warning(ex, "Pause 失败"); }
+        catch (Exception ex)
+        {
+            StatusMessage = $"暂停请求写入失败：{ex.Message}";
+            _log.Warning(ex, "Pause 失败");
+            LastPauseOutcome = new ActionOutcomeDecision(DiagnosticOutcome.Failed, "pause-request-failed");
+        }
         return Task.CompletedTask;
     }
 
     /// <summary>停止本次运行（取消令牌；已拷入的部分全部保留，可续传）。</summary>
     public Task StopAsync()
     {
+        // D6.3 §11：本次停止请求有没有"在跑的运行"可取消（业务事实，来自既有 IsRunning）。
+        var running = IsRunning;
         try
         {
             // ★ A.5（P1-5）★ 停止同属"不可被节流延迟的量"：先 Flush 再写状态。
@@ -1294,8 +1346,16 @@ public sealed class MigrationSessionViewModel : ObservableObject
             _cts?.Cancel();
             StatusMessage = "已请求停止：已拷入的部分全部保留，可点「恢复任务」续传。";
             _log.Information("WinUI 会话停止请求");
+            // 有在跑的运行 ⇒ 取消请求已投递（Accepted）；没有 ⇒ 什么都没停成，如实 Skipped。
+            LastStopOutcome = running
+                ? ActionOutcomePolicy.ForRequest(honored: true, "stop-requested", "stop-no-running-run")
+                : new ActionOutcomeDecision(DiagnosticOutcome.Skipped, "stop-no-running-run");
         }
-        catch (Exception ex) { StatusMessage = $"停止请求失败：{ex.Message}"; }
+        catch (Exception ex)
+        {
+            StatusMessage = $"停止请求失败：{ex.Message}";
+            LastStopOutcome = new ActionOutcomeDecision(DiagnosticOutcome.Failed, "stop-request-failed");
+        }
         return Task.CompletedTask;
     }
 
@@ -1312,7 +1372,12 @@ public sealed class MigrationSessionViewModel : ObservableObject
         IProgress<string>? progress,
         CancellationToken ct)
     {
-        if (IsRunning) { StatusMessage = "已有一次运行在进行中。"; return; }
+        if (IsRunning)
+        {
+            StatusMessage = "已有一次运行在进行中。";
+            LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-already-running", null));
+            return;
+        }
 
         // ---- 扫描残缺闸门（v0.3.8）：未确认不允许开跑（Core 的权威判定，不重写规则）----
         var scanGate = ScanGate.Inspect(ctx);
@@ -1320,12 +1385,18 @@ public sealed class MigrationSessionViewModel : ObservableObject
         {
             foreach (var p in scanGate.Paths.Take(12)) AddFail("扫描不可访问", p);
             StatusMessage = "已拦下：扫描存在不可访问位置。\n" + ScanGate.BuildBlockMessage(scanGate, cli: false);
+            LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-scan-gate-blocked", null));
             return;
         }
 
         // 暂停/停止后的进程收尾有数秒窗口，恢复撞锁是实测过的坑——给 30 秒宽限（与 WPF 同口径）
         using var jobLock = JobLock.TryAcquire(ctx, TimeSpan.FromSeconds(30), out var lockReason);
-        if (jobLock is null) { StatusMessage = lockReason; return; }
+        if (jobLock is null)
+        {
+            StatusMessage = lockReason;
+            LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-job-lock-busy", null));
+            return;
+        }
 
         IsRunning = true;
         IsFinished = false;
@@ -1388,6 +1459,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
             {
                 StatusMessage = $"连接失败：{ex.Message}";
                 _log.Error(ex, "WinUI 传输前连接失败");
+                LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, null, "run-smb-connect-failed"));
                 CleanupRun(session);
                 return;
             }
@@ -1405,6 +1477,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         //     而 `Progress<T>` 是**异步投递**所以永不外抛。换成同步实现后，Report 里任何异常都会
         //     直接杀死传输泵 ⇒ SnapshotSink.Report **必须自带 try/catch 且绝不上抛**。
         var snapshotProgress = new SnapshotSink(OnSnapshotReported);
+        var runFaulted = false;
         try
         {
             Phase = JobPhase.Running;
@@ -1418,6 +1491,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            runFaulted = true;
             StatusMessage = $"传输异常：{ex.Message}";
             _log.Error(ex, "WinUI 传输异常");
         }
@@ -1437,6 +1511,11 @@ public sealed class MigrationSessionViewModel : ObservableObject
             CleanupRun(session);
             await RefreshRowsFromReceiptsAsync();
         }
+
+        // D6.3 §11：开始/恢复的实际业务结果 = 既有 JobPhase（Completed/CompletedWithErrors/
+        // Paused/Interrupted/Failed）+ 是否抛异常。**"方法返回了"不是成功**。
+        LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(
+            Phase, BlockedReason: null, FailedReason: runFaulted ? "run-faulted" : null));
     }
 
     /// <summary>运行收尾：只做资源与状态复位（引擎事件已在 finally 里取消订阅）。</summary>
@@ -1519,8 +1598,20 @@ public sealed class MigrationSessionViewModel : ObservableObject
     public async Task VerifyAsync(VerifyLevel level = VerifyLevel.L1_CountSize, IProgress<string>? progress = null, CancellationToken ct = default)
     {
         var ctx = Ctx;
-        if (ctx is null) { StatusMessage = "尚无任务：不能验证。"; Log("WARN", "验证被拒绝：尚无任务。"); return; }
-        if (IsRunning) { StatusMessage = "迁移/修复进行中：请先结束运行再验证。"; Log("WARN", "验证被拒绝：迁移/修复进行中。"); return; }
+        if (ctx is null)
+        {
+            StatusMessage = "尚无任务：不能验证。";
+            Log("WARN", "验证被拒绝：尚无任务。");
+            LastVerifyOutcome = ActionOutcomePolicy.ForVerify(new VerifyBusinessResult(false, false, "verify-no-task", false, false));
+            return;
+        }
+        if (IsRunning)
+        {
+            StatusMessage = "迁移/修复进行中：请先结束运行再验证。";
+            Log("WARN", "验证被拒绝：迁移/修复进行中。");
+            LastVerifyOutcome = ActionOutcomePolicy.ForVerify(new VerifyBusinessResult(false, false, "verify-already-running", false, false));
+            return;
+        }
 
         var gate = await EvaluateVerifyGateAsync(ct);
         if (!gate.CanVerify)
@@ -1529,18 +1620,22 @@ public sealed class MigrationSessionViewModel : ObservableObject
             StatusMessage = gate.Reason;
             Log("WARN", "验证被闸门拒绝：" + gate.Reason);
             _log.Warning("验证被闸门拒绝: {Reason}", gate.Reason);
+            LastVerifyOutcome = ActionOutcomePolicy.ForVerify(new VerifyBusinessResult(false, false, "verify-gate-blocked", false, false));
             return;
         }
 
         Phase = JobPhase.Verifying;
         StatusMessage = $"正在验证（{DescribeLevel(level)}）…";
         Log("INFO", $"开始验证：{DescribeLevel(level)}（闸门通过：有计划且源路径可达）");
+        VerifyReport? report = null;
+        var canceled = false;
+        var faulted = false;
         try
         {
             var jobLog = LogBootstrap.CreateJobLogger(ctx.JobDir, ctx.JobId);
             var matrix = MigrationMatrix.Load(null, jobLog);
             var verifier = new Verifier(ctx, matrix, jobLog);
-            var report = await verifier.RunAsync(level, progress, ct);
+            report = await verifier.RunAsync(level, progress, ct);
             ctx.SaveVerify(report);
             _hasVerifyReport = true;
             TotalHashSampled = report.Objects.Sum(o => o.HashSampled);
@@ -1557,13 +1652,23 @@ public sealed class MigrationSessionViewModel : ObservableObject
             Raise(nameof(CanRepair));
             await RefreshExistingJobsAsync(null, ct);
         }
-        catch (OperationCanceledException) { StatusMessage = "验证已取消。"; }
+        catch (OperationCanceledException) { canceled = true; StatusMessage = "验证已取消。"; }
         catch (Exception ex)
         {
+            faulted = true;
             StatusMessage = $"验证失败：{ex.Message}";
             Log("ERROR", $"验证失败：{ex.Message}");
             _log.Error(ex, "WinUI 验证失败");
         }
+
+        // D6.3 §11：验证的实际业务结果 = **既有验证报告的结构化结论**（OverallPass / 对象数），
+        // 绝不用"VerifyAsync 返回了"冒充成功（审计 P1-4）。
+        LastVerifyOutcome = ActionOutcomePolicy.ForVerify(new VerifyBusinessResult(
+            Executed: report is { Objects.Count: > 0 },
+            OverallPass: report?.OverallPass == true,
+            BlockedReason: null,
+            Canceled: canceled,
+            Faulted: faulted));
     }
 
     /// <summary>
@@ -1573,8 +1678,20 @@ public sealed class MigrationSessionViewModel : ObservableObject
     public async Task RepairAsync(bool forceOverwrite = true, string? password = null, IProgress<string>? progress = null, CancellationToken ct = default)
     {
         var ctx = Ctx;
-        if (ctx is null) { StatusMessage = "尚无任务：不能修复。"; Log("WARN", "尝试修复被拒绝：尚无任务。"); return; }
-        if (IsRunning) { StatusMessage = "已有一次运行在进行中。"; Log("WARN", "尝试修复被拒绝：已有一次运行在进行中。"); return; }
+        if (ctx is null)
+        {
+            StatusMessage = "尚无任务：不能修复。";
+            Log("WARN", "尝试修复被拒绝：尚无任务。");
+            LastRepairOutcome = ActionOutcomePolicy.ForRepair(new RepairBusinessResult(0, 0, 0, "repair-no-task"));
+            return;
+        }
+        if (IsRunning)
+        {
+            StatusMessage = "已有一次运行在进行中。";
+            Log("WARN", "尝试修复被拒绝：已有一次运行在进行中。");
+            LastRepairOutcome = ActionOutcomePolicy.ForRepair(new RepairBusinessResult(0, 0, 0, "repair-already-running"));
+            return;
+        }
 
         var targets = CollectRepairTargets(out var beforeMismatch);
         var plannedObjects = ctx.Plan?.Objects.Count ?? 0;
@@ -1592,6 +1709,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
                 DiagnosticOutcome.Skipped);
             StatusMessage = "没有需要修复的对象：上次校验（若有）全部一致，也没有失败对象。";
             Log("INFO", "尝试修复：没有需要修复的对象（上次校验全部一致且无失败对象）——未启动重拷。");
+            LastRepairOutcome = ActionOutcomePolicy.ForRepair(new RepairBusinessResult(0, 0, 0, null));
             return;
         }
         PublishRepair(RepairEvents.RepairTargetsCollected,
@@ -1605,6 +1723,10 @@ public sealed class MigrationSessionViewModel : ObservableObject
         await RunTransferCoreAsync(ctx, password, targets, forceOverwrite, progress, ct);
 
         // ★ D6.1 §16 ★ 修复结束：只**读既有回执**做统计，不新增成功/失败判定。
+        // D6.3 §11：这一次的终点结果 = 同一份回执事实（有失败就不是 Succeeded）。
+        var okCount = 0;
+        var failCount = 0;
+        ActionOutcomeDecision? repairDecision = null;
         try
         {
             var receipts = ctx.LoadReceipts(_log)
@@ -1612,15 +1734,20 @@ public sealed class MigrationSessionViewModel : ObservableObject
                 .Select(g => g.OrderBy(r => r.CompletedUtc).Last())
                 .Where(r => targets.Contains(r.ObjectId, StringComparer.OrdinalIgnoreCase))
                 .ToList();
-            var ok = receipts.Count(r => r.Status == ObjectStatus.Completed);
+            okCount = receipts.Count(r => r.Status == ObjectStatus.Completed);
+            failCount = Math.Max(0, receipts.Count - okCount);
+            repairDecision = ActionOutcomePolicy.ForRepair(new RepairBusinessResult(targets.Count, okCount, failCount, null));
             PublishRepair(RepairEvents.RepairCompleted,
-                new RprCompletedPayload(targets.Count, ok, Math.Max(0, receipts.Count - ok), forceOverwrite),
-                DiagnosticLevel.Information, DiagnosticOutcome.Succeeded);
+                new RprCompletedPayload(targets.Count, okCount, failCount, forceOverwrite),
+                repairDecision.Value.Outcome == DiagnosticOutcome.Succeeded ? DiagnosticLevel.Information : DiagnosticLevel.Warning,
+                repairDecision.Value.Outcome);
         }
         catch (Exception)
         {
             // 观察失败绝不影响修复结果。
         }
+        LastRepairOutcome = repairDecision
+            ?? ActionOutcomePolicy.ForRepair(new RepairBusinessResult(targets.Count, okCount, failCount, null));
     }
 
     /// <summary>D6.1 §16：修复链路观察（纯观察，异常吞掉，自动继承动作链）。</summary>

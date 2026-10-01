@@ -117,6 +117,17 @@ public sealed class ActionTrace : IDisposable
             outcome, phase: phase, durationMs: durationMs);
     }
 
+    /// <summary>
+    /// D6.3 §11：按**统一策略的判定**落动作终点（审计 P1-4 收口）。
+    /// 页面/底栏只负责"取业务事实 → 调 <see cref="PCMig.Core.Diagnostics.ActionOutcomePolicy"/> → Finish"，
+    /// 不再自己写死 Succeeded。Rejected 走 Rejected 事件，其余走 Completed 事件。
+    /// </summary>
+    public void Finish(PCMig.Core.Diagnostics.ActionOutcomeDecision decision, string component = "Ui")
+    {
+        if (decision.Outcome == DiagnosticOutcome.Rejected) Reject(decision.ReasonCode, component);
+        else Complete(decision.Outcome, decision.ReasonCode);
+    }
+
     /// <summary>VM 状态被写入（投影来源变化）。</summary>
     public void ProjectionChanged(string stateOwnerName, int changedFieldCount, string component = "Vm")
         => Publish(UiEvents.ProjectionChanged, new UiProjectionChangedPayload(stateOwnerName, changedFieldCount),

@@ -1050,7 +1050,8 @@ public sealed partial class Step2SelectDataPage : UserControl
         trace.Expect("transfer.v1", "job-run-started");
         await _session.RunAsync(_passwordProvider?.Invoke(), new Progress<string>(m => StateMessageText.Text = m));
         trace.Confirm("transfer.v1", "job-run-started");
-        trace.Complete(DiagnosticOutcome.Succeeded, "run-returned");
+        // D6.3 §11：真实业务结果 = 既有 JobPhase，不是"RunAsync 返回了"（审计 P1-4）。
+        trace.Finish(_session.LastRunOutcome, "Step2SelectDataPage");
         PushState();
     }
 
@@ -1063,7 +1064,8 @@ public sealed partial class Step2SelectDataPage : UserControl
         trace.Expect("pause.v1", "pause-request-write-result");
         await _session.PauseAsync();
         trace.Confirm("pause.v1", "pause-request-write-result");
-        trace.Complete(DiagnosticOutcome.Succeeded, "pause-request-returned");
+        // 暂停 = 请求语义 ⇒ Accepted / Rejected，永不 Succeeded。
+        trace.Finish(_session.LastPauseOutcome, "Step2SelectDataPage");
         PushState();
     }
 
@@ -1076,7 +1078,8 @@ public sealed partial class Step2SelectDataPage : UserControl
         trace.Expect("stop.v1", "stop-observed");
         await _session.StopAsync();
         trace.Confirm("stop.v1", "stop-observed");
-        trace.Complete(DiagnosticOutcome.Succeeded, "stop-request-returned");
+        // 停止 = 请求语义；没有在跑的运行 ⇒ Skipped。
+        trace.Finish(_session.LastStopOutcome, "Step2SelectDataPage");
         PushState();
     }
 
@@ -1089,7 +1092,8 @@ public sealed partial class Step2SelectDataPage : UserControl
         trace.Expect("resume.v1", "run-resumed");
         await _session.ResumeAsync(_passwordProvider?.Invoke(), new Progress<string>(m => StateMessageText.Text = m));
         trace.Confirm("resume.v1", "run-resumed");
-        trace.Complete(DiagnosticOutcome.Succeeded, "resume-returned");
+        // 恢复 = 又一次真实运行 ⇒ 同样以 JobPhase 为准。
+        trace.Finish(_session.LastRunOutcome, "Step2SelectDataPage");
         PushState();
     }
 

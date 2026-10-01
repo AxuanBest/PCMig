@@ -27,39 +27,47 @@ namespace PCMig.WinUI.Diagnostics;
 ///        只累加"被丢弃条数"（不记长度/文本/IME/剪贴板，也不看其它祖先 AutomationId 绕过）；
 ///   · ❌ 不写 `Handled`/`Focus`/`Capture`、不用全局钩子、不记坐标轨迹；
 ///   · ⏱ **限时**：到期自动停；用户关闭 Deep 立即停；关窗立即停；
+///   · 🕒 **只用单调时钟**：时限与去重窗口都由 <see cref="IMonotonicClock"/> 计时
+///        （墙上时钟会被 NTP 校时/DST/手工改表拨动，用它当基准等于"限时"是假的，见 D6.3 §14）；
+///   · 🚪 **唯一停机出口**：<see cref="Stop(string)"/>，且**必须带理由**
+///        （`deep-toggled-off` / `window-closing` / `deadline-reached` / `restarted` …）——
+///        "到期自动停"与"用户关掉了"在证据里必须能分开；
 ///   · 🔢 **限流**：同一控件+同一类别在抑制窗口内只累加计数（字典有上限，绝不无限增长）。
 /// </summary>
 public sealed class DeepTraceInputObserver
 {
     /// <summary>Deep Trace 的默认最长观测时长（候选值，不是 SLA；到期自动停止）。</summary>
-    public static readonly TimeSpan DefaultMaxDuration = TimeSpan.FromSeconds(60);
+    public static readonly TimeSpan DefaultMaxDuration = InputObservationWindow.DefaultMaxDuration;
 
     /// <summary>同一控件+类别的重复输入抑制窗口（防点风暴把事件流打满）。</summary>
-    public static readonly TimeSpan DuplicateWindow = TimeSpan.FromMilliseconds(150);
+    public static readonly TimeSpan DuplicateWindow = InputObservationWindow.DuplicateWindow;
 
     /// <summary>去重字典的条目上限（超出即清空重来：有界，绝不随会话长度增长）。</summary>
-    public const int MaxDedupeEntries = 256;
+    public const int MaxDedupeEntries = InputObservationWindow.MaxDedupeEntries;
 
     private readonly IDiagnosticPublisher _publisher;
     private readonly Func<string?> _rootOwnerComponent;
+    private readonly IMonotonicClock _clock;
+
+    /// <summary>时限 + 重复抑制：策略在契约层（可被行为测试直接验证，不依赖 WinUI）。</summary>
+    private readonly InputObservationWindow _window = new();
 
     private readonly List<FrameworkElement> _registered = new();
-    private readonly Dictionary<string, (DateTime LastUtc, int Suppressed)> _lastByControl = new(StringComparer.Ordinal);
 
     /// <summary>复用的祖先链缓冲（UI 线程单线程访问；稳态零分配）。</summary>
     private readonly List<InputSourceNode> _ancestry = new(InputObservationPolicy.MaxAncestryDepth);
 
     private DispatcherQueueTimer? _timer;
-    private DateTime _startedUtc;
-    private DateTime _deadlineUtc;
     private bool _isActive;
     private long _observed;
     private long _droppedSensitive;
 
-    public DeepTraceInputObserver(IDiagnosticPublisher publisher, string rootOwnerComponent = "Shell")
+    public DeepTraceInputObserver(IDiagnosticPublisher publisher, string rootOwnerComponent = "Shell",
+        IMonotonicClock? clock = null)
     {
         _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
         _rootOwnerComponent = () => rootOwnerComponent;
+        _clock = clock ?? StopwatchMonotonicClock.Shared;
     }
 
     public bool IsActive => _isActive;
@@ -70,21 +78,20 @@ public sealed class DeepTraceInputObserver
     /// <summary>因命中敏感来源而丢弃的输入条数（只记条数，不记身份）。</summary>
     public long SensitiveDroppedCount => _droppedSensitive;
 
-    /// <summary>剩余时间（未激活时为 TimeSpan.Zero）。</summary>
-    public TimeSpan Remaining => _isActive ? _deadlineUtc - DateTime.UtcNow : TimeSpan.Zero;
+    /// <summary>剩余时间（未激活时为 TimeSpan.Zero）。基于单调时钟，不受改表影响。</summary>
+    public TimeSpan Remaining =>
+        _isActive ? TimeSpan.FromMilliseconds(_window.RemainingMilliseconds(_clock.NowMilliseconds)) : TimeSpan.Zero;
 
-    /// <summary>启动观测（幂等；已激活时先停再起，避免重复注册）。</summary>
+    /// <summary>启动观测（幂等；已激活时先以 <see cref="DeepTraceStopReasons.Restarted"/> 停掉旧的，再起新的）。</summary>
     public void Start(FrameworkElement root, TimeSpan? maxDuration = null)
     {
         if (root is null) return;
-        Stop();
+        Stop(DeepTraceStopReasons.Restarted);
 
         var duration = maxDuration ?? DefaultMaxDuration;
         if (duration <= TimeSpan.Zero) return;
+        if (!_window.Start(_clock.NowMilliseconds, duration)) return;
 
-        _startedUtc = DateTime.UtcNow;
-        _deadlineUtc = _startedUtc + duration;
-        _lastByControl.Clear();
         _observed = 0;
         _droppedSensitive = 0;
 
@@ -96,11 +103,16 @@ public sealed class DeepTraceInputObserver
         Publish(InputCategories.LifecycleStarted, true, true, 0);
     }
 
-    /// <summary>停止观测并**注销全部处理器**（幂等、绝不外抛）。</summary>
-    public void Stop()
+    /// <summary>
+    /// ★ 唯一的停止出口（D6.3 §14）★：停止观测并**注销全部处理器**（幂等、绝不外抛）。
+    /// 必须给出理由码（会写进停止事件）；未知理由降级为
+    /// <see cref="DeepTraceStopReasons.Unspecified"/>，绝不把自由文本带进证据。
+    /// </summary>
+    public void Stop(string reasonCode)
     {
         if (!_isActive && _registered.Count == 0 && _timer is null) return;
         _isActive = false;
+        _window.Close();
 
         foreach (var element in _registered)
         {
@@ -123,7 +135,8 @@ public sealed class DeepTraceInputObserver
             _timer = null;
         }
 
-        Publish(InputCategories.LifecycleStopped, true, true, (int)Math.Min(int.MaxValue, _observed));
+        Publish(InputCategories.LifecycleStopped, true, true, (int)Math.Min(int.MaxValue, _observed),
+            reasonCode: DeepTraceStopReasons.Normalize(reasonCode));
     }
 
     private void Register(FrameworkElement element)
@@ -161,7 +174,9 @@ public sealed class DeepTraceInputObserver
     private void Observe(string category, DependencyObject? source)
     {
         if (!_isActive) return;
-        if (DateTime.UtcNow > _deadlineUtc) { Stop(); return; }
+
+        var now = _clock.NowMilliseconds;
+        if (_window.IsExpired(now)) { Stop(DeepTraceStopReasons.DeadlineReached); return; }
 
         try
         {
@@ -180,24 +195,8 @@ public sealed class DeepTraceInputObserver
             var controlId = InputObservationPolicy.ResolveControlId(_ancestry);
             var dedupeKey = controlId is null ? category : controlId + "|" + category;
 
-            var now = DateTime.UtcNow;
-            var suppressed = 0;
-            if (_lastByControl.TryGetValue(dedupeKey, out var last))
-            {
-                if (now - last.LastUtc < DuplicateWindow)
-                {
-                    // 抑制窗口内：只累加计数，不逐次建事件（防点风暴）。
-                    _lastByControl[dedupeKey] = (last.LastUtc, last.Suppressed + 1);
-                    return;
-                }
-                suppressed = last.Suppressed;
-                _lastByControl[dedupeKey] = (now, 0);
-            }
-            else
-            {
-                if (_lastByControl.Count >= MaxDedupeEntries) _lastByControl.Clear();   // 有界
-                _lastByControl[dedupeKey] = (now, 0);
-            }
+            // 重复抑制只读单调时钟：墙上时钟被拨动不会把去重窗口拉长/缩短。
+            if (!_window.TryObserve(dedupeKey, now, out var suppressed)) return;
 
             _observed++;
             Publish(category, isEnabled, isVisible, suppressed, controlId);
@@ -250,12 +249,14 @@ public sealed class DeepTraceInputObserver
         _timer.Tick += (_, _) =>
         {
             if (!_isActive) { _timer?.Stop(); return; }
-            if (DateTime.UtcNow > _deadlineUtc) Stop();      // 到期自动停（不需要用户记得关）
+            // 到期自动停（不需要用户记得关）：判决只读单调时钟。
+            if (_window.IsExpired(_clock.NowMilliseconds)) Stop(DeepTraceStopReasons.DeadlineReached);
         };
         _timer.Start();
     }
 
-    private void Publish(string category, bool isEnabled, bool isVisible, int suppressed, string? controlId = null)
+    private void Publish(string category, bool isEnabled, bool isVisible, int suppressed,
+        string? controlId = null, string? reasonCode = null)
     {
         try
         {
@@ -268,7 +269,7 @@ public sealed class DeepTraceInputObserver
                     .WithControl(controlId ?? "unknown"),
                 new UiInputObservedPayload(
                     category, isEnabled, isVisible, suppressed,
-                    (int)Math.Min(int.MaxValue, _droppedSensitive)),
+                    (int)Math.Min(int.MaxValue, _droppedSensitive)) { ReasonCode = reasonCode },
                 Level: DiagnosticLevel.Debug,
                 Outcome: DiagnosticOutcome.Succeeded,
                 StateOwner: StateOwner.View));

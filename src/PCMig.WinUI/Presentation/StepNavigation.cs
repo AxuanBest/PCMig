@@ -5,6 +5,8 @@ using System.Linq;
 using System.Numerics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
+using PCMig.Core.Diagnostics;
+using PCMig.WinUI.Diagnostics;
 
 namespace PCMig.WinUI.Presentation;
 
@@ -45,6 +47,23 @@ public sealed class StepNavItem : ObservableObject
     public string Title { get; }
     public string Subtitle { get; }
     public string Glyph { get; }
+
+    /// <summary>
+    /// 稳定 AutomationId（登记在 <see cref="ControlIds"/>；外部自动化与 Deep Trace 共用同一 token）。
+    ///
+    /// ★ D6.3 WP I ★ 为什么是"生成"而不是四段字面量：四张卡共用一个 DataTemplate，
+    /// 字面量只能有一个值；此前 UIA 树里 `StepCardButton`（x:Name 派生）出现 4 次同名 ID，
+    /// 外部自动化按名字取控件会选错对象。这里按 <see cref="StepKind"/> 生成一一对应的稳定 ID。
+    /// **纯标识，不参与任何业务判断，也不影响渲染。**
+    /// </summary>
+    public string ControlId => Kind switch
+    {
+        StepKind.Connect => ControlIds.ShellNavStep1,
+        StepKind.SelectData => ControlIds.ShellNavStep2,
+        StepKind.Progress => ControlIds.ShellNavStep3,
+        StepKind.Result => ControlIds.ShellNavStep4,
+        _ => string.Empty,
+    };
 
     public bool IsSelected
     {
@@ -149,6 +168,16 @@ public sealed class StepNavigation : ObservableObject
 {
     private StepKind _current = StepKind.Connect;
 
+    /// <summary>
+    /// 下一次切换的**原因码**（由 <see cref="GoTo(StepKind, string)"/> 写入）。
+    /// 必须在 setter 的**最前面**取走并复位：否则一次"同页赋值"（不产生导航）会把原因
+    /// 留在字段里，等下一次真正切换时被当成它的原因 —— 那就是**编造原因**。
+    /// </summary>
+    private string _pendingReason = NavigationReasons.Unspecified;
+
+    /// <summary>首屏归属是否已发布（只发一次，不重复刷屏）。</summary>
+    private bool _initialAnnounced;
+
     public StepNavigation()
     {
         Items = new ObservableCollection<StepNavItem>(Build());
@@ -156,6 +185,12 @@ public sealed class StepNavigation : ObservableObject
     }
 
     public ObservableCollection<StepNavItem> Items { get; }
+
+    /// <summary>
+    /// 业务侧关联 ID（可选）。**没有就保持 null —— 绝不编造**：
+    /// 载荷里该属性会被直接省略（`PayloadJson.WriteStringOrNull` 的 null ⇒ 不写口径）。
+    /// </summary>
+    public string? OperationId { get; set; }
 
     /// <summary>
     /// 导航**即将**切换（此时 <see cref="Current"/> 仍是旧值）。
@@ -177,6 +212,10 @@ public sealed class StepNavigation : ObservableObject
         get => _current;
         set
         {
+            // 先取走原因（无论这次赋值是否真的产生导航，都不能把它留给下一次切换）。
+            var reason = _pendingReason;
+            _pendingReason = NavigationReasons.Unspecified;
+
             if (!Enum.IsDefined(typeof(StepKind), value)) return;
             if (_current == value) return;
             var from = _current;
@@ -185,13 +224,61 @@ public sealed class StepNavigation : ObservableObject
             {
                 Apply();
                 Changed?.Invoke(from, value);
+                // ★ D6.3 WP I ★ 导航证据的唯一发布点。
+                // 位置：**在 Set 成功、Apply 完成、Changed 通知之后** —— 此刻"当前步真的变了"
+                // 已经是既成事实（from/to 都来自真实状态），不是方法返回值。
+                NavigationEvidence.Publish(
+                    NavToken(from),
+                    NavToken(value),
+                    reason,
+                    OperationId,
+                    component: "Shell");
             }
         }
     }
 
     public StepNavItem CurrentItem => Items.First(i => i.Kind == _current);
 
-    public void GoTo(StepKind kind) => Current = kind;
+    public void GoTo(StepKind kind) => GoTo(kind, NavigationReasons.Unspecified);
+
+    /// <summary>
+    /// 唯一导航出口：切换当前步并带上**真实原因码**（封闭集合见 <see cref="NavigationReasons"/>）。
+    /// 未登记的原因会被降级为 <c>unspecified</c>，不会作为自由文本进入事件。
+    /// </summary>
+    public void GoTo(StepKind kind, string reasonCode)
+    {
+        _pendingReason = NavigationReasons.Normalize(reasonCode);
+        Current = kind;
+    }
+
+    /// <summary>
+    /// 首屏归属：把"启动即在 <see cref="_current"/> 页"作为一次导航事实发布（from = (none)），只发一次。
+    /// 为什么需要它：事件名是 NavigationChanged，若只在"切换"时发布，
+    /// "用户从没导航过"与"用户一直在 Step1"在证据上无法区分 —— 而这两件事的取证结论完全不同。
+    /// 调用时机由装配根决定（必须在诊断 sink 已安装之后）。
+    /// </summary>
+    public void AnnounceInitial()
+    {
+        if (_initialAnnounced) return;
+        // 只有**真的写进管道**才算已发布：否则（诊断未采集）保持未发布状态，
+        // 让后续调用仍有机会如实记录，而不是用一次空操作冒充"已经声明过了"。
+        _initialAnnounced = NavigationEvidence.Publish(
+            NavigationEvidence.NoPreviousStep,
+            NavToken(_current),
+            NavigationReasons.Initial,
+            OperationId,
+            component: "Shell");
+    }
+
+    /// <summary>步骤 → 稳定 token（与 <see cref="StepKind"/> 枚举名一致；不认识就如实说不知道）。</summary>
+    private static string NavToken(StepKind kind) => kind switch
+    {
+        StepKind.Connect => nameof(StepKind.Connect),
+        StepKind.SelectData => nameof(StepKind.SelectData),
+        StepKind.Progress => nameof(StepKind.Progress),
+        StepKind.Result => nameof(StepKind.Result),
+        _ => NavigationEvidence.UnknownStep,
+    };
 
     private void Apply()
     {

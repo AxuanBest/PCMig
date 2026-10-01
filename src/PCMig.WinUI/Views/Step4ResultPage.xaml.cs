@@ -202,7 +202,9 @@ public sealed partial class Step4ResultPage : UserControl
             trace.Expect("verify.v1", "verify-completed");
             await session.VerifyAsync(VerifyLevel.L1_CountSize);
             trace.Confirm("verify.v1", "verify-completed");
-            trace.Complete(DiagnosticOutcome.Succeeded, "verify-returned");
+            // D6.3 §11：终点结果 = VM 记录的**实际验证业务结论**（报告 OverallPass / 取消 / 故障），
+            // 不是"VerifyAsync 返回了"（审计 P1-4）。
+            trace.Finish(session.LastVerifyOutcome, "Step4ResultPage");
         }
         catch (Exception ex)
         {
@@ -254,7 +256,8 @@ public sealed partial class Step4ResultPage : UserControl
         {
             await session.RepairAsync(forceOverwrite: force, password: _passwordProvider?.Invoke());
             trace.Confirm("repair.v1", "repair-targets-collected");
-            trace.Complete(DiagnosticOutcome.Succeeded, "repair-returned");
+            // D6.3 §11：终点结果 = 既有回执统计（无目标 ⇒ Skipped；有失败 ⇒ Failed；全成 ⇒ Succeeded）。
+            trace.Finish(session.LastRepairOutcome, "Step4ResultPage");
         }
         catch (Exception ex)
         {
@@ -290,11 +293,27 @@ public sealed partial class Step4ResultPage : UserControl
     /// 「恢复任务」：**必须由用户明确点击确认**（本页绝不自动恢复，也绝不自动载入）。
     /// 若当前没有活动任务但启动探测找到了候选任务，则先载入该候选（用户点击 = 明确确认），再续传；
     /// 续传沿用 job.json 里的线程原值与任务定义（VM 的 ResumeAsync 语义）。
+    ///
+    /// ★ D6.3 §11（缺口②收口）★ 本方法原先**完全没有** ActionTrace：Step4 工具栏点「恢复任务」
+    /// 在诊断里不产生任何 UI-00x（真实用户动作成了不可答的黑洞），而同页的「验证」/「尝试修复」
+    /// 与 Step2 的「恢复」都有完整因果链。现在按同一范式补齐插桩：
+    /// **只补观察，不改任何业务语义与判据**（点击后的处理路径、拒绝条件、日志文本逐字未变）。
     /// </summary>
     private async void ToolbarResume_Click(object sender, RoutedEventArgs e)
     {
         var session = _session;
-        if (session is null) return;
+        using var trace = ActionTrace.Begin(ActionKinds.Resume, ControlIds.Step4Resume, "click", "Step4ResultPage");
+        if (session is null)
+        {
+            trace.Eligibility(false, "no-session");
+            trace.Reject("no-session", "Step4ResultPage");
+            return;
+        }
+
+        // 资格判据 = 本页启用该按钮的**既有**条件（PushState 里同一个表达式），不为诊断另造一套判据。
+        var canClick = session.CanResume || session.PendingResumeCandidate is not null;
+        trace.Eligibility(canClick, canClick ? "allowed" : "no-resumable-task");
+
         try
         {
             if (!session.CanResume)
@@ -303,15 +322,25 @@ public sealed partial class Step4ResultPage : UserControl
                 if (candidate is null)
                 {
                     session.AppendLog("WARN", "恢复任务被拒绝：当前没有可恢复的任务（也没有检测到未完成任务）。");
+                    // 拒绝也必须留痕，否则"点了没反应"在诊断里依旧无从解释。
+                    trace.Reject("cannot-resume", "Step4ResultPage");
                     return;
                 }
                 session.AppendLog("INFO", $"用户确认载入未完成任务 {candidate.JobId}（{candidate.PhaseText}）。");
                 await session.AdoptExistingJobAsync(candidate.JobDir);
             }
+
+            trace.Started();
+            // 契约期望：恢复动作的反馈面（与 Step2 / 底栏同一个 resume.v1 契约）。
+            trace.Expect("resume.v1", "run-resumed");
             await session.ResumeAsync(_passwordProvider?.Invoke());
+            trace.Confirm("resume.v1", "run-resumed");
+            // 终点取**业务结果**（ActionOutcomePolicy 的判定），绝不用"方法返回了"冒充成功。
+            trace.Finish(session.LastRunOutcome, "Step4ResultPage");
         }
         catch (Exception ex)
         {
+            trace.Fault(ex, "ToolbarResume");
             session.AppendLog("ERROR", "恢复任务异常：" + ex.Message);
         }
         finally

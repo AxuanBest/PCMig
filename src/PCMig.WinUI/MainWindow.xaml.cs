@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using PCMig.WinUI.Diagnostics;
 using PCMig.Diagnostics.Abstractions;
+using PCMig.Core.Diagnostics;
 using PCMig.WinUI.Presentation;
 using Windows.Graphics;
 
@@ -158,7 +159,11 @@ public sealed partial class MainWindow : Window
         // ── Shell 装配（唯一入口；之后不再把页面逻辑散落回 MainWindow） ──────────────
         // 1) 侧栏导航与 ContentHost 共享同一份 Nav
         StepNav.Nav = Nav;
-        StepNav.StepSelected += (_, kind) => Nav.GoTo(kind);
+        StepNav.StepSelected += (_, kind) => Nav.GoTo(kind, NavigationReasons.RailClick);
+        // ★ D6.3 WP I ★ 首屏归属：把「启动即在 Step1」作为一次导航事实发布（from = (none)）。
+        //   位置在装配根（诊断 sink 已在 App.OnLaunched 里先于 MainWindow 构造安装完成），
+        //   且在任何用户导航之前 —— 只有先声明"我从哪开始"，后续的 from/to 才有起点。
+        Nav.AnnounceInitial();
         // 2) Step 1 页注入 Shell 的共享 ViewModel（唯一实例；页面自己不新建业务状态）
         PageConnect.Vm = ViewModel;
         // 页面就绪状态适配层：由 Shell 创建唯一实例并注入四页（薄投影，不含业务规则）。
@@ -288,7 +293,7 @@ public sealed partial class MainWindow : Window
             {
                 var node = await Step2TreeQaProbe.RunAsync(Session);
                 if (node is null) return;
-                Nav.GoTo(StepKind.SelectData);
+                Nav.GoTo(StepKind.SelectData, NavigationReasons.QaProbe);
                 PageSelectData.ExpandAllRootsForVerification();
             };
         }
@@ -365,7 +370,7 @@ public sealed partial class MainWindow : Window
         //   必须排在 StopUiRefresh 之后（不再产生新的 UI 事件）且在 Environment.Exit(0) 之前；
         //   预算到期就如实记 ShutdownIncomplete，绝不假装"诊断已全部保存"，也绝不无限等待。
         //   先注销 Deep Trace 的输入观测（若用户在开着的时候直接关窗）。
-        try { _deepTraceObserver?.Stop(); } catch { /* 注销失败不得影响退出 */ }
+        try { _deepTraceObserver?.Stop(DeepTraceStopReasons.WindowClosing); } catch { /* 注销失败不得影响退出 */ }
         try { DiagnosticBootstrap.Shutdown(); } catch { /* 诊断收尾失败不得影响退出 */ }
 
         // 绕开 LdrShutdownProcess → Microsoft.UI.Xaml.dll!DllMain → ThreadPoolService::ReleaseFactories
@@ -374,18 +379,18 @@ public sealed partial class MainWindow : Window
     }
 
     // ── 键盘导航（KeyboardAccelerator 回调；与侧栏点击、上一步/下一步共用同一个 Nav） ──
-    private void GoStep1_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) { Nav.GoTo(StepKind.Connect); args.Handled = true; }
-    private void GoStep2_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) { Nav.GoTo(StepKind.SelectData); args.Handled = true; }
-    private void GoStep3_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) { Nav.GoTo(StepKind.Progress); args.Handled = true; }
-    private void GoStep4_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) { Nav.GoTo(StepKind.Result); args.Handled = true; }
+    private void GoStep1_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) { Nav.GoTo(StepKind.Connect, NavigationReasons.KeyboardStep); args.Handled = true; }
+    private void GoStep2_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) { Nav.GoTo(StepKind.SelectData, NavigationReasons.KeyboardStep); args.Handled = true; }
+    private void GoStep3_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) { Nav.GoTo(StepKind.Progress, NavigationReasons.KeyboardStep); args.Handled = true; }
+    private void GoStep4_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) { Nav.GoTo(StepKind.Result, NavigationReasons.KeyboardStep); args.Handled = true; }
     private void GoNextStep_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
-        Nav.GoTo((StepKind)Math.Min((int)StepKind.Result, (int)Nav.Current + 1));
+        Nav.GoTo((StepKind)Math.Min((int)StepKind.Result, (int)Nav.Current + 1), NavigationReasons.KeyboardNext);
         args.Handled = true;
     }
     private void GoPrevStep_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
-        Nav.GoTo((StepKind)Math.Max((int)StepKind.Connect, (int)Nav.Current - 1));
+        Nav.GoTo((StepKind)Math.Max((int)StepKind.Connect, (int)Nav.Current - 1), NavigationReasons.KeyboardPrev);
         args.Handled = true;
     }
 
@@ -393,10 +398,10 @@ public sealed partial class MainWindow : Window
     // 与上面的键盘导航**共用同一个 Nav、同一套边界算术**（Connect 为下界 / Result 为上界），
     // 因此没有第二条流程：显示与文案全部由 XAML 的 x:Bind Nav.IsXxxCurrent 决定。
     private void NavNext_Click(object sender, RoutedEventArgs e) =>
-        Nav.GoTo((StepKind)Math.Min((int)StepKind.Result, (int)Nav.Current + 1));
+        Nav.GoTo((StepKind)Math.Min((int)StepKind.Result, (int)Nav.Current + 1), NavigationReasons.FooterNext);
 
     private void NavPrevious_Click(object sender, RoutedEventArgs e) =>
-        Nav.GoTo((StepKind)Math.Max((int)StepKind.Connect, (int)Nav.Current - 1));
+        Nav.GoTo((StepKind)Math.Max((int)StepKind.Connect, (int)Nav.Current - 1), NavigationReasons.FooterPrev);
 
     // ── 共用底栏（BottomBar）：真实进度位 + 四个动作按钮 ─────────────────────────────
     // 底栏四页常驻（XAML 注释：Step 1 为 Disabled 视觉态，不得删除）。阶段 A 包 3 把它接回真实状态：
@@ -447,7 +452,9 @@ public sealed partial class MainWindow : Window
         if (!Session.CanStart) { trace.Reject("cannot-start", "ShellFooter"); return; }
         trace.Started();
         await Session.RunAsync(PageConnect.CurrentPassword);
-        trace.Complete(DiagnosticOutcome.Succeeded, "footer-start-returned");
+        // D6.3 §11：终点结果 = 既有 JobPhase（Completed / CompletedWithErrors / Paused / Interrupted / Failed），
+        // 不是"RunAsync 返回了"（审计 P1-4）。
+        trace.Finish(Session.LastRunOutcome, "ShellFooter");
         PushFooter();
     }
 
@@ -458,7 +465,8 @@ public sealed partial class MainWindow : Window
         trace.Eligibility(true, "allowed");
         trace.Started();
         await Session.PauseAsync();
-        trace.Complete(DiagnosticOutcome.Succeeded, "footer-pause-returned");
+        // 暂停是**请求**语义：只报 Accepted，绝不报 Succeeded。
+        trace.Finish(Session.LastPauseOutcome, "ShellFooter");
         PushFooter();
     }
 
@@ -469,7 +477,8 @@ public sealed partial class MainWindow : Window
         trace.Eligibility(true, "allowed");
         trace.Started();
         await Session.StopAsync();
-        trace.Complete(DiagnosticOutcome.Succeeded, "footer-stop-returned");
+        // 停止也是**请求**语义：受理 ⇒ Accepted；没有在跑的运行 ⇒ Skipped。
+        trace.Finish(Session.LastStopOutcome, "ShellFooter");
         PushFooter();
     }
 
@@ -481,7 +490,8 @@ public sealed partial class MainWindow : Window
         if (!Session.CanResume) { trace.Reject("cannot-resume", "ShellFooter"); return; }
         trace.Started();
         await Session.ResumeAsync(PageConnect.CurrentPassword);
-        trace.Complete(DiagnosticOutcome.Succeeded, "footer-resume-returned");
+        // 恢复 = 又一次真实运行 ⇒ 同样以 JobPhase 为准。
+        trace.Finish(Session.LastRunOutcome, "ShellFooter");
         PushFooter();
     }
     /// <summary>
@@ -511,12 +521,17 @@ public sealed partial class MainWindow : Window
         try
         {
             var runtime = DiagnosticBootstrap.Runtime;
-            if (runtime is null) return;
+            if (runtime is null)
+            {
+                // 运行期已经收尾：观测此刻没有任何意义 —— 如实给理由，不静默。
+                _deepTraceObserver?.Stop(DeepTraceStopReasons.RuntimeUnavailable);
+                return;
+            }
 
             _deepTraceObserver ??= new DeepTraceInputObserver(runtime.Publisher, "Shell");
             if (!enabled)
             {
-                _deepTraceObserver.Stop();
+                _deepTraceObserver.Stop(DeepTraceStopReasons.UserDisabled);
                 return;
             }
 

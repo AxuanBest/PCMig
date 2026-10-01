@@ -28,7 +28,8 @@
                         HorizontalAlignment="Stretch"
                         Margin="0,0,0,10"
                         ToolTipService.ToolTip="{x:Bind Subtitle}"
-                        AutomationProperties.Name="{x:Bind Title}">
+                        AutomationProperties.Name="{x:Bind Title}"
+                        AutomationProperties.AutomationId="{x:Bind ControlId}">
                     <!-- 说明（20260928 调查，未修）：本卡的 Button PointerOver/Pressed 画刷在下方 Button.Resources 里被置为全透明，
                          实测悬停像素差 = 0%（整卡零反馈）。为恢复"克制但有"的反馈，本轮尝试过两种方案：
                            (a) 在 Button 内容的 Border 上挂 VisualStateManager → 无效（Setter 的 this 为 null，被静默忽略）；

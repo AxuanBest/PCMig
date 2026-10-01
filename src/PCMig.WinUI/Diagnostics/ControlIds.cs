@@ -66,6 +66,18 @@ public static class ControlIds
     public const string ShellTransferStop = "Shell.Transfer.Stop";
     public const string ShellTransferResume = "Shell.Transfer.Resume";
 
+    // Shell 导航（四张步骤卡）
+    //
+    // ★ D6.3 WP I ★ 这四条属于"模板生成的 ID"：四张卡共用一个 DataTemplate，
+    // 不可能写四个字面量 ⇒ 由 `Presentation\StepNavigation.StepNavItem.ControlId` 按 StepKind 生成，
+    // XAML 模板里以 `AutomationProperties.AutomationId="{x:Bind ControlId}"` 绑定。
+    // 绑定前的实测事实：UIA 树里 `StepCardButton` 这个 x:Name 派生的 ID 出现 **4 次**
+    // （SubtitleText 亦重复）⇒ 外部自动化按名字取控件时会选错对象。
+    public const string ShellNavStep1 = "Shell.Nav.Step1";
+    public const string ShellNavStep2 = "Shell.Nav.Step2";
+    public const string ShellNavStep3 = "Shell.Nav.Step3";
+    public const string ShellNavStep4 = "Shell.Nav.Step4";
+
     // Shell 工具入口 / 浮层
     public const string ShellMaterialTuning = "Shell.Tool.MaterialTuning";
     public const string ShellDiagnostics = "Shell.Tool.Diagnostics";
@@ -79,12 +91,16 @@ public static class ControlIds
     public const string DiagnosticsWarnOnly = "Diagnostics.WarnOnly";
     public const string DiagnosticsExport = "Diagnostics.Export";
 
-    /// <summary>D6.1 §12 关键业务控件清单（契约测试按这份清单校验"XAML 里真的有这个 ID"）。</summary>
+    /// <summary>
+    /// D6.1 §12 关键业务控件清单（契约测试按这份清单校验"XAML 里真的有这个 ID"）。
+    /// ★ D6.3 §11（缺口②）★ `Step4.Resume` 与 Step2 的「恢复」/底栏的「恢复」是**同一个业务动作**
+    /// 的三个入口，原先漏在清单外（实机确认它点击后零 UI-00x）⇒ 补齐。
+    /// </summary>
     public static readonly IReadOnlyList<string> BusinessCritical = new[]
     {
         Step1Connect, Step1AddShare, Step2Prepare, Step2Start, Step2Pause, Step2Stop, Step2Resume,
-        Step2ExistingJobs, Step4Verify, Step4Repair, ShellTransferStart, ShellTransferPause, ShellTransferStop,
-        ShellTransferResume, ShellMaterialTuning, ShellDiagnostics, ShellDiagnosticsPanel,
+        Step2ExistingJobs, Step4Verify, Step4Repair, Step4Resume, ShellTransferStart, ShellTransferPause,
+        ShellTransferStop, ShellTransferResume, ShellMaterialTuning, ShellDiagnostics, ShellDiagnosticsPanel,
         DiagnosticsRefresh, DiagnosticsDeepToggle, DiagnosticsWarnOnly, DiagnosticsExport,
     };
 }
