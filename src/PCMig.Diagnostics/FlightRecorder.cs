@@ -36,6 +36,20 @@ public readonly record struct FlightStats(
     public long TrimmedFinishedWindows { get; init; }
 }
 
+/// <summary>
+/// 一个窗口封存后的**事实**（供上层如实发布 `DIA.RingSealed`；记录者不自己写事件）。
+/// ★ D6.3 §8 ★ 审计 P1-3：窗口"封存"与"完整"必须分开说 —— 到了截止时刻不等于一条都没丢。
+/// </summary>
+public readonly record struct FlightSealFacts(
+    string TriggerId,
+    string TriggerCode,
+    int ActualCoverageMs,
+    long OverwrittenEvents,
+    long DroppedEvents,
+    bool PostWindowComplete,
+    bool Persisted,
+    int CheckpointSegments);
+
 /// <summary>一个冻结窗口（pre = 触发前的环快照；post = 触发后继续采集的部分）。</summary>
 internal sealed class FlightWindow
 {
@@ -50,6 +64,18 @@ internal sealed class FlightWindow
     public bool PostComplete { get; set; }
     public long DroppedInPost { get; set; }
     public long OverwrittenAtTrigger { get; init; }
+
+    /// <summary>
+    /// ★ D6.3 §8 ★ pre 快照已填充完毕（`Trigger` 在**锁外**复制，复制完成才置位，置位与发布在锁内）。
+    /// 未就绪的窗口**不得**被封存/落盘：否则会读到只填了一半的 pre，甚至在复制进行中把列表清空。
+    /// </summary>
+    public bool Ready { get; set; }
+
+    /// <summary>窗口从打开到封存的真实时长（毫秒）—— 实际覆盖多少就写多少，不承诺固定秒数。</summary>
+    public int ActualCoverageMs { get; set; }
+
+    /// <summary>封存时的检查点段数（如实呈现"kill 后能恢复多少"）。</summary>
+    public int CheckpointSegmentsAtSeal { get; set; }
 
     // ── 落盘后的**轻量元数据**（D6.1 §7）：事件列表必须被释放，只留这些。 ──
     public string? PersistedPath { get; set; }
@@ -294,7 +320,16 @@ public sealed class FlightRecorder
         if (pending is { } work)
         {
             FillPre(work.Window, work.Ring, work.Count, work.Write);
-            Interlocked.Add(ref _retainedWindowPayloadBytes, WindowPayloadBytes(work.Window));
+
+            // ★ D6.3 §8 ★ 就绪与记账一起在锁内完成：
+            //   只有置位 Ready 之后，这个窗口才允许被封存/落盘（否则会落出半个 pre）。
+            lock (_gate)
+            {
+                Interlocked.Add(ref _retainedWindowPayloadBytes, WindowPayloadBytes(work.Window));
+                work.Window.Ready = true;
+                Monitor.PulseAll(_gate);   // 关停路径可能正在等"所有窗口就绪"
+            }
+
             return new FlightTriggerOutcome(true, work.Window.TriggerId, false, reasonCode);
         }
 
@@ -324,8 +359,11 @@ public sealed class FlightRecorder
         return sb.Length == 0 ? "trigger" : sb.ToString();
     }
 
-    /// <summary>timer 入口：关闭到期窗口并落盘；同时做低频检查点。</summary>
-    public void Tick(bool checkpointEnabled)
+    /// <summary>
+    /// timer 入口：关闭到期窗口并落盘；同时做低频检查点。
+    /// 返回本次真正封存掉的窗口事实（上层据此如实发布 `DIA.RingSealed`）。
+    /// </summary>
+    public IReadOnlyList<FlightSealFacts> Tick(bool checkpointEnabled)
     {
         List<FlightWindow> toPersist = new();
         lock (_gate)
@@ -334,6 +372,10 @@ public sealed class FlightRecorder
             foreach (var window in _windows)
             {
                 if (window.Sealed) continue;
+
+                // ★ D6.3 §8 ★ 未就绪（pre 还在锁外复制）的窗口不得封存：
+                //   否则会落出"半个 pre"的窗口，且与复制线程争用同一个列表。
+                if (!window.Ready) continue;
                 if (now < window.CloseAtMonotonic) continue;
                 window.Sealed = true;
                 window.PostComplete = true;
@@ -348,10 +390,13 @@ public sealed class FlightRecorder
             }
         }
 
-        foreach (var window in toPersist) PersistWindow(window);
+        var facts = new List<FlightSealFacts>(toPersist.Count);
+        foreach (var window in toPersist) facts.Add(PersistWindow(window));
 
         // ★ D6.1 §19 ★ 检查点间隔**真的生效**（旧实现每次 Tick 都写 ⇒ 配置项形同虚设）。
         if (checkpointEnabled && !_checkpointStopped && CheckpointDue()) WriteCheckpoint();
+
+        return facts;
     }
 
     /// <summary>检查点是否到期（按配置的间隔；单调时钟，首轮立即到期）。</summary>
@@ -368,32 +413,54 @@ public sealed class FlightRecorder
         return true;
     }
 
-    /// <summary>关闭时把仍打开的窗口封存（post 不完整 ⇒ 如实标记）。</summary>
-    public void SealOpenWindows()
+    /// <summary>关闭时把仍打开的窗口封存（post 不完整 ⇒ 如实标记）。返回被封存的事实。</summary>
+    public IReadOnlyList<FlightSealFacts> SealOpenWindows()
     {
         List<FlightWindow> toPersist = new();
         lock (_gate)
         {
+            // ★ D6.3 §8 ★ 有界等待 pre 复制完成（复制在锁外做，正常只有微秒级；
+            //   等不到就**不**封存这个窗口 —— 宁可在丢失台账里留痕，也不落出半个 pre）。
+            var deadline = Environment.TickCount64 + 500;
+            while (_windows.Any(w => !w.Ready) && Environment.TickCount64 < deadline)
+                Monitor.Wait(_gate, 25);
+
+            var notReady = 0;
             foreach (var window in _windows)
             {
                 if (window.Sealed) continue;
+                if (!window.Ready) { notReady++; continue; }
                 window.Sealed = true;
                 window.PostComplete = false;
                 toPersist.Add(window);
             }
+
             foreach (var window in toPersist)
             {
                 _finished.Add((window, false, "sealed-at-shutdown"));
                 _windows.Remove(window);
             }
+
+            if (notReady > 0)
+                _loss.RecordDrop(DiagnosticBranches.Flight, DeliveryClass.Operational, 0, "seal-skipped-pre-copy-in-flight", evicted: false);
         }
 
-        foreach (var window in toPersist) PersistWindow(window);
+        var facts = new List<FlightSealFacts>(toPersist.Count);
+        foreach (var window in toPersist) facts.Add(PersistWindow(window));
+        return facts;
     }
 
-    private void PersistWindow(FlightWindow window)
+    private FlightSealFacts PersistWindow(FlightWindow window)
     {
         string? failure = null;
+        var coverageMs = DiagnosticClock.TicksToMs(Stopwatch.GetTimestamp() - window.OpenedMonotonic);
+        window.ActualCoverageMs = (int)Math.Min(int.MaxValue, coverageMs);
+        window.CheckpointSegmentsAtSeal = _checkpointSegments;
+
+        // ★ D6.3 §8 ★ `partial` 的真相：到没到截止时刻（PostComplete）与**有没有丢**是两件事。
+        //   审计 P1-3：post 超容量/超预算被丢掉的窗口原来仍写 `partial: false` —— 那就是"完整"这个字的谎。
+        var complete = window.PostComplete && window.DroppedInPost == 0;
+
         try
         {
             Directory.CreateDirectory(_flightDir);
@@ -407,18 +474,14 @@ public sealed class FlightRecorder
                 stream.Flush(true);
             }
 
-            var coverageMs = DiagnosticClock.TicksToMs(Stopwatch.GetTimestamp() - window.OpenedMonotonic);
             var manifest = SegmentRecovery.BuildManifest(
                 "flight", path, window.Pre.Count + window.Post.Count,
                 window.Pre.Count > 0 ? window.Pre[0].Sequence : 0,
                 window.Post.Count > 0 ? window.Post[^1].Sequence : (window.Pre.Count > 0 ? window.Pre[^1].Sequence : 0),
                 window.Pre.Count > 0 ? window.Pre[0].TimestampUtc : DateTimeOffset.UtcNow,
                 window.Post.Count > 0 ? window.Post[^1].TimestampUtc : DateTimeOffset.UtcNow,
-                partial: !window.PostComplete, corruptLines: 0);
+                partial: !complete, corruptLines: 0);
             DiagnosticSessionStore.WriteManifestFor(path, manifest);
-
-            // 实际覆盖多少就写多少：这里只记"窗口打开到封存的真实时长"，不承诺固定秒数。
-            _ = coverageMs;
 
             // ★ D6.1 §7 ★ 记住"落盘在哪、多大、几条"——释放载荷之后这些是唯一的引用信息。
             window.PersistedPath = path;
@@ -454,6 +517,16 @@ public sealed class FlightRecorder
                 _trimmedFinishedWindows++;
             }
         }
+
+        return new FlightSealFacts(
+            window.TriggerId,
+            window.TriggerCode,
+            window.ActualCoverageMs,
+            window.OverwrittenAtTrigger,
+            window.DroppedInPost,
+            complete,
+            failure is null,
+            window.CheckpointSegmentsAtSeal);
     }
 
     /// <summary>低频检查点：把环里尚未检查点化的事件追加到一个有界文件（kill 后能恢复的就这些）。</summary>

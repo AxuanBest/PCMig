@@ -54,7 +54,8 @@ public readonly record struct ExpectationTrackerStats(
     long ClosedByRejection,
     long ClosedByTerminal,
     long DroppedByCap,
-    int Pending);
+    int Pending,
+    long UnsupportedVersionSkipped);
 
 /// <summary>
 /// 待满足期望跟踪器（方案 §10）。
@@ -76,27 +77,55 @@ public sealed class PendingExpectationTracker
     private readonly Action<ExpectationTimeout> _onTimeout;
     private readonly Dictionary<Guid, PendingExpectation> _pending = new();
 
+    /// <summary>
+    /// ★ D6.3 §7「自检健康」★ 单把锁保护 <see cref="_pending"/> 及其计数。
+    ///
+    /// 为什么必须有：<see cref="Observe"/> 在 **analyzer 消费线程**上跑，
+    /// <see cref="Tick"/> 在 **维护定时器线程**上跑，收尾时还会从关停路径调 <see cref="CloseAll"/>。
+    /// 原来三者都在裸改 `Dictionary` —— 并发写字典会把它变成环或撕裂内部状态，
+    /// 之后每一次 `foreach` 都可能自旋不返回，**整个维护循环就这样被拖死**
+    /// （审计 P1-2：诊断自己坏掉时却仍然报 Healthy + EvidenceComplete）。
+    ///
+    /// 纪律：临界区只做集合与计数，**绝不在锁内调用 <see cref="_onTimeout"/>**
+    /// （回调会落到规则引擎去开事件卡，锁内调用等于把锁借给外部代码）。
+    /// </summary>
+    private readonly object _gate = new();
+
     private long _begun;
     private long _satisfied;
     private long _timedOut;
     private long _closedByRejection;
     private long _closedByTerminal;
     private long _droppedByCap;
+    private long _unsupportedVersionSkipped;
+
+    /// <summary>
+    /// ★ D6.3 §11 ★ 所有契约步骤指名的事件名（用于快速判定"这个事件有没有可能满足某一步"）。
+    /// 没有它就得对每个事件遍历所有 pending × 所有步骤，纯属浪费。
+    /// </summary>
+    private readonly HashSet<string> _stepEventNames = new(StringComparer.Ordinal);
 
     public PendingExpectationTracker(FeedbackContractRegistry contracts, Action<ExpectationTimeout> onTimeout)
     {
         _contracts = contracts;
         _onTimeout = onTimeout;
+        foreach (var contract in contracts.All)
+            foreach (var step in contract.Steps)
+                foreach (var expected in step.ExpectedEventNames)
+                    _stepEventNames.Add(expected);
     }
 
-    public int PendingCount => _pending.Count;
+    public int PendingCount
+    {
+        get { lock (_gate) return _pending.Count; }
+    }
 
     /// <summary>观察一个事件（由 analyzer 收件箱调用；**绝不抛**）。</summary>
     public void Observe(in DiagnosticEvent evt)
     {
         try
         {
-            ObserveCore(in evt);
+            lock (_gate) ObserveCore(in evt);
         }
         catch (Exception)
         {
@@ -106,6 +135,15 @@ public sealed class PendingExpectationTracker
 
     private void ObserveCore(in DiagnosticEvent evt)
     {
+        // ★ D6.3 §6.5 ★ 版本门与规则引擎**同一条**：不受支持的版本只配被保存，
+        //   不配被当前契约解释。少了这道门，一个 `eventVersion=999` 的
+        //   "动作被观察"事件就能凭空开出一条期望，最后变成"用户没反馈"的假事件卡。
+        if (evt.VersionUnsupported)
+        {
+            Interlocked.Increment(ref _unsupportedVersionSkipped);
+            return;
+        }
+
         var name = evt.Descriptor.Name;
 
         // ① 动作被观察到 ⇒ 按契约开一条期望。
@@ -137,24 +175,62 @@ public sealed class PendingExpectationTracker
             return;
         }
 
-        if (evt.ActionId is not { } currentAction) return;
-        if (!_pending.TryGetValue(currentAction, out var pending)) return;
-        if (pending.IsClosed) return;
-
-        // ② 终止事件 ⇒ 关掉期望（合法终点；不产出任何"缺反馈"结论）。
-        if (_contracts.TryGet(pending.ActionKind, out var activeContract)
-            && activeContract.TerminalEventNames.Contains(name, StringComparer.Ordinal))
+        // ─────────── ② 带 actionId 的事件：精确对应到"这一次动作" ───────────
+        //
+        // ★ D6.3 §11 关联策略（真实世界校准，审计/实机复验缺陷 D63-18）★
+        //
+        // UI/VM 层事件带 actionId，可以精确落到某一次用户动作上。
+        // 但 Core 侧的业务事件由后台线程发布（JobManager / robocopy 泵 / 预检线程），
+        // **按设计不带 actionId** —— 而它们恰恰是 Deferred / ExternalWait 步骤指名要等的证据
+        // （TRN.JobRunStarted、TRN.ObjectStarted、TRN.JobRunCompleted、TRN.PauseObserved、
+        //   RBC.ProcessStarted、PFL.PreflightCompleted …）。
+        //
+        // 原来的写法是"事件没有 actionId 就 return"，于是这些步骤**永远不可能被满足**：
+        // 只要动作在预算内没走到终止事件，就会凭空产出"用户没看到反馈"的假结论。
+        // 实机证据：暂停中的 Start 在 20s 后开出
+        //   UI_FEEDBACK_MISSING|…|start.deferred（evidenceIncomplete=false、Confidence=Medium），
+        // 而 TRN.JobRunStarted 就在点击后 12ms 落盘、TechnicalSummary 里 satisfied 只有 start.immediate。
+        //
+        // 现在的口径（只放松"无 actionId"这一种情况，**不放松**终止事件与错配）：
+        //   · 带 actionId 的事件：必须命中本次动作，否则丢弃（绝不错配给别的动作）；
+        //   · 不带 actionId 的事件：只按**事件名**满足当前仍然打开、且契约里指名了该事件的期望。
+        if (evt.ActionId is { } currentAction)
         {
-            pending.IsClosed = true;
-            pending.CloseReason = name == UiEvents.ActionRejected.Name ? "rejected"
-                : name == UiEvents.ActionFaulted.Name ? "faulted" : "completed";
-            if (pending.CloseReason == "rejected") _closedByRejection++;
-            else _closedByTerminal++;
-            _pending.Remove(currentAction);
+            if (!_pending.TryGetValue(currentAction, out var pending)) return;
+            if (pending.IsClosed) return;
+
+            // 终止事件 ⇒ 关掉期望（合法终点；不产出任何"缺反馈"结论）。
+            if (_contracts.TryGet(pending.ActionKind, out var activeContract)
+                && activeContract.TerminalEventNames.Contains(name, StringComparer.Ordinal))
+            {
+                pending.IsClosed = true;
+                pending.CloseReason = name == UiEvents.ActionRejected.Name ? "rejected"
+                    : name == UiEvents.ActionFaulted.Name ? "faulted" : "completed";
+                if (pending.CloseReason == "rejected") _closedByRejection++;
+                else _closedByTerminal++;
+                _pending.Remove(currentAction);
+                return;
+            }
+
+            SatisfySteps(pending, in evt, name);
             return;
         }
 
-        // ③ 其它事件 ⇒ 满足对应步骤。
+        // ─────────── ③ 不带 actionId 的业务事件：按事件名满足仍然打开的期望 ───────────
+        if (_pending.Count == 0 || !_stepEventNames.Contains(name)) return;
+        foreach (var pending in _pending.Values)
+        {
+            if (pending.IsClosed) continue;
+            SatisfySteps(pending, in evt, name);
+        }
+    }
+
+    /// <summary>
+    /// 用事件满足待定期望里"指名了该事件"的步骤。
+    /// 只增 <see cref="PendingExpectation.Satisfied"/> 与计数，**不改 _pending 结构**（调用方持锁）。
+    /// </summary>
+    private void SatisfySteps(PendingExpectation pending, in DiagnosticEvent evt, string name)
+    {
         if (!_contracts.TryGet(pending.ActionKind, out var contractForSteps)) return;
         foreach (var step in contractForSteps.Steps)
         {
@@ -171,52 +247,71 @@ public sealed class PendingExpectationTracker
     /// </summary>
     public void Tick(long nowMonotonic, bool evidenceComplete, long lossEpoch, long acceptanceWatermark)
     {
-        if (_pending.Count == 0) return;
+        List<ExpectationTimeout>? fired = null;
 
-        List<Guid>? remove = null;
-        foreach (var (actionId, pending) in _pending)
+        lock (_gate)
         {
-            if (pending.IsClosed) { (remove ??= new List<Guid>()).Add(actionId); continue; }
-            if (!_contracts.TryGet(pending.ActionKind, out var contract)) continue;
+            if (_pending.Count == 0) return;
 
-            var elapsedMs = DiagnosticClock.TicksToMs(nowMonotonic - pending.OpenedMonotonic);
-
-            foreach (var step in contract.Steps)
+            List<Guid>? remove = null;
+            foreach (var (actionId, pending) in _pending)
             {
-                if (step.Kind == ExpectationKind.Optional) continue;
-                if (pending.Satisfied.ContainsKey(step.ExpectationId)) continue;
-                if (pending.TimedOut.Contains(step.ExpectationId)) continue;
+                if (pending.IsClosed) { (remove ??= new List<Guid>()).Add(actionId); continue; }
+                if (!_contracts.TryGet(pending.ActionKind, out var contract)) continue;
 
-                var budget = step.Kind switch
+                var elapsedMs = DiagnosticClock.TicksToMs(nowMonotonic - pending.OpenedMonotonic);
+
+                foreach (var step in contract.Steps)
                 {
-                    ExpectationKind.Immediate => contract.ImmediateTimeoutMs,
-                    ExpectationKind.Deferred => contract.DeferredTimeoutMs,
-                    _ => contract.ExternalWaitTimeoutMs,
-                };
-                if (elapsedMs < budget) continue;
+                    if (step.Kind == ExpectationKind.Optional) continue;
+                    if (pending.Satisfied.ContainsKey(step.ExpectationId)) continue;
+                    if (pending.TimedOut.Contains(step.ExpectationId)) continue;
 
-                pending.TimedOut.Add(step.ExpectationId);
-                _timedOut++;
-                _onTimeout(new ExpectationTimeout(
-                    pending, step, elapsedMs - budget, acceptanceWatermark, evidenceComplete, lossEpoch));
+                    var budget = step.Kind switch
+                    {
+                        ExpectationKind.Immediate => contract.ImmediateTimeoutMs,
+                        ExpectationKind.Deferred => contract.DeferredTimeoutMs,
+                        _ => contract.ExternalWaitTimeoutMs,
+                    };
+                    if (elapsedMs < budget) continue;
+
+                    pending.TimedOut.Add(step.ExpectationId);
+                    _timedOut++;
+                    (fired ??= new List<ExpectationTimeout>()).Add(new ExpectationTimeout(
+                        pending, step, elapsedMs - budget, acceptanceWatermark, evidenceComplete, lossEpoch));
+                }
             }
+
+            if (remove is not null)
+                foreach (var id in remove) _pending.Remove(id);
         }
 
-        if (remove is not null)
-            foreach (var id in remove) _pending.Remove(id);
+        // ★ 回调在锁外派发 ★：规则引擎的事不能拿着这把锁办。
+        if (fired is not null)
+            foreach (var timeout in fired) _onTimeout(timeout);
     }
 
     /// <summary>会话收尾：把所有仍待满足的期望标记为"会话结束"（**不**产出缺反馈结论）。</summary>
     public void CloseAll(string reasonCode)
     {
-        foreach (var pending in _pending.Values)
+        lock (_gate)
         {
-            pending.IsClosed = true;
-            pending.CloseReason = reasonCode;
+            foreach (var pending in _pending.Values)
+            {
+                pending.IsClosed = true;
+                pending.CloseReason = reasonCode;
+            }
+            _pending.Clear();
         }
-        _pending.Clear();
     }
 
-    public ExpectationTrackerStats Stats() => new(
-        _begun, _satisfied, _timedOut, _closedByRejection, _closedByTerminal, _droppedByCap, _pending.Count);
+    public ExpectationTrackerStats Stats()
+    {
+        lock (_gate)
+        {
+            return new ExpectationTrackerStats(
+                _begun, _satisfied, _timedOut, _closedByRejection, _closedByTerminal, _droppedByCap, _pending.Count,
+                _unsupportedVersionSkipped);
+        }
+    }
 }

@@ -86,6 +86,31 @@ public sealed class RedactionPolicy
         }
     }
 
+    /// <summary>
+    /// ★ D6.3 §6.3 ★ **直接稳定标识符**的每包独立假名。
+    ///
+    /// 为什么不能"原样留着"：`jobId` / `actionId` / `operationId` / `objectId` / `traceId` /
+    /// `processIdentity` / `storageRootToken` 这类标识符在同一次会话、同一台机器上是**稳定**的，
+    /// 原样导出就等于在多个诊断包之间留下可关联的锚点（审计实测 `processIdentity` 跨包一致）。
+    ///
+    /// 语义：同包内同 (kind, 原值) ⇒ 同假名（包内引用仍然自洽）；换包换 key ⇒ 不同假名
+    /// （跨包不可直接关联）。kind 前缀保留可读性（看得出这是哪一类标识符，看不出它原本是什么）。
+    /// </summary>
+    public string Pseudonym(string kind, string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return "[empty]";
+        try
+        {
+            var mac = HMACSHA256.HashData(_key, Encoding.UTF8.GetBytes(kind + "|" + value));
+            return kind + "-" + ToBase64Url(mac).Substring(0, 12).ToLowerInvariant();
+        }
+        catch (Exception)
+        {
+            // 绝不回退明文（与 Token 同一条纪律）。
+            return "[token-failed]";
+        }
+    }
+
     /// <summary>路径 → 脱敏引用（不做任何文件系统访问，不 ResolveLink）。</summary>
     public PathRef CreatePathRef(string? path, PathRole role, string? rootAlias = null)
     {

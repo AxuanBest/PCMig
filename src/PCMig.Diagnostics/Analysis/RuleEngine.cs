@@ -143,7 +143,8 @@ public sealed class RuleEngine
     /// </summary>
     private RuleContext ContextFor(IDiagnosticRule rule, RuleContext shared)
     {
-        var complete = shared.Coverage.IsCompleteForRule(rule);
+        // ★ D6.3 §7 ★ 覆盖完整 **且** 诊断自身健康 ⇒ 才敢说"证据完整"。
+        var complete = shared.Coverage.IsCompleteForRule(rule) && shared.HealthEvidenceIntact;
         var epoch = shared.Coverage.EpochFor(rule.RequiredDeliveryClass);
 
         if (complete == shared.EvidenceComplete && epoch == shared.LossEpoch) return shared;
@@ -155,6 +156,7 @@ public sealed class RuleEngine
             AcceptanceWatermark = shared.AcceptanceWatermark,
             Coverage = shared.Coverage,
             ResolveEvidence = shared.ResolveEvidence,
+            HealthEvidenceIntact = shared.HealthEvidenceIntact,
         };
     }
 
@@ -326,13 +328,14 @@ public sealed class RuleEngine
     /// 这里的 `evidenceComplete`/`lossEpoch` 用**默认档（Operational）**，
     /// 各规则若声明了不同档位/分支，会由 <see cref="ContextFor"/> 单独计算。
     /// </summary>
-    public RuleContext CreateContext(EvidenceCoverage coverage, long acceptanceWatermark) => new()
+    public RuleContext CreateContext(EvidenceCoverage coverage, long acceptanceWatermark, bool healthEvidenceIntact = true) => new()
     {
         LossEpoch = coverage.EpochFor(DeliveryClass.Operational),
-        EvidenceComplete = coverage.IsCompleteFor(DeliveryClass.Operational),
+        EvidenceComplete = coverage.IsCompleteFor(DeliveryClass.Operational) && healthEvidenceIntact,
         AcceptanceWatermark = acceptanceWatermark,
         Coverage = coverage,
         ResolveEvidence = reference => _evidenceResolver(reference),
+        HealthEvidenceIntact = healthEvidenceIntact,
     };
 
     public RuleEngineStats Stats()

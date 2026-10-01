@@ -14,6 +14,15 @@ public sealed class RuleContext
 
     /// <summary>本会话已接受事件的水位（缺事件规则的"水位是否越过"判据）。</summary>
     public required Func<EventRef, DiagnosticEvent?> ResolveEvidence { get; init; }
+
+    /// <summary>
+    /// ★ D6.3 §7 ★ **诊断自身**的健康是否还配得上"证据完整"这个说法：
+    /// 存储降级 / 消费者把事件吞掉（SinkFaults）/ 维护调度器已死，三者任一为假时，
+    /// 即使**覆盖**是连续的（水位无洞、无丢失），规则也不得把结论说成"证据完整"。
+    /// 缺失事件与"证据链自己坏了"是两件事，但结论的可信度同样要降级。
+    /// 默认 true（老调用方/单测构造上下文的语义不变）。
+    /// </summary>
+    public bool HealthEvidenceIntact { get; init; } = true;
 }
 
 /// <summary>

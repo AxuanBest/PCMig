@@ -46,8 +46,27 @@ public sealed class DiagnosticRuntimeOptions
     /// </summary>
     public int AnalyzerMaxPending { get; set; } = 4096;
 
-    /// <summary>诊断中心 viewer 缓存条数上限（只影响界面显示，不影响落盘）。</summary>
+    /// <summary>
+    /// 诊断中心 viewer **显示缓存**条数上限：界面展示窗口，同时是规则证据解析视野
+    /// （`DiagnosticRuntime.ResolveEvidenceFromCache` 从这里解析 `EventRef`，找不到 ⇒ 规则必须按
+    /// "证据不可得"处理）。满了丢最旧并计数（<see cref="ViewerEventCache.DroppedOldest"/>）。
+    ///
+    /// ★ 它**不是** viewer 收件箱容量——两者此前共用同一个数值 2000（见 <see cref="ViewerQueueCapacity"/>）。
+    /// </summary>
     public int ViewerMaxEvents { get; set; } = 2000;
+
+    /// <summary>
+    /// viewer 收件箱（fan-out → viewer 消费者）队列容量。
+    ///
+    /// ★ D6.3 实测缺陷 ★ 旧实现把收件箱容量直接写成 <see cref="ViewerMaxEvents"/>（= 2000），
+    /// 而"一次真实量级突发"就是 2000 条 + 1 条会话开始事件 = 2001 条 ⇒
+    /// 在机器有负载、viewer 泵线程来不及排空时**必然**出现 `viewer/Operational queue-full`：
+    /// 实测 `lossEpoch=1`、`EvidenceComplete=false`（台账 `viewer/Operational queue-full x1`）。
+    /// 这与 D6.1 修 analyzer 的情形完全同类（原 1024 太窄 ⇒ 提高到与其他 Operational 分支同量级），
+    /// 故此处同样给收件箱独立容量，让"显示视野 2000"与"收件箱容量"解耦：
+    /// 收件箱不再是那条最窄的环，而显示缓存仍是它本来的有界视野。
+    /// </summary>
+    public int ViewerQueueCapacity { get; set; } = 4096;
 
     /// <summary>单条事件写入前的字符串字段上限（超出即截断并标 Truncated）。</summary>
     public int MaxMessageLength { get; set; } = 256;

@@ -18,13 +18,30 @@ public readonly record struct DiagnosticShutdownReport(
     string? FailureReason);
 
 /// <summary>
-/// 导出截止点（D6.1 §2.5）：导出前把"当前活动段"就地封存，使**用户点导出前最后一段时间的证据**
+/// 导出截止点（D6.1 §2.5 + D6.3 §3）：导出前把"当前活动段"就地封存，使**用户点导出前最后一段时间的证据**
 /// 真正进入已封段集合。
-///   · <see cref="RequestedSequence"/> 是请求时的会话水位；
-///   · <see cref="CutoffSequence"/> 是**真正已落盘**的水位（导出只承诺覆盖到这里）；
-///   · <see cref="PendingAtCutoff"/> &gt; 0 表示"请求时还有事件没写下去"——如实标注，不假装包全；
-///   · <see cref="FlushStatus"/>：`acknowledged` / `seal-failed` / `no-active-segment`；
-///   · <see cref="AnyTailLoss"/>：为真表示包尾可能不完整（有未覆盖或本会话有丢失世代）。
+///   · <see cref="RequestedSequence"/> 是请求时的会话水位（已被接受的序号上界）；
+///   · <see cref="CutoffSequence"/> 是**连续**已落盘水位（1..N 无洞、或洞已在丢失台账入账）——
+///     ★ D6.3 起不再是"最大已写序号"：{1,3} 这种情形只能到 1，绝不允许说成覆盖到 3；
+///   · <see cref="SettledMaxSequence"/> 是"最大已写序号"（仅展示，不得用于判完整）；
+///   · <see cref="GapCount"/> &gt; 0 表示连续水位之上还有未解释的**洞**；
+///   · <see cref="TrackingOverflowed"/> 为真表示缺口太多、无法精确断言 ⇒ 按不完整处理；
+///   · <see cref="PendingAtCutoff"/> &gt; 0 表示请求时还有事件没写下去；
+///   · <see cref="FlushStatus"/>：`acknowledged` / `tail-pending` / `gap` / `tracking-overflow` /
+///     `seal-failed` / `no-active-segment` / `no-writer`；
+///   · <see cref="AnyTailLoss"/>：包尾是否可能不完整（未覆盖 / 有洞 / 溢出 / 封段失败 / 无 writer）。
+///
+/// ★ D6.3 §3 「Export barrier 必须聚合」★
+/// 截止点不再只反映**事件 writer**：事件段、事件卡（incident）段、序列化失败、损坏行跳过
+/// 都是本包证据的一部分。<see cref="IsPackageEvidenceComplete"/> 是捕捉侧的聚合输入；
+/// <see cref="EvidenceBlockReason"/> 逐条说明是谁挡住了。
+///
+/// ★ 缺口①收口（D6.3 §11）★ 对外宣称"本包证据完整"的判据只有**一份实现**：
+/// `DiagnosticPackageJson.EvaluatePackageEvidence(request, warnings)` —— `manifest.json` 与
+/// `summary.json` 都只许从它取结论。实机缺陷：请求了飞行窗口却一条都没进包时，summary 判 Partial，
+/// manifest 却直接写这里的 <see cref="IsPackageEvidenceComplete"/> ⇒ 同一个 ZIP 里两处说法相反。
+/// 本判据（以及"导出时才跳过的损坏行/未封段/飞行窗口没进包"这些**导出时才知道的事实**）
+/// 只是 EvaluatePackageEvidence 的输入之一，不再单独对外作答。
 /// </summary>
 public readonly record struct DiagnosticExportCutoff(
     long RequestedSequence,
@@ -35,7 +52,52 @@ public readonly record struct DiagnosticExportCutoff(
     bool AnyTailLoss,
     long PendingAtCutoff,
     int SealedSegments,
-    string? Note);
+    string? Note)
+{
+    /// <summary>最大已结算序号（旧 WrittenWatermark 语义）。**仅展示**，不参与完整性判据。</summary>
+    public long SettledMaxSequence { get; init; }
+
+    /// <summary>未解释的缺口个数（连续水位与最大已结算序号之间）。</summary>
+    public long GapCount { get; init; }
+
+    /// <summary>缺口跟踪是否溢出（溢出即"说不清"，不得声称完整）。</summary>
+    public bool TrackingOverflowed { get; init; }
+
+    /// <summary>本包依赖的证据是否真的连续完整（无未覆盖尾巴、无洞、未溢出、封段成功）。</summary>
+    public bool IsEvidenceContiguous => !AnyTailLoss && GapCount == 0 && !TrackingOverflowed;
+
+    // ───────────────────── ★ D6.3 §3 导出闸门聚合 ★ ─────────────────────
+
+    /// <summary>事件卡（incident）段是否成功封存。没有事件卡 writer 时为 true（不适用 ≠ 挡住）。</summary>
+    public bool IncidentSealOk { get; init; } = true;
+
+    /// <summary>本会话累计序列化失败数（&gt; 0 ⇒ 有些事件**没能**被写成可读证据）。</summary>
+    public long SerializationFailures { get; init; }
+
+    /// <summary>导出过程中因解析不了而被跳过的行数（损坏行 ⇒ 包内证据有洞）。</summary>
+    public long CorruptLinesSkipped { get; init; }
+
+    /// <summary>飞行记录器是否缺损（丢 post 事件 / 未封口 / 未持久化却在 manifest 里声称包含）。</summary>
+    public bool FlightEvidenceIncomplete { get; init; }
+
+    /// <summary>
+    /// 逐条列出"挡住完整"的原因（空 ⇒ 本包证据完整）。**只来自本包实际证据面**，
+    /// 不看配置意图、不看运行时乐观状态。
+    /// </summary>
+    public string? EvidenceBlockReason { get; init; }
+
+    /// <summary>
+    /// ★ 本包证据是否完整 ★（对外唯一判据）。
+    /// 与 <see cref="IsEvidenceContiguous"/> 的区别：这里还要求事件卡段封存成功、
+    /// 没有序列化失败、没有损坏行被跳过、飞行记录器缺损也已如实登记。
+    /// </summary>
+    public bool IsPackageEvidenceComplete =>
+        IsEvidenceContiguous
+        && IncidentSealOk
+        && SerializationFailures == 0
+        && CorruptLinesSkipped == 0
+        && !FlightEvidenceIncomplete;
+}
 
 /// <summary>
 /// 诊断运行时装配根（方案 §5/§32-D2）。
@@ -60,6 +122,12 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
     private readonly DiagnosticClock _clock = new();
     private readonly DiagnosticHealth _health = new();
     private readonly LossLedger _loss = new();
+
+    /// <summary>
+    /// ★ D6.3 §3 ★ 连续确认水位：会话级"哪一段序号真的连续完整"。
+    /// 与"最大已写序号"（<see cref="JsonlSegmentWriter.WrittenWatermark"/>）严格区分。
+    /// </summary>
+    private readonly SequenceLedger _sequences = new();
     private readonly EvidenceCoverage _coverage;
     private readonly RedactionPolicy _redaction;
     private readonly DiagnosticHub _hub;
@@ -127,13 +195,16 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
 
         _redaction = RedactionPolicy.CreateForSession();
         _coverage = new EvidenceCoverage(_loss);
+
+        // ★ D6.3 §3 ★ 丢弃入账 ⇒ 该序号确定不会落盘 ⇒ 连续水位可以跨过它继续前进。
+        _loss.Dropped += OnLossDropped;
         _hub = new DiagnosticHub(sessionId, options, _clock, _health, _loss, _redaction);
         _meters = new DiagnosticMeters(_health, _loss);
         _viewerCache = new ViewerEventCache(options.ViewerMaxEvents);
 
         if (store is not null)
         {
-            _writer = new JsonlSegmentWriter(store, options, _health, _loss, _meters, "events");
+            _writer = new JsonlSegmentWriter(store, options, _health, _loss, _meters, "events", _sequences);
             // 事件卡单独一个写者（不同文件、不同调用线程）：incidents.jsonl 是**修订流水**
             // （同一 IncidentId 每次修订一行，离线端按 Revision 取最新）。
             _incidentWriter = new JsonlSegmentWriter(store, options, _health, _loss, _meters, "incidents");
@@ -203,11 +274,24 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
     ///   · 保留性淘汰（环覆盖/队列合并）不算丢失；
     ///   · 存储降级仍然算不完整（它意味着"本该写下去的证据可能没写下"）。
     /// </summary>
-    private bool EvidenceIsComplete => _coverage.IsCompleteFor(DeliveryClass.Operational) && !_health.StorageDegraded;
+    private bool EvidenceIsComplete =>
+        _coverage.IsCompleteFor(DeliveryClass.Operational)
+        && HealthSupportsEvidenceComplete;
 
-    /// <summary>规则上下文（分档证据覆盖 + 接受水位）。</summary>
+    /// <summary>
+    /// ★ D6.3 §7 ★ **诊断自身**还配得上"证据完整"吗：存储降级（本该写下去的证据可能没写下）、
+    /// 消费者吞掉事件（SinkFaults，那条证据等于不存在）、维护调度器已死（后续判定根本没发生）。
+    /// 单独抽出来是因为**规则上下文也要用它** —— 否则规则会把"证据链自己坏了"的报告说成证据完整
+    ///（审计 P1-2：SinkFaults=1 却 EvidenceComplete=true）。
+    /// </summary>
+    private bool HealthSupportsEvidenceComplete =>
+        !_health.StorageDegraded
+        && _health.SinkFaults == 0
+        && _health.MaintenanceAlive;
+
+    /// <summary>规则上下文（分档证据覆盖 + 接受水位 + 诊断自身健康）。</summary>
     private RuleContext CreateRuleContext() =>
-        _ruleEngine.CreateContext(_coverage, _hub.CurrentSequence);
+        _ruleEngine.CreateContext(_coverage, _hub.CurrentSequence, HealthSupportsEvidenceComplete);
 
     private DiagnosticEvent? ResolveEvidenceFromCache(EventRef reference)
     {
@@ -341,6 +425,25 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
         return runtime;
     }
 
+    /// <summary>
+    /// ★ D6.3 §3 ★ 哪些分支的丢弃意味着"这条序号永远不会出现在 events 段里"：
+    ///   · 摄入分支（ingress-*）：事件还没进管线就被丢；
+    ///   · writer 分支：已进管线但没写进文件。
+    /// 其余分支（analyzer / viewer / incident / flight）丢的是**别的**证据面：事件本身仍会落盘，
+    /// 因此绝不能拿它们去推进"已落盘水位"（否则会把没写下去的洞说成已覆盖）。
+    /// </summary>
+    private void OnLossDropped(string branch, long sequence)
+    {
+        if (sequence <= 0) return;
+        if (branch == DiagnosticBranches.Writer
+            || branch == DiagnosticBranches.IngressCritical
+            || branch == DiagnosticBranches.IngressOperational
+            || branch == DiagnosticBranches.IngressVerbose)
+        {
+            _sequences.SettleDropped(sequence);
+        }
+    }
+
     private void BuildPipeline()
     {
         _writerInbox = _writer is null
@@ -365,7 +468,9 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
 
         _viewerInbox = new BoundedBranch(
             DiagnosticBranches.Viewer,
-            _options.ViewerMaxEvents,
+            // ★ D6.3 ★ 收件箱容量独立于显示缓存视野：旧实现共用 ViewerMaxEvents（2000），
+            //   恰好等于"一次真实量级突发"（2000+1）⇒ 有负载时必然 queue-full（实测 lossEpoch=1）。
+            _options.ViewerQueueCapacity,
             _options.OperationalByteBudget,
             evictsOldest: false,
             _loss,
@@ -509,17 +614,25 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
     private void PublishPreviousSessionUncleanIfAny()
     {
         if (_store is null) return;
-        var previous = DiagnosticSessionStore.FindPreviousUncleanSession(_store.Root, SessionId);
-        if (previous is null) return;
+        var previous = DiagnosticSessionStore.FindPreviousUncleanSession(
+            _store.Root, SessionId, currentProcessIsOnlyInstance: true, out var scanFailure);
 
-        _hub.PublishInternal(
-            DiagnosticsEvents.PreviousSessionUnclean,
-            new DiaPreviousSessionUncleanPayload(
+        // ★ D6.3 ★ "读不出来"不等于"上次会话一切正常"：
+        // 判定失败时也必须如实说一句（reason 带上失败类型），否则用户以为上次干净关闭。
+        if (previous is null && scanFailure is null) return;
+
+        var payload = previous is null
+            ? new DiaPreviousSessionUncleanPayload(Guid.Empty, scanFailure!, null, 0, false)
+            : new DiaPreviousSessionUncleanPayload(
                 previous.Value.SessionId,
                 previous.Value.ReasonCode,
                 previous.Value.LastKnownSequence,
                 previous.Value.TailCompleteLines,
-                previous.Value.MarkerWriteFailed),
+                previous.Value.MarkerWriteFailed);
+
+        _hub.PublishInternal(
+            DiagnosticsEvents.PreviousSessionUnclean,
+            payload,
             level: DiagnosticLevel.Warning,
             component: "DiagnosticRuntime");
     }
@@ -555,23 +668,44 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
         {
             while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
             {
-                // ★ 唯一的期望调度器 ★ 250ms 节拍做到期判定（绝不为每条期望创建 Timer）。
-                _expectations.Tick(
+                // ★ D6.1 §4 ★ 反馈期望依赖的是 **analyzer 收件箱里的 Operational 证据**：
+                //   只有这一档/这一分支真的丢了东西，"没等到反馈"才必须降级。
+                // ★ D6.3 §7 ★ 每个维护子任务各自隔离：任何一步抛异常只算这一步失败，
+                //   绝不拖死整个维护循环（否则超时判定/刷盘/损耗发布从此都不再发生）。
+                RunMaintenance("expectations-tick", () => _expectations.Tick(
                     Stopwatch.GetTimestamp(),
-                    // ★ D6.1 §4 ★ 反馈期望依赖的是 **analyzer 收件箱里的 Operational 证据**：
-                    //   只有这一档/这一分支真的丢了东西，"没等到反馈"才必须降级。
                     EvidenceIsComplete && _coverage.IsCompleteForBranch(DiagnosticBranches.Analyzer),
                     _coverage.EpochFor(DeliveryClass.Operational),
-                    _hub.CurrentSequence);
+                    _hub.CurrentSequence));
 
                 // 其余维护（刷盘/飞行窗口/保留/健康）每秒一次。
                 if (++tick % 4 == 0) Tick();
+
+                _health.MarkMaintenanceSucceeded(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             }
         }
-        catch (OperationCanceledException) { /* 正常停止 */ }
-        catch (Exception)
+        catch (OperationCanceledException) { /* 正常停止：调度是**被我们叫停**的，不是坏掉 */ }
+        catch (Exception ex)
         {
+            // 循环整体退出 = 调度真的死了：此后没有任何判定会再发生，必须如实记账。
             _health.IncSinkFault();
+            _health.MarkMaintenanceStopped("timer-loop:" + ex.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    /// ★ D6.3 §7 ★ 跑一个维护子任务：失败只隔离这一步并记下位置与原因。
+    /// 诊断自己的维护**不许**因为某一个功能抛异常而整体停摆。
+    /// </summary>
+    private void RunMaintenance(string stage, Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            _health.MarkMaintenanceFault(stage, ex);
         }
     }
 
@@ -636,88 +770,139 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
         DiagnosticBranches.IngressVerbose => _options.VerboseQueueCapacity,
         DiagnosticBranches.Writer => _options.OperationalQueueCapacity,
         DiagnosticBranches.Analyzer => _options.AnalyzerMaxPending,
-        DiagnosticBranches.Viewer => _options.ViewerMaxEvents,
+        DiagnosticBranches.Viewer => _options.ViewerQueueCapacity,
         DiagnosticBranches.Incident => 512,
         _ => _options.OperationalQueueCapacity,
     };
 
-    /// <summary>每秒一次的维护（全部在后台线程：**绝不**在生产路径上做这些）。</summary>
+    /// <summary>
+    /// 每秒一次的维护（全部在后台线程：**绝不**在生产路径上做这些）。
+    ///
+    /// ★ D6.3 §7 ★ 每个子任务单独隔离：刷盘失败不许连带取消飞行窗口，
+    /// 保留策略出问题不许连带停掉损耗发布 —— 任何一步坏掉都只是"这一步这一秒没做成"，
+    /// 并且通过 <see cref="DiagnosticHealth.MaintenanceFaults"/> 如实可见。
+    /// </summary>
     private void Tick()
     {
-        try
+        RunMaintenance("writer-flush", () => _writer?.FlushIfDue(durable: false));
+        RunMaintenance("incident-flush", () => _incidentWriter?.FlushIfDue(durable: false));
+        RunMaintenance("flight-tick", TickFlightRecorder);
+
+        // ★ D6.1 §4/§16 ★ 丢失必须**作为事件可见**，而不只是台账里的数字：
+        //   规则（DIAGNOSTICS_DEGRADED）与离线包都要能"看到"什么时候丢了什么。
+        //   旧实现从不发布这三个事件 ⇒ 那几条触发路径等于**永远死掉**（实测：目录里定义了、
+        //   规则也在等，但没人发）。这里只在**真的发生变化**时发一次，并做节流。
+        RunMaintenance("loss-events", PublishLossEvents);
+        RunMaintenance("storage-events", PublishStorageTransitions);
+        RunMaintenance("analyzer-lag", PublishAnalyzerLag);
+        RunMaintenance("retention", EnforceRetention);
+    }
+
+    /// <summary>存储降级/恢复的可解释性：进入与退出各记一次（限速，不刷屏）。</summary>
+    private void PublishStorageTransitions()
+    {
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (_health.StorageDegraded && nowMs - Interlocked.Read(ref _lastStorageFailurePublishMs) > 30_000)
         {
-            _writer?.FlushIfDue(durable: false);
-            _incidentWriter?.FlushIfDue(durable: false);
-            _flight?.Tick(checkpointEnabled: Mode is CaptureMode.Flight or CaptureMode.Deep);
-
-            // ★ D6.1 §4/§16 ★ 丢失必须**作为事件可见**，而不只是台账里的数字：
-            //   规则（DIAGNOSTICS_DEGRADED）与离线包都要能"看到"什么时候丢了什么。
-            //   旧实现从不发布这三个事件 ⇒ 那几条触发路径等于**永远死掉**（实测：目录里定义了、
-            //   规则也在等，但没人发）。这里只在**真的发生变化**时发一次，并做节流。
-            PublishLossEvents();
-
-            // 存储降级/恢复的可解释性：进入与退出各记一次（限速，不刷屏）。
-            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            if (_health.StorageDegraded && nowMs - Interlocked.Read(ref _lastStorageFailurePublishMs) > 30_000)
-            {
-                Interlocked.Exchange(ref _lastStorageFailurePublishMs, nowMs);
-                _hub.PublishInternal(
-                    DiagnosticsEvents.StorageFailed,
-                    new DiaStorageFailedPayload("segment-writer", _health.LastStorageReason ?? "unknown", null, EmergencyFallbackActive: false),
-                    level: DiagnosticLevel.Error,
-                    component: "JsonlSegmentWriter");
-            }
-            else if (!_health.StorageDegraded && Interlocked.Read(ref _lastStorageFailurePublishMs) > 0)
-            {
-                Interlocked.Exchange(ref _lastStorageFailurePublishMs, 0);
-                _hub.PublishInternal(
-                    DiagnosticsEvents.StorageRecovered,
-                    new DiaStorageRecoveredPayload("segment-writer", 0),
-                    component: "JsonlSegmentWriter");
-            }
-
-            // 分析器滞后：只报告"落后"，不冒充"丢事件"。
-            var depth = _analyzerInbox?.Depth ?? 0;
-            if (depth > _options.AnalyzerMaxPending * 0.8 && nowMs - Interlocked.Read(ref _lastAnalyzerLagPublishMs) > 30_000)
-            {
-                Interlocked.Exchange(ref _lastAnalyzerLagPublishMs, nowMs);
-                _hub.PublishInternal(
-                    DiagnosticsEvents.AnalyzerLagged,
-                    new DiaAnalyzerLaggedPayload((int)Math.Min(int.MaxValue, depth), _health.AnalyzerLagMs),
-                    level: DiagnosticLevel.Warning,
-                    component: "FanOutStage");
-            }
-
-            // 保留/配额：每分钟一次（并如实标注配额是否仍然超）。
-            if (++_retentionCounter >= 60)
-            {
-                _retentionCounter = 0;
-                if (_store is not null)
-                {
-                    var pinned = _flight?.PersistedWindowPaths() ?? Array.Empty<string>();
-                    var result = RetentionManager.Enforce(_store, _options, pinned);
-                    if (result.QuotaExhausted)
-                    {
-                        _hub.PublishInternal(
-                            DiagnosticsEvents.CoverageChanged,
-                            new DiaCoverageChangedPayload(Mode, "quota-exhausted", null, null),
-                            level: DiagnosticLevel.Warning,
-                            component: "RetentionManager");
-                    }
-                }
-            }
+            Interlocked.Exchange(ref _lastStorageFailurePublishMs, nowMs);
+            _hub.PublishInternal(
+                DiagnosticsEvents.StorageFailed,
+                new DiaStorageFailedPayload("segment-writer", _health.LastStorageReason ?? "unknown", null, EmergencyFallbackActive: false),
+                level: DiagnosticLevel.Error,
+                component: "JsonlSegmentWriter");
         }
-        catch (Exception)
+        else if (!_health.StorageDegraded && Interlocked.Read(ref _lastStorageFailurePublishMs) > 0)
         {
-            _health.IncSinkFault();
+            Interlocked.Exchange(ref _lastStorageFailurePublishMs, 0);
+            _hub.PublishInternal(
+                DiagnosticsEvents.StorageRecovered,
+                new DiaStorageRecoveredPayload("segment-writer", 0),
+                component: "JsonlSegmentWriter");
         }
+    }
+
+    /// <summary>分析器滞后：只报告"落后"，不冒充"丢事件"。</summary>
+    private void PublishAnalyzerLag()
+    {
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var depth = _analyzerInbox?.Depth ?? 0;
+        if (depth > _options.AnalyzerMaxPending * 0.8 && nowMs - Interlocked.Read(ref _lastAnalyzerLagPublishMs) > 30_000)
+        {
+            Interlocked.Exchange(ref _lastAnalyzerLagPublishMs, nowMs);
+            _hub.PublishInternal(
+                DiagnosticsEvents.AnalyzerLagged,
+                new DiaAnalyzerLaggedPayload((int)Math.Min(int.MaxValue, depth), _health.AnalyzerLagMs),
+                level: DiagnosticLevel.Warning,
+                component: "FanOutStage");
+        }
+    }
+
+    /// <summary>保留/配额：每分钟一次（并如实标注配额是否仍然超）。</summary>
+    private void EnforceRetention()
+    {
+        if (++_retentionCounter < 60) return;
+        _retentionCounter = 0;
+        if (_store is null) return;
+
+        var pinned = _flight?.PersistedWindowPaths() ?? Array.Empty<string>();
+        var result = RetentionManager.Enforce(_store, _options, pinned);
+        if (!result.QuotaExhausted) return;
+
+        _hub.PublishInternal(
+            DiagnosticsEvents.CoverageChanged,
+            new DiaCoverageChangedPayload(Mode, "quota-exhausted", null, null),
+            level: DiagnosticLevel.Warning,
+            component: "RetentionManager");
     }
 
     public void SetMode(CaptureMode mode, string reasonCode) => _hub.SetMode(mode, reasonCode);
 
     /// <summary>触发一次 Flight 冻结（D4 规则命中时调用；返回合并/超限理由，不静默丢弃）。</summary>
     public FlightTriggerOutcome TriggerFlight(string triggerCode, string reasonCode)
-        => _flight?.Trigger(triggerCode, reasonCode) ?? new FlightTriggerOutcome(false, null, false, "flight-unavailable");
+    {
+        var outcome = _flight?.Trigger(triggerCode, reasonCode)
+            ?? new FlightTriggerOutcome(false, null, false, "flight-unavailable");
+
+        // ★ D6.3 §8 ★ 冻结必须**在事件流里留下痕迹**：否则窗口文件在磁盘上，
+        //   而读事件的人根本不知道发生过一次冻结（审计 P1-3 的"发布协议"缺口）。
+        if (outcome.Accepted && outcome.TriggerId is { } triggerId)
+        {
+            _hub.PublishInternal(
+                DiagnosticsEvents.RingTriggered,
+                new DiaRingTriggeredPayload(
+                    triggerId,
+                    triggerCode,
+                    // 环是**容量**上限，不是"前 N 秒"承诺 ⇒ 这里如实写 0，不编造一个时间窗。
+                    RequestedPreWindowMs: 0,
+                    MaxPostWindowMs: _options.FlightPostWindowMs),
+                component: "FlightRecorder");
+        }
+
+        return outcome;
+    }
+
+    /// <summary>维护一拍：封存到期窗口，并如实发布每个窗口的封存事实。</summary>
+    private void TickFlightRecorder()
+    {
+        if (_flight is null) return;
+
+        var seals = _flight.Tick(checkpointEnabled: Mode is CaptureMode.Flight or CaptureMode.Deep);
+        foreach (var seal in seals)
+        {
+            _hub.PublishInternal(
+                DiagnosticsEvents.RingSealed,
+                new DiaRingSealedPayload(
+                    seal.TriggerId,
+                    seal.ActualCoverageMs,
+                    seal.OverwrittenEvents,
+                    seal.DroppedEvents,
+                    seal.PostWindowComplete,
+                    seal.CheckpointSegments),
+                // 没保住完整的 post 窗口 = 这份证据有洞 ⇒ 必须是警告，不能是"一切正常"。
+                level: seal.PostWindowComplete ? DiagnosticLevel.Information : DiagnosticLevel.Warning,
+                component: "FlightRecorder");
+        }
+    }
 
     public FlightStats? FlightStatistics() => _flight?.Stats();
 
@@ -763,9 +948,10 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
         var budget = waitBudget ?? TimeSpan.FromMilliseconds(500);
         var deadline = DateTime.UtcNow + budget;
 
-        // 有界等待：让已经盖戳的事件尽量落盘（不阻塞业务、不影响迁移）。
+        // ★ D6.3 §3 ★ 有界等待：等的是**连续水位**追上"已被接受的序号"，
+        //   而不是"最大已写序号"追上它 —— 后者只要有洞就永远不算追上（这正是要修的假 Complete）。
         while (_writer is not null
-               && _writer.WrittenWatermark < requested
+               && _sequences.Contiguous < requested
                && DateTime.UtcNow < deadline)
         {
             Thread.Sleep(5);
@@ -774,68 +960,85 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
         var events = _writer?.SealForExport();
         var incidents = _incidentWriter?.SealForExport();
 
-        var written = events?.WrittenWatermark ?? 0;
-        var pending = Math.Max(0, requested - written);
+        var contiguous = _sequences.Contiguous;
+        var settledMax = _sequences.SettledMax;
+        var pending = Math.Max(0, requested - contiguous);
+        var gaps = _sequences.UnknownCount;
+        var overflowed = _sequences.TrackingOverflowed;
+
+        // ★ D6.3 §3 ★ 事件卡段也必须聚合：incidents 段封存失败同样是"本包证据不完整"。
+        var incidentSealOk = _incidentWriter is null || incidents is { Success: true };
+
         var flushStatus = events is null
             ? "no-writer"
             : !events.Value.Success ? "seal-failed"
             : events.Value.SealedSegmentPath is null ? "no-active-segment"
+            : overflowed ? "tracking-overflow"
+            : gaps > 0 ? "gap"
+            : pending > 0 ? "tail-pending"
             : "acknowledged";
 
-        var coverageEnd = 0L;
-        if (_writer is not null)
-            foreach (var manifest in _writer.SealedSegments) coverageEnd = Math.Max(coverageEnd, manifest.LastSequence);
+        // ★ D6.3 §3 ★ 覆盖终点只能是**连续水位**：中间有洞时，说"覆盖到最大序号"就是假完整。
+        var coverageEnd = contiguous;
 
-        var anyTailLoss = pending > 0 || _loss.Epoch > 0 || (events is { Success: false });
+        // 包尾是否完整：有未覆盖的尾巴、有未解释的洞、计数溢出、封段失败、或干脆没有 writer。
+        var anyTailLoss = pending > 0 || gaps > 0 || overflowed
+            || events is null || events is { Success: false };
+
         var note = events is null
             ? "诊断存储不可用：本次导出的包不含任何事件段"
-            : pending > 0
-                ? $"请求时有 {pending} 条事件尚未落盘，包尾覆盖到序号 {written}"
-                : null;
+            : overflowed
+                ? "缺口跟踪已溢出：本次导出的覆盖范围无法精确断言，按不完整处理"
+                : gaps > 0
+                    ? $"序号 {_sequences.FirstUnknown} 起存在 {gaps} 个未确认缺口，包内证据不连续"
+                    : pending > 0
+                        ? $"请求时有 {pending} 条事件尚未落盘，包尾覆盖到序号 {contiguous}"
+                        : null;
 
-        _ = incidents;
+        // ★ D6.3 §3 ★ 逐条登记"谁挡住了完整"（导出侧还会补上损坏行/飞行缺损等原因）。
+        var blockers = new List<string>(4);
+        if (events is null) blockers.Add("no-writer");
+        else if (events is { Success: false }) blockers.Add("event-seal-failed");
+        else if (events.Value.SealedSegmentPath is null) blockers.Add("no-active-segment");
+        if (!incidentSealOk) blockers.Add("incident-seal-failed");
+        if (overflowed) blockers.Add("gap-tracking-overflow");
+        else if (gaps > 0) blockers.Add($"unknown-gaps={gaps}");
+        if (pending > 0) blockers.Add($"tail-pending={pending}");
+        var serializationFailures = _health.SerializationFailures;
+        if (serializationFailures > 0) blockers.Add($"serialization-failures={serializationFailures}");
+
         return new DiagnosticExportCutoff(
-            requested, written, DateTimeOffset.UtcNow, flushStatus, coverageEnd, anyTailLoss, pending,
-            _writer?.SealedSegments.Count ?? 0, note);
+            requested, contiguous, DateTimeOffset.UtcNow, flushStatus, coverageEnd, anyTailLoss, pending,
+            _writer?.SealedSegments.Count ?? 0, note)
+        {
+            SettledMaxSequence = settledMax,
+            GapCount = gaps,
+            TrackingOverflowed = overflowed,
+            IncidentSealOk = incidentSealOk,
+            SerializationFailures = serializationFailures,
+            EvidenceBlockReason = blockers.Count == 0 ? null : string.Join(",", blockers),
+        };
     }
 
-    public DiagnosticHealthSnapshot GetHealthSnapshot()
-    {
-        var loss = _loss.Snapshot();
-        return new DiagnosticHealthSnapshot(
-            _health.EventsProduced,
-            _health.EventsAccepted,
-            _health.EventsFiltered,
-            _health.EventsWritten,
-            loss.TotalDropped,
-            loss.TotalEvicted,
-            loss.CriticalLost,
-            loss.StickyCriticalLost,
-            loss.Epoch,
-            _health.PublishFaults,
-            _health.SerializationFailures,
-            _health.StorageFailures,
-            _health.SinkFaults,
-            _health.IngressCriticalDepth,
-            _health.IngressOperationalDepth,
-            _health.IngressVerboseDepth,
-            _health.WriterDepth,
-            _health.AnalyzerDepth,
-            _health.ViewerDepth,
-            _health.RingBytes,
-            _health.RingEvents,
-            _health.AnalyzerPending,
-            _health.AnalyzerLagMs,
-            _health.UiPending,
-            _health.WriterLatencyMs,
-            _health.FlushLatencyMs,
-            _health.LastSuccessfulFlushUnixMs,
-            _health.LastWriteUnixMs,
-            _health.WrittenBytes,
-            _health.Rotations,
-            _health.StorageDegraded,
-            _health.LastStorageReason);
-    }
+    /// <summary>
+    /// ★ D6.3 §3 ★ 连续确认水位（1..N 无洞；洞若已入丢失台账则视为已解释）。
+    /// 这是导出/证据完整性唯一允许用来判断"覆盖到哪里"的数字。
+    /// </summary>
+    public long ContiguousSequence => _sequences.Contiguous;
+
+    /// <summary>最大已结算序号（旧 WrittenWatermark 语义，**仅展示**）。</summary>
+    public long SettledMaxSequence => _sequences.SettledMax;
+
+    /// <summary>未解释的缺口个数（&gt; 0 就不允许声称证据完整）。</summary>
+    public long UnknownGapCount => _sequences.UnknownCount;
+
+    /// <summary>缺口跟踪是否溢出（溢出即"说不清"，按不完整处理）。</summary>
+    public bool GapTrackingOverflowed => _sequences.TrackingOverflowed;
+
+    public DiagnosticHealthSnapshot GetHealthSnapshot() =>
+        // ★ D6.3 §7 ★ 投影只有一处（DiagnosticHealthSnapshot.Capture），
+        //   避免"运行时快照忘了带上自检故障"这种谎话再出现。
+        DiagnosticHealthSnapshot.Capture(_health, _loss.Snapshot());
 
     /// <summary>
     /// 有界关闭：先停摄入（新事件不再进入），再排空收件箱，最后封段并把"最终状态事件"写进新段。
@@ -948,6 +1151,9 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
                         EvidenceLossEpoch = _coverage.EpochFor(DeliveryClass.Operational),
                         AnyFaultLoss = _coverage.HasFaultLoss,
                         RetentionEvictions = _coverage.RetentionEvictions,
+                        // ★ D6.3 §7 ★ 记录者自己的故障也要一起写下来（否则"clean"会被读成"可信"）。
+                        SinkFaults = _health.SinkFaults,
+                        MaintenanceFaults = _health.MaintenanceFaults,
                     });
                     cleanMarkerWritten = true;
                 }
