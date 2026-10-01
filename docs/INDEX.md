@@ -25,15 +25,15 @@
 | 当前发布版本 | **v0.4.9**（`installer\pcmig.iss`、Cli/Core/Gui 三处 csproj 均为 `0.4.9`） |
 | 当前开发线 | **v0.5.0 WinUI**（分支 `feature/winui-v0.5.0`，**尚未发版**） |
 | PMML | **v1.0 — FROZEN**（UI 冻结） |
-| Diagnostics | **D6.1 — COMPLETE** |
-| D6.2 Real World Validation | **NOT STARTED**（等用户明确触发语） |
+| Diagnostics | **D6.1 — COMPLETE · D6.2 — 已执行完毕**（2026-10-01 真实验证，见报告） |
+| D6.2 Real World Validation | **EXECUTED**（结论：Deep Trace E2E FAIL 限定 / Secret PASS / 2-9 Action 全链路 / 跨包隐私 FAIL 限定 / Stage B NOT READY） |
 | Stage B | **NOT AUTHORIZED** |
 | 测试基线 | `PCMig.Core.Tests` 290 + `PCMig.Diagnostics.Tests` 286 = **576 / 0** |
 | Solution | `PCMig.sln` **8 个工程**（2026-10-01 补齐 WinUI 与 Diagnostics；见下文 §十） |
 | 构建基线 | `dotnet build PCMig.sln -c Release` → **0 error / 4 warning**（既有：xUnit2031 ×1 + WMC1506 ×3，无新增） |
 | Git 分支 / Commits | `feature/winui-v0.5.0` · checkpoint **`2c0183b`**（治理前真实产品状态）→ solution **`7ba2bc1`** → governance **`c5e668c`** → 最终交接·报告 **`73fcb05`** |
 | Workspace 治理 | **COMPLETE**（2026-10-01 第二轮：docs 顶层 `.md` 83 → 29；清出 ≈1.09 GiB 可重建产物） |
-| 当前工作交接 | `docs\工作交接-20261001-Workspace治理完成与D6.2起点.md` |
+| 当前工作交接 | `docs\工作交接-20261001-D6.2真实验证完成.md` |
 | 文档入口 | 本文件（`docs\INDEX.md`） |
 
 **一句话**：产品功能处于冻结状态（PMML v1.0 FROZEN / D6.1 COMPLETE），下一步是 D6.2 真实环境验证，但**未获授权前不得开始**。
@@ -83,7 +83,7 @@
 
 ---
 
-## 四、【Diagnostics】诊断子系统（D6.1 COMPLETE）
+## 四、【Diagnostics】诊断子系统（D6.1 COMPLETE · D6.2 已执行完毕）
 
 - `docs\方案-诊断中心与自诊断架构.md` —— 架构（现行）
 - `docs\诊断系统实施-阶段证据.md` —— 阶段证据（**不可移动**：`D5UiWiringContractTests` 读取；只增不改）
@@ -91,12 +91,18 @@
 - `docs\诊断系统实施-自检报告-20261001.md` —— 独立自检报告（人类审计报告）
 - `docs\诊断系统实施-基线指纹-D1.txt` —— D1 基线指纹证据（**保留原位**，在此登记为 Baseline / Evidence）
 
+**D6.2 产物（2026-10-01，真实运行验证）**：
+
+- `docs\诊断系统实施-D6.2真实验证报告.md` —— **D6.2 最终报告**（16 项问答 + 14 个 Known Gap + Stage B 就绪建议）
+- `docs\诊断系统实施-Reserved事件分级.md` —— 23 个 Reserved 事件分级（A 4 / B 14 / C 5）及实现顺序建议
+- 机器证据（**工作区根目录，不在 Git 仓库内**）：`E:\Project\deepseek work\archive\evidence\diagnostics-d62-20261001\`（69 文件 / 717,430 B；含 `20-d62-evidence-digest.txt` 摘要、`10-package-analysis.txt` 四包复算、`tools\ui.ps1` UIA 工具、`evidence\runs\run-01-input-canary\` 原始事件）—— **禁止删除**
+
 **机器生成，禁止手工编辑**（由 Contract Test 重算覆盖）：
 
 - `docs\诊断系统实施-事件覆盖矩阵.md` ← `tests\PCMig.Diagnostics.Tests\CoverageMatrixTests.cs:136`
 - `docs\诊断系统实施-配置项接线审计.md` ← `tests\PCMig.Diagnostics.Tests\OptionsWiringAuditTests.cs:21,114`
 
-**未完成事项**（详见当前交接）：23 个事件仍为 `Reserved`；`DIA.SerializationFailed` 只有计数器没有事件；`FS.FileReadFailure` 口径缺失；性能数字仍为候选值。
+**未完成事项**（详见当前交接与 D6.2 报告）：23 个事件已分级（A 4 / B 14 / C 5，见 `诊断系统实施-Reserved事件分级.md`）但均未实现；`DIA.SerializationFailed` 只有计数器没有事件；`FS.FileReadFailure` 口径缺失；Deep Trace 产物进不了包（G-1/G-3）；跨包隐私 G-2；性能数字仍为候选值。
 
 ---
 
@@ -148,7 +154,8 @@
 
 ## 七、【Current Handover】当前工作交接
 
-**当前**：`docs\工作交接-20261001-Workspace治理完成与D6.2起点.md`
+**当前**：`docs\工作交接-20261001-D6.2真实验证完成.md`
+（上一份 Current `工作交接-20261001-Workspace治理完成与D6.2起点.md` 已于 2026-10-01 按本节规则移入 `docs\handover\history\`，只作历史追溯。）
 
 规则（与 `AGENTS.md` 铁律 10 一致）：
 
@@ -161,7 +168,7 @@
 
 ## 八、【History】历史与归档（仅追溯，不覆盖当前规则）
 
-- `docs\handover\history\` —— 全部历史工作交接（`工作交接-*.md`、`工作交接说明_v0.4.*.md`）。这些文档**互相引用多为同目录相对名**，整体归档后互引自动保持有效。当前共 **42 篇**（含 2026-10-01 归档的 `工作交接-20261001-D6.1诊断收口与全量验收.md`）。
+- `docs\handover\history\` —— 全部历史工作交接（`工作交接-*.md`、`工作交接说明_v0.4.*.md`）。这些文档**互相引用多为同目录相对名**，整体归档后互引自动保持有效。当前共 **43 篇**（2026-10-01 归档：`工作交接-20261001-D6.1诊断收口与全量验收.md`、`工作交接-20261001-Workspace治理完成与D6.2起点.md`）。
 - `docs\archive\` —— 已被取代 / 已交付的历史文档（Superseded / Historical）：
   - `公司域环境验证清单.md` —— 已被 `First-Day-Company-Test-Checklist.md` 取代（两块独有内容已合并保留）
   - `FinalPolish-用户指令原文-20260927.md` —— 用户 67 节指令原文归档（文件带只读属性，**不可删**）
@@ -207,15 +214,11 @@
 
 ## 十一、【Roadmap】下一步
 
-1. **D6.2 Real World Validation**（未开始，等用户触发语）
-   - Deep Trace 端到端真实窗口 / 高 DPI / 面板动效逐帧
-   - 性能实测（当前数字全是候选值）
-   - 210 万文件级真实迁移
-   - 多会话导出与离线回放
-2. **Stage B**（未授权）
-3. **三 VM 企业模拟实验室**（未开始）
+1. **D6.2 收口后的修复项**（未授权，等用户指令）：G-1/G-3 Deep Trace 出口（`DIA.RingTriggered`/`DIA.RingSealed` → 真正写进包）、G-2 incident 内 `previousSessionId` 令牌化、G-4 显式 AutomationId 绑定、G-9 `UI.NavigationChanged`；详见 `docs\诊断系统实施-D6.2真实验证报告.md` §十四/§十五
+2. **Stage B**（未授权；D6.2 结论为 **NOT READY**，前置清单见报告 §十五）
+3. **三 VM 企业模拟实验室**（未开始）—— 6/9 Action 真实链路与 10 项故障场景需在此执行
 4. **Release Governance**（登记未改）：`tools\release.ps1` 交付清单、`首日实测检查表.md` 陈旧口径、`AGENTS.md` 版本号与 INDEX 指针
-5. **Harness / DSH Workspace Cleanup**（工作区根 174 散落文件 + 12 重复目录，本轮明确不碰）
+5. **Harness / DSH Workspace Cleanup**（工作区根 174 散落文件 + 12 重复目录，明确不碰）
 
 ---
 

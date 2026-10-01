@@ -13,17 +13,17 @@
 |---|---|
 | 权威工作区（唯一事实来源） | `E:\Project\deepseek work\PCMig`（交付区 `E:\Project\PCMig`；`I:\K\deepseek work` 永不作为事实依据或代码来源） |
 | 文档入口 | `docs\INDEX.md`（**唯一导航入口**） |
-| 当前工作交接（Current Handover） | `docs\工作交接-20261001-Workspace治理完成与D6.2起点.md`（旧的 D6.1 交接已归档在 `docs\handover\history\`，**只作历史追溯，不再是 Current**） |
+| 当前工作交接（Current Handover） | `docs\工作交接-20261001-D6.2真实验证完成.md`（旧的 D6.2 起点交接与 D6.1 交接均已归档在 `docs\handover\history\`，**只作历史追溯，不再是 Current**） |
 | Workspace Governance Phase 2 | **COMPLETE** |
 | Git Recovery Baseline | **ESTABLISHED** |
 | Solution Governance | **COMPLETE** —— `PCMig.sln` 覆盖当前 **8 个工程**（含 `src\PCMig.WinUI` 与 `src\PCMig.Diagnostics`；治理前只有 6 个） |
-| Docs Governance | **COMPLETE** —— docs 顶层 `.md` 83 → **29**；历史交接在 `docs\handover\history\`（42 篇），只作追溯 |
+| Docs Governance | **COMPLETE** —— docs 顶层 `.md` 83 → **29**（D6.2 后新增报告/分级/交接 3 篇，见 INDEX §四/§六）；历史交接在 `docs\handover\history\`（43 篇），只作追溯 |
 | PMML | **v1.0 — FROZEN** |
-| Diagnostics | **D6.1 — COMPLETE** |
+| Diagnostics | **D6.1 — COMPLETE · D6.2 — 已执行完毕**（2026-10-01 真实验证；报告 `docs\诊断系统实施-D6.2真实验证报告.md`） |
 | 发布线 / 开发线 | 发布 **v0.4.9**；开发 **v0.5.0 WinUI**（分支 `feature/winui-v0.5.0`，**未发版**） |
 | 当前 Git | 分支 `feature/winui-v0.5.0`：checkpoint **`2c0183b`** → solution **`7ba2bc1`** → governance **`c5e668c`** → 交接与报告 **`73fcb05`** / **`6f002ac`** / **`beb2902`** → 治理完成时 HEAD **`f592d8c`**（其后另有 AGENTS 对齐提交；**最新 HEAD 一律用 `git log --oneline -1` 实读**，不写死） |
 | 验证基线 | Build `dotnet build PCMig.sln -c Release` → **0 error / 4 warning**（全部既有：xUnit2031 ×1 + WMC1506 ×3）；Tests **Core 290 + Diagnostics 286 = 576 / 0**。证据：`archive\pcmig-governance-20261001\s1-build.log`、`s1-test.log` |
-| 下一步 | **D6.2 Real World Validation**（等用户明确触发语；未获授权前不得开始） |
+| 下一步 | **D6.2 收口修复项**（G-1/G-2/G-4/G-9：Deep Trace 出口、跨包隐私、显式 AutomationId、`UI.NavigationChanged` —— **未授权，等用户明确指令**）；其后才是 Stage B |
 | Stage B | **NOT AUTHORIZED / NOT STARTED** |
 | 三 VM / 210 万文件 / 大规模故障注入 | **NOT STARTED** |
 | Mnemon memory sync | **PARTIAL / Provider path available** —— 当前状态摘要已写入 Mnemon Documents（Document `57fe2a88-20ee-4c6b-ac7a-6cacf95cb4d1`）；CLI 直写路径在本机不可用（缺 `mnemon.exe`，Memory Space 写入被拒）。**这不代表治理未完成**，待 Provider 可用后再补同步 |
