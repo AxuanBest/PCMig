@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>PCMig</AssemblyName>
     <RootNamespace>PCMig.Gui</RootNamespace>
-    <Version>0.4.6</Version>
+    <Version>0.4.9</Version>
     <AssemblyTitle>PCMig 迁移工具</AssemblyTitle>
     <Product>PCMig 迁移工具</Product>
     <Description>由 郑子轩 个人制作 · 企业内网 Windows 数据/环境迁移图形界面</Description>

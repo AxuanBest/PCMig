@@ -4,6 +4,15 @@
  xmlns:local="using:PCMig.WinUI">
  <Application.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries>
   <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls"/>
+  <ResourceDictionary Source="Themes/Colors.xaml"/>
   <ResourceDictionary Source="Themes/Materials.xaml"/>
+  <ResourceDictionary Source="Themes/Typography.xaml"/>
+  <ResourceDictionary Source="Themes/Motion.xaml"/>
+  <ResourceDictionary Source="Themes/Controls.xaml"/>
+  <ResourceDictionary Source="Themes/TextInputTemplates.xaml"/>
+  <!-- ★ A7（2026-09-30）★ 「线程数 / 已有任务」下拉改用**自上而下卷帘**打开（替换官方 Split*ThemeAnimation）。
+       文件是官方 DefaultComboBoxStyle 模板的逐字副本 + 三处机械改动，见该文件头部说明与
+       生成脚本 archive\scripts\a7-make-combobox-rollstyle.ps1（可复核/可重生成）。 -->
+  <ResourceDictionary Source="Themes/PcmigComboBoxRoll.xaml"/>
  </ResourceDictionary.MergedDictionaries></ResourceDictionary></Application.Resources>
 </Application>

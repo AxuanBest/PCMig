@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>PCMig 诊断契约层：DiagnosticEvent / EventCatalog / DiagnosticContext / IDiagnosticPublisher。零业务依赖、零 UI 依赖、零 Serilog 依赖（Observer 边界的类型定义）。</Description>
+  </PropertyGroup>
+
+  <!--
+    依赖方向（架构方案 §29）：Core ──→ Abstractions ←── Diagnostics runtime
+    本文件不得出现 ProjectReference / PackageReference：契约层必须能被 Core、CLI、WPF、WinUI、
+    测试项目同时引用而不引入任何传递依赖（也不产生 net8.0-windows 之类 TFM 漂移）。
+  -->
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="PCMig.Diagnostics" />
+    <InternalsVisibleTo Include="PCMig.Diagnostics.Tests" />
+  </ItemGroup>
+
+</Project>

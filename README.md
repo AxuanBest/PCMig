@@ -2,7 +2,7 @@
 
 > **直拉模式（Direct Pull）**：在新电脑上运行 PCMig，输入旧电脑 IP 或电脑名，通过 SMB 网络把旧电脑共享盘的数据完整拉到新电脑。
 
-**当前版本：v0.4.6** ｜ 设计 & 开发：郑子轩（[Axuanbest](https://github.com/Axuanbest)）
+**当前版本：v0.4.9** ｜ 设计 & 开发：郑子轩（[Axuanbest](https://github.com/Axuanbest)）
 
 ## 架构
 
@@ -42,16 +42,11 @@ docs/              使用说明 & 验证清单
 ## 构建
 
 ```powershell
-# 编译
+# 本地编译验证（不生成交付物）
 dotnet build -c Release
-
-# 发布自包含单文件
-dotnet publish src\PCMig.Gui -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist\publish-gui
-dotnet publish src\PCMig.Cli -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist\publish-cli
-
-# 打包安装程序（需要 Inno Setup 6）
-& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" installer\pcmig.iss
 ```
+
+> 发版、发布和安装包制作只能通过 `tools/release.ps1` 执行；禁止手工 `dotnet publish` 或直接调用 Inno Setup。
 
 ## 快速开始
 
@@ -116,7 +111,7 @@ list       列出所有任务
 1. 先写三处：docs/更新日志.md（本版条目 + 版本对照表一行）、docs/使用说明.txt（本版段落）；
 2. 运行：
 
-       powershell -NoProfile -ExecutionPolicy Bypass -File "tools/release.ps1" -Version 0.2.26
+       powershell -NoProfile -ExecutionPolicy Bypass -File "tools/release.ps1" -Version X.Y.Z
 
    脚本会校验上面三处，缺一项直接中止；然后自动写版本号、生成 docs/更新日志.txt、
    打包安装包、交付并逐文件校验哈希。

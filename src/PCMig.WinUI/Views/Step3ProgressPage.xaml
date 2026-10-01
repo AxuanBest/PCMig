@@ -1,0 +1,226 @@
+<UserControl
+    x:Class="PCMig.WinUI.Views.Step3ProgressPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- 页面入场动画由 Shell 统一播放（方向性，见 Presentation\MotionDirector.cs）。 -->
+
+    <!--
+        Step 3 — 迁移进度（视觉基准：正式参考图 ref3）。
+        结构照参考图落位（纵向）：
+          页标题区 → 总进度大字 + 进度条 → 四张统计卡 → 下方"对象明细"表格空状态 + "正在复制的文件"空状态 双栏
+        阶段三（阶段 A 包 3）：本页数值**全部来自 Core 真实状态**（经 MigrationSessionViewModel 投影），
+        不再有占位/假数据；接线方式为代码直推（见 Step3ProgressPage.xaml.cs 的 PushState）。
+    -->
+    <Grid RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <!-- 总进度卡保持 Auto：它是内容（不是视口），不参与抢剩余高度。 -->
+            <RowDefinition Height="Auto"/>
+            <!-- 四张统计卡同样保持 Auto。 -->
+            <RowDefinition Height="Auto"/>
+            <!-- 下双栏行必须是星号行：页根已不再套 ScrollViewer，整页填满 Shell 给出的有界高度，
+                 星号行才能把剩余高度给「对象明细 / 正在复制」两张 Card，两张卡才能等高。
+                 A51：原来页根还有 Margin="0,12,0,0"，与外层 WorkspaceShell 的 Padding="20,20,20,18"
+                 重复，已去掉 —— 与 Step1/Step2/Step4 页头位置统一（页头都在 y=160 起），并把 12 DIP
+                 让给两张 Card；页内滚动条仍为 0（StarTrace：本页无任何 ScrollViewer）。 -->
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+            <!-- 页标题区 -->
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Border Width="34" Height="34" CornerRadius="17" Background="{StaticResource AccentGradientBrush}" BorderBrush="#B8FFFFFF" BorderThickness="1" Translation="0,0,24" Shadow="{StaticResource ElevationHigh}">
+                    <Grid>
+                        <!-- 球形高光：与外框同宽、被圆角裁剪，给平涂渐变补上"受光"层 -->
+                        <Border CornerRadius="16" Margin="1" IsHitTestVisible="False">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0.25,0" EndPoint="0.25,1">
+                                    <GradientStop Color="#59FFFFFF" Offset="0"/>
+                                    <GradientStop Color="#14FFFFFF" Offset="0.42"/>
+                                    <GradientStop Color="#00FFFFFF" Offset="0.70"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+                        <TextBlock Style="{StaticResource PCMigTextStepBadge}" Text="3" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"/>
+                    </Grid>
+                </Border>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource PCMigTextPageTitle}" Text="迁移进度"/>
+                    <TextBlock Style="{StaticResource PCMigTextPageSubtitle}"
+                               Text="实时进度、文件流与报错；暂停或停止都可在任务存档中恢复。"/>
+                </StackPanel>
+            </StackPanel>
+
+            <!-- 总进度 -->
+            <Border Grid.Row="1" Translation="0,0,12" Style="{StaticResource ElevatedSurface}" Padding="18">
+                <StackPanel Spacing="10">
+                    <!-- ★ A6（F5，2026-09-30）★ 同 F1（Step4）：横向 StackPanel 以**无限宽度**度量子元素
+                         ⇒ 状态句（_state.Step3StateText，含"迁移未完整完成…实际完成 X%…"这类长句）
+                         即使写了 Wrap 也永不折行，会被右缘裁掉。改为 Auto/Auto/* 三列：
+                         前两列几何不变（仍底对齐、间距 12），状态句列拿到真实剩余宽度并可折行。 -->
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" x:Name="TotalPercentText" Style="{StaticResource PCMigTextTotalPercent}" Text=""/>
+                        <TextBlock Grid.Column="1" x:Name="TotalBytesText" Style="{StaticResource PCMigTextFooterValue}" Text="" VerticalAlignment="Bottom"/>
+                        <TextBlock Grid.Column="2" Style="{StaticResource PCMigTextStepSubtitle}" x:Name="StateLineText" TextWrapping="Wrap" VerticalAlignment="Bottom"/>
+                    </Grid>
+                    <Grid Height="12">
+                        <Border Background="{StaticResource ProgressTrackBrush}" CornerRadius="6"/>
+                        <ProgressBar x:Name="TotalProgressBar" Minimum="0" Maximum="100" Height="12" VerticalAlignment="Center"
+                                     Foreground="{StaticResource AccentBrush}" Background="Transparent" BorderThickness="0"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- 四张统计卡（Compact 下折行 2x2） -->
+            <Grid x:Name="StatCardsGrid" Grid.Row="2" ColumnSpacing="12" RowSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="0"/>
+                </Grid.RowDefinitions>
+                <Border x:Name="StatCard0" Grid.Row="0" Grid.Column="0" Translation="0,0,8" Style="{StaticResource SecondarySurface}" Padding="14">
+                    <StackPanel Spacing="4">
+                        <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Text="传输速度"/>
+                        <TextBlock x:Name="SpeedValueText" Style="{StaticResource PCMigTextStatValue}" Text=""/>
+                    </StackPanel>
+                </Border>
+                <Border x:Name="StatCard1" Grid.Row="0" Grid.Column="1" Translation="0,0,8" Style="{StaticResource SecondarySurface}" Padding="14">
+                    <StackPanel Spacing="4">
+                        <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Text="预计剩余"/>
+                        <TextBlock x:Name="EtaValueText" Style="{StaticResource PCMigTextStatValue}" Text=""/>
+                    </StackPanel>
+                </Border>
+                <Border x:Name="StatCard2" Grid.Row="0" Grid.Column="2" Translation="0,0,8" Style="{StaticResource SecondarySurface}" Padding="14">
+                    <StackPanel Spacing="4">
+                        <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Text="对象进度"/>
+                        <TextBlock x:Name="ObjectValueText" Style="{StaticResource PCMigTextStatValue}" Text=""/>
+                    </StackPanel>
+                </Border>
+                <Border x:Name="StatCard3" Grid.Row="0" Grid.Column="3" Translation="0,0,8" Style="{StaticResource SecondarySurface}" Padding="14">
+                    <StackPanel Spacing="4">
+                        <TextBlock x:Name="BytesCardLabel" Style="{StaticResource PCMigTextStepSubtitle}" Text="已传 / 计划"/>
+                        <TextBlock x:Name="BytesValueText" Style="{StaticResource PCMigTextStatValue}" Text=""/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- 下双栏：对象明细 + 正在复制的文件（Compact 下改单栏堆叠） -->
+            <Grid x:Name="LowerPanesGrid" Grid.Row="3" ColumnSpacing="12" RowSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <!-- 内容行必须是星号行：两张 Card 在同一行里，才能一起变高、顶底对齐等高。
+                         第 2 行（0 高）由代码后置在 Compact 下改成 Auto 做单栏堆叠，不能删。 -->
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="0"/>
+                </Grid.RowDefinitions>
+
+                <Border x:Name="LowerPaneLeft" Grid.Row="0" Grid.Column="0" Translation="0,0,10" VerticalAlignment="Stretch" Style="{StaticResource ElevatedSurface}" Padding="14">
+                    <Grid RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <!-- 数据视口行改为星号行：页根已不再套 ScrollViewer，Card 拿到的是有界高度，
+                                 星号行才能把剩余高度给内框（改前这里是 Auto，内框只能靠 MinHeight 撑着）。 -->
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <!-- U63（用户人工标注，紧急修复）：这个图标原本是强调蓝 AccentBrush(#1677F2)，
+                                 但"对象明细"只是面板标题、既没有被选中也不是当前步骤 —— 用户判词：
+                                 「这个我没有点击没有选中，所以应该是灰色」。像素实测该图标 winner = #1677F2。
+                                 改为与空状态图标同族的 StepIconBrush(#7C93B3) 中性色。 -->
+                            <FontIcon Glyph="&#xE8FD;" FontSize="20" Foreground="{StaticResource StepIconBrush}"/>
+                            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="对象明细" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="ObjectPaneHintText" Style="{StaticResource PCMigTextStepSubtitle}" Text=""
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <Border Grid.Row="1" Style="{StaticResource InsetSurface}" MinHeight="120" Padding="16" VerticalAlignment="Stretch">
+                            <!-- 空状态与真实对象清单二选一（互斥由代码后置的 PushState 切换 Visibility）。
+                                 Grid 只是让两者叠在同一格内：Border 只能有一个子元素，且不改任何既有几何。 -->
+                            <Grid>
+                            <StackPanel x:Name="ObjectEmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+                                <FontIcon Glyph="&#xE9D2;" FontSize="28" Foreground="{StaticResource StepIconBrush}"/>
+                                <TextBlock Style="{StaticResource PCMigTextEmptyStateTitle}" Text="还没有迁移对象。"
+                                           HorizontalAlignment="Center"/>
+                                <TextBlock Style="{StaticResource PCMigTextHintBody}"
+                                           Text="在 Step 2 勾选内容并开始迁移后，这里会逐项显示进度与结果。"
+                                           HorizontalAlignment="Center"/>
+                            </StackPanel>
+                            <!-- 真实对象清单：数据源 = MigrationSessionViewModel.Objects（回执驱动的权威状态），
+                                 ItemsSource 由代码后置一次性挂上（本页沿用“代码直推”，不用 {x:Bind}）。 -->
+                            <ListView x:Name="ObjectList" Visibility="Collapsed" SelectionMode="None" Padding="0">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid ColumnSpacing="10" Padding="0,3">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource PCMigTextListItemTitle}" Text="{Binding ObjectId}" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Style="{StaticResource PCMigTextListItemBody}" Text="{Binding SourcePath}"
+                                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="2" Style="{StaticResource PCMigTextListItemMeta}" Text="{Binding SizeText}" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="3" Style="{StaticResource PCMigTextListItemMeta}" Text="{Binding StatusText}" VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <Border x:Name="LowerPaneRight" Grid.Row="0" Grid.Column="1" Translation="0,0,10" VerticalAlignment="Stretch" Style="{StaticResource ElevatedSurface}" Padding="14">
+                    <Grid RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <!-- U63：同"对象明细"——面板标题图标不是选中态，不得用强调蓝。 -->
+                            <FontIcon Glyph="&#xE8B7;" FontSize="20" Foreground="{StaticResource StepIconBrush}"/>
+                            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="正在复制的文件" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <Border Grid.Row="1" Style="{StaticResource InsetSurface}" MinHeight="120" Padding="16" VerticalAlignment="Stretch">
+                            <!-- 同左栏：空状态与真实文件流二选一（Grid 仅为同格叠放，Border 只能有一个子元素）。 -->
+                            <Grid>
+                            <StackPanel x:Name="LiveFilesEmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+                                <FontIcon Glyph="&#xE8A5;" FontSize="28" Foreground="{StaticResource StepIconBrush}"/>
+                                <TextBlock Style="{StaticResource PCMigTextEmptyStateTitle}" Text="当前没有正在复制的文件。"
+                                           HorizontalAlignment="Center"/>
+                                <!-- 原先这里硬编码「（说明：该窗口正在搬运 0 个文件）」的假计数，
+                                     现改为由 Engine 的 FileCopied 事件 / 停滞提示驱动的真实一行（初始为空，无假数据）。 -->
+                                <TextBlock x:Name="LiveFilesHintText" Style="{StaticResource PCMigTextHintBody}" Text=""
+                                           HorizontalAlignment="Center"/>
+                            </StackPanel>
+                            <!-- 真实文件流：数据源 = MigrationSessionViewModel.LiveFiles（引擎 FileCopied 事件投影，≤200 条滚动）。
+                                 U66（密度）：条目上下内边距 3→2，同高度多出一行；只动内边距，
+                                 字体体系（PCMigTextListItemBody：FontFamily/FontSize/Foreground）与材质一律不动，
+                                 也不引卡片/边框（保持纯日志流外观）。 -->
+                            <ListView x:Name="LiveFileList" Visibility="Collapsed" SelectionMode="None" Padding="0">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Style="{StaticResource PCMigTextListItemBody}" Text="{Binding}"
+                                                   TextTrimming="CharacterEllipsis" Padding="0,2"/>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
+    </Grid>
+</UserControl>

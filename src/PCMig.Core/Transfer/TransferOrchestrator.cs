@@ -1,8 +1,12 @@
 using System.Diagnostics;
+using PCMig.Core.Diagnostics;
 using PCMig.Core.Jobs;
 using PCMig.Core.Matrix;
 using PCMig.Core.Models;
 using PCMig.Core.Util;
+using PCMig.Diagnostics.Abstractions;
+using PCMig.Diagnostics.Abstractions.Events;
+using PCMig.Diagnostics.Abstractions.Payloads;
 using Serilog;
 
 namespace PCMig.Core.Transfer;
@@ -61,6 +65,7 @@ public sealed class TransferOrchestrator
     private PlannedObject? _activeObject;
     private DateTime _lastFileEventAt = DateTime.MinValue; // 最近一次解析到文件行的时刻
     private DateTime _lastEnumAt = DateTime.MinValue;      // 最近一次回退枚举的时刻
+    private bool _enumSkipLogged;                          // 本对象是否已记录"该通道跳过回退枚举"的原因
     private TimeSpan _enumInterval = TimeSpan.FromSeconds(8); // 自适应枚举间隔（按上次枚举耗时×3，8s~120s）
 
     // ---- 错误风暴检测 + 进度回冲 ----
@@ -235,6 +240,9 @@ public sealed class TransferOrchestrator
         state.LastError = null;
         _ctx.SaveState(state);
 
+        PublishTransfer(TransferEvents.JobRunStarted, null, DiagnosticLevel.Information, DiagnosticOutcome.Started,
+            phase: nameof(JobPhase.Running));
+
         // ---- 本次运行的速率口径与熔断状态复位 ----
         _spaceCode = null;
         _runStartCompletedBytes = state.CompletedBytes;
@@ -276,10 +284,40 @@ public sealed class TransferOrchestrator
             Report(progress, state, obj.ObjectId, obj.SourcePath, 0, $"开始对象 {obj.ObjectId}",
                 objTotal: Math.Max(obj.EstimatedBytes, 0), objLarge: obj.UseRestartablePass);
 
+            PublishTransfer(TransferEvents.ObjectStarted, null, DiagnosticLevel.Information, DiagnosticOutcome.Started,
+                objectId: obj.ObjectId, phase: nameof(JobPhase.Running));
+
             var receipt = await RunOneObjectAsync(obj, job, state, baseBytes, progress, ct);
             if (receipt == null) { interrupted = true; break; }  // 取消/Immediate 暂停导致中断
 
             _ctx.SaveReceipt(receipt);
+
+            // ★ 对象级结果事件 ★ 两个通道的退出码分开记（-1 = 未执行该通道），
+            //   规则的输入是这些结构化字段，而不是去解析日志文本。
+            PublishTransfer(
+                receipt.Status == ObjectStatus.Interrupted ? TransferEvents.ObjectInterrupted : TransferEvents.ObjectCompleted,
+                new TrnObjectPayload(
+                    receipt.Kind.ToString(),
+                    receipt.TargetBytes,
+                    receipt.TargetFiles,
+                    receipt.RobocopyExitCodeBulk,
+                    receipt.RobocopyExitCodeLarge,
+                    receipt.ErrorClass.ToString(),
+                    receipt.Attempt),
+                receipt.Status switch
+                {
+                    ObjectStatus.Completed => DiagnosticLevel.Information,
+                    ObjectStatus.Interrupted => DiagnosticLevel.Warning,
+                    _ => DiagnosticLevel.Warning,
+                },
+                receipt.Status switch
+                {
+                    ObjectStatus.Completed => DiagnosticOutcome.Succeeded,
+                    ObjectStatus.Interrupted => DiagnosticOutcome.Canceled,
+                    _ => DiagnosticOutcome.Failed,
+                },
+                objectId: obj.ObjectId,
+                exitCode: receipt.RobocopyExitCodeBulk);
             // 复拷已完成对象：先扣掉上一次计入的字节，避免同一对象被累计两次
             if (wasCompleted) baseBytes -= prevReceipt!.TargetBytes;
             baseBytes += receipt.TargetBytes;
@@ -322,11 +360,21 @@ public sealed class TransferOrchestrator
             state.LastError = "目标磁盘空间不足：本次运行已提前停止（避免对每个文件反复重试）。" +
                 "请释放目标盘空间后执行 resume，已完成的对象不会重传。";
             _log.Error("传输提前结束：目标盘空间不足（完成 {Done}/{Total} 对象）", state.CompletedObjects, state.TotalObjects);
+            // _spaceCode 是文本形式的错误码（既有业务口径）⇒ 能解析成数字就填进 Win32Error 域，否则留空（不伪造）。
+            PublishTransfer(TransferEvents.SpaceAbortRequested, null, DiagnosticLevel.Error, DiagnosticOutcome.Failed,
+                win32: int.TryParse(_spaceCode, out var spaceCodeValue) ? spaceCodeValue : null,
+                phase: nameof(JobPhase.CompletedWithErrors));
         }
         else if (interrupted || ct.IsCancellationRequested)
         {
             state.Phase = File.Exists(_ctx.PauseRequestPath) ? JobPhase.Paused : JobPhase.Interrupted;
             state.LastError = "任务被暂停或中断；可用 resume 续传（已完成的对象不会重传）";
+            // ★ 请求态与真实态分开 ★ 有 pause.request 才是"已暂停"，否则是"被中断/取消"。
+            PublishTransfer(
+                state.Phase == JobPhase.Paused ? TransferEvents.Paused : TransferEvents.StopObserved,
+                null, DiagnosticLevel.Information,
+                state.Phase == JobPhase.Paused ? DiagnosticOutcome.Accepted : DiagnosticOutcome.Canceled,
+                phase: state.Phase.ToString());
         }
         else if (state.Phase == JobPhase.Paused)
         {
@@ -356,7 +404,60 @@ public sealed class TransferOrchestrator
                 : $"阶段结束: {state.Phase}");
         _log.Information("传输阶段结束: {Phase}（完成 {Done}/{Total} 对象，失败 {Failed}）",
             state.Phase, state.CompletedObjects, state.TotalObjects, state.FailedObjects);
+
+        PublishTransfer(TransferEvents.JobRunCompleted, null,
+            state.Phase is JobPhase.Completed ? DiagnosticLevel.Information : DiagnosticLevel.Warning,
+            state.Phase switch
+            {
+                JobPhase.Completed => DiagnosticOutcome.Succeeded,
+                JobPhase.Paused => DiagnosticOutcome.Accepted,
+                JobPhase.Interrupted or JobPhase.Canceled => DiagnosticOutcome.Canceled,
+                _ => DiagnosticOutcome.Failed,
+            },
+            phase: state.Phase.ToString());
+
         return state.Phase;
+    }
+
+    /// <summary>
+    /// 发布观察事件（**绝不影响传输**）：未启用时提前返回；上下文带 Job 归属，
+    /// 传了 objectId 时再带对象归属。规则的输入是 typed payload + envelope 字段，不是日志文本。
+    /// </summary>
+    private void PublishTransfer(
+        EventDescriptor descriptor,
+        IDiagnosticPayload? payload,
+        DiagnosticLevel level,
+        DiagnosticOutcome outcome,
+        string? objectId = null,
+        int? exitCode = null,
+        int? durationMs = null,
+        string? phase = null,
+        int? win32 = null,
+        string? errorClass = null)
+    {
+        try
+        {
+            var publisher = CoreDiagnostics.Sink.Publisher;
+            if (!publisher.IsEnabledFor(descriptor)) return;
+
+            var context = objectId is null ? _ctx.Diagnostics : _ctx.Diagnostics.WithObject(objectId);
+            publisher.TryPublish(new DiagnosticEventDraft(
+                descriptor,
+                context,
+                payload,
+                Level: level,
+                Outcome: outcome,
+                RobocopyExitCode: exitCode,
+                DurationMs: durationMs,
+                Win32Error: win32,
+                ErrorDomain: win32 is null ? ErrorDomain.None : ErrorDomain.Win32,
+                Phase: phase,
+                StateOwner: StateOwner.Core));
+        }
+        catch (Exception)
+        {
+            // 观察失败绝不影响传输。
+        }
     }
 
     /// <summary>执行单个对象：Bulk 通道（/MT）→ 可选 Large 通道（/Z），含 Transient 重试。</summary>
@@ -387,16 +488,35 @@ public sealed class TransferOrchestrator
         _largeFileTarget = null; _largeFileStartLen = 0; _largeFileApproxSize = 0;
         _activeObject = obj; _currentPass = passKind;
         _lastFileEventAt = DateTime.MinValue; _lastEnumAt = DateTime.MinValue;
+        _enumSkipLogged = false;
 
         // ---- 强制覆盖（修复专用）：先删目标侧同名文件，逼 robocopy 从共享重新拉取 ----
         // 不删的话，robocopy 对"大小+时间相同"的文件一律跳过（实测 /IS /IT 也无效）。
         if (ForceOverwriteFromSource)
         {
-            var (pf, pb, pskip) = RepairPurge.PurgeTargetCopies(obj, job.Options, _matrix, _log);
-            if (pf > 0 || pskip > 0)
+            var purge = RepairPurge.PurgeTargetCopies(obj, job.Options, _matrix, _log);
+            if (purge.Files > 0 || purge.SkippedLarge > 0)
                 _log.Information("强制覆盖: 对象 {Id} 已删除目标侧 {Files} 个同名文件（{Bytes}），将从共享重新拉取{Skip}",
-                    obj.ObjectId, pf, Format.Bytes(pb),
-                    pskip > 0 ? $"；{pskip} 个大于分流阈值且本次不走 /Z 通道的文件已跳过不删" : "");
+                    obj.ObjectId, purge.Files, Format.Bytes(purge.Bytes),
+                    purge.SkippedLarge > 0 ? $"；{purge.SkippedLarge} 个大于分流阈值且本次不走 /Z 通道的文件已跳过不删" : "");
+
+            // ★ D6.1 §16 观察点 ★ 净化聚合（含**失败数**）：只陈述事实，不改任何删除决策。
+            Diagnostics.CoreDiagnostics.PublishCore(
+                RepairEvents.PurgeAttempted,
+                new RprPurgePayload(purge.Files, purge.Bytes, purge.SkippedLarge, purge.Failed, "force-overwrite"),
+                _ctx.Diagnostics.WithObject(obj.ObjectId),
+                DiagnosticLevel.Information,
+                purge.Failed > 0 ? DiagnosticOutcome.Unknown : DiagnosticOutcome.Succeeded,
+                "TransferOrchestrator");
+
+            if (purge.Failed > 0)
+                Diagnostics.CoreDiagnostics.PublishCore(
+                    RepairEvents.PurgeFailed,
+                    new RprPurgePayload(purge.Files, purge.Bytes, purge.SkippedLarge, purge.Failed, "delete-failed"),
+                    _ctx.Diagnostics.WithObject(obj.ObjectId),
+                    DiagnosticLevel.Warning,
+                    DiagnosticOutcome.Failed,
+                    "TransferOrchestrator");
         }
 
         // 进度轮询任务：周期性实测目标目录字节增长 → 更新 CompletedBytes/速度/ETA
@@ -486,6 +606,12 @@ public sealed class TransferOrchestrator
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             receipt.Attempt = attempt;
+
+            // ★ D6.1 §16 观察点 ★ 重试开始（attempt>1 时）——只记事实，不改重试决策与通道选择。
+            if (attempt > 1)
+                PublishTransfer(TransferEvents.RetryStarted,
+                    new TrnRetryPayload(pass.ToString(), attempt, maxAttempts, 0),
+                    DiagnosticLevel.Information, DiagnosticOutcome.Accepted, obj.ObjectId);
             // v0.3.8 大文件通道：auto 下首次用 /MT+/J（吞吐），重试时退 /Z（续传优先）
             var restartable = RobocopyRunner.UseRestartableZ(_ctx.Definition.Options, pass, attempt);
             _serialLargePass = pass == PassKind.Large && restartable;
@@ -495,6 +621,13 @@ public sealed class TransferOrchestrator
                     RobocopyRunner.ChannelText(pass, restartable,
                         RobocopyRunner.UseUnbufferedJ(obj.SourcePath, obj.TargetPath, _ctx.Definition.Options)),
                     attempt);
+            // ★ 把对象/尝试/通道的不可变上下文交给 runner ★
+            //   这样 robocopy 的子进程事件（PID/退出码/被杀/错误聚合）能**正确归属到对象**，
+            //   而不是靠时间顺序去猜。下一次对象开始时会覆盖它（无需 finally 复位：
+            //   编排器自己的事件用的是 _ctx.Diagnostics，不读 runner 的这份副本）。
+            _runner.Diagnostics = _ctx.Diagnostics.WithObject(obj.ObjectId).WithAttempt(attempt)
+                .WithPass(RobocopyRunner.PassToken(pass));
+
             var result = await _runner.RunPassAsync(obj.SourcePath, obj.TargetPath, _ctx.Definition.Options,
                 _matrix, pass, roboLog, ct, obj.FileList, restartable);
             if (result.Killed) return null;
@@ -507,6 +640,13 @@ public sealed class TransferOrchestrator
                 var backoff = TimeSpan.FromSeconds(10.0 * attempt);
                 _log.Warning("对象 {Id} [{Pass}] 失败(第{A}次, Transient): {Err}；{Backoff} 后重试",
                     obj.ObjectId, pass, attempt, result.LastErrorLine ?? $"Exit={result.ExitCode}", backoff);
+
+                // ★ D6.1 §16 ★ 重试排期（含退避毫秒与稳定错误分类）——只观察，不改退避算法。
+                PublishTransfer(TransferEvents.RetryScheduled,
+                    new TrnRetryPayload(pass.ToString(), attempt, maxAttempts, (long)backoff.TotalMilliseconds, cls.ToString()),
+                    DiagnosticLevel.Warning, DiagnosticOutcome.Unknown, obj.ObjectId,
+                    errorClass: cls.ToString());
+
                 await Task.Delay(backoff, ct);
                 continue;
             }
@@ -575,6 +715,13 @@ public sealed class TransferOrchestrator
         _log.Information("任务已暂停（{Mode}），等待 resume 或取消", _ctx.ReadPauseRequest() ?? "Cooperative");
 
         var pauseSw = System.Diagnostics.Stopwatch.StartNew();
+
+        // ★ D6.1 §16 观察点 ★ 暂停**被观察到**（此刻业务已经置 Paused 并落了状态）——
+        //   只记录事实：模式（Immediate/Cooperative）+ 当时的阶段，不参与暂停决策。
+        PublishTransfer(TransferEvents.PauseObserved,
+            new TrnPauseObservedPayload(_ctx.ReadPauseRequest() ?? "Cooperative", state.CurrentObjectId),
+            DiagnosticLevel.Information, DiagnosticOutcome.Accepted, state.CurrentObjectId);
+
         while (File.Exists(_ctx.PauseRequestPath))
         {
             if (ct.IsCancellationRequested) return PauseOutcome.Canceled;
@@ -589,6 +736,12 @@ public sealed class TransferOrchestrator
         _ctx.SaveState(state);
         Report(progress, state, null, null, 0, "已恢复，继续传输");
         _log.Information("任务已恢复");
+
+        // ★ D6.1 §16 ★ 恢复（含真实等待时长）——暂停不是"传得慢"，这个时长必须单独可见。
+        PublishTransfer(TransferEvents.Resumed,
+            new TrnPauseObservedPayload("Cooperative", state.CurrentObjectId, (long)pauseSw.Elapsed.TotalMilliseconds),
+            DiagnosticLevel.Information, DiagnosticOutcome.Succeeded, state.CurrentObjectId);
+
         return PauseOutcome.Running;
     }
 
@@ -645,7 +798,15 @@ public sealed class TransferOrchestrator
             // 枚举间隔自适应 = 上次枚举耗时×3（8s~120s），巨型目录不会被枚举拖垮。
             var now = DateTime.UtcNow;
             var noEventWindow = _currentPass == PassKind.Large ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(30);
-            if (now - _lastFileEventAt > noEventWindow && now - _lastEnumAt > _enumInterval)
+            // 目录枚举回退**只允许用在 Bulk 小文件通道**：
+            //   · Large 通道：/J 会给目标文件预分配最终长度，枚举到的长度不等于已落盘字节；
+            //   · RootFiles 通道：源根散落文件里同样可能有单个超大文件（真实任务里是 14.1GB 的素材.zip），
+            //     目标文件一旦被预分配，枚举就会把整段长度当成"已完成"——真实任务总进度因此在
+            //     仍在传输时跳到约 99%（预分配文件长度被误算成已完成字节）。
+            // 这两个通道一律只认 robocopy 已确认的输出。代价是 robocopy 输出被块缓冲时进度会暂时
+            // "停住"，但那是真实的，不会谎报接近完成。
+            var enumFallbackAllowed = _currentPass == PassKind.Bulk;
+            if (enumFallbackAllowed && now - _lastFileEventAt > noEventWindow && now - _lastEnumAt > _enumInterval)
             {
                 var enumSw = Stopwatch.StartNew();
                 var measured = MeasureCurrentTargetBytes(obj);
@@ -656,6 +817,14 @@ public sealed class TransferOrchestrator
                     obj.ObjectId, measured, Interlocked.Read(ref _bulkCopiedBytes),
                     Interlocked.Read(ref _largeCompletedBytes), CurrentLargePartial(), enumSw.ElapsedMilliseconds);
                 if (measured > nowBytes) nowBytes = measured;
+            }
+            else if (!enumFallbackAllowed && !_enumSkipLogged && now - _lastFileEventAt > noEventWindow)
+            {
+                // 只记一次：说明为什么本通道不用目录枚举（否则日志里看不到任何"回退"线索会让人以为进度逻辑坏了）
+                _enumSkipLogged = true;
+                _log.Debug("进度回退枚举已跳过 {Id}：通道 {Pass} 的目标文件可能被预分配文件长度，" +
+                           "枚举长度 ≠ 已确认落盘字节，会虚报进度；本通道只使用 robocopy 已确认的输出",
+                    obj.ObjectId, _currentPass);
             }
 
             var dt = (now - lastTime).TotalSeconds;

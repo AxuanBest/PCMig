@@ -1,0 +1,179 @@
+<UserControl
+    x:Class="PCMig.WinUI.Views.StepNavigationControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:pres="using:PCMig.WinUI.Presentation">
+
+    <!--
+        四步导航（真正的 Navigation，不再是静态装饰）。
+        四条硬要求：
+          1) 四张卡**始终可点**——Navigation availability 与 Business action availability 分离：
+             未连接 / 未选数据 / 未开始迁移都不得让后三步变成"点不了"；
+          2) 选中态由 StepNavItem.IsSelected 驱动（数据层已把选中态翻译成 Brush/样式键），
+             因此四个页面的侧栏外观不可能各写一套；
+          3) 卡片外观**必须显式写 BorderThickness="0" / Background="Transparent" /
+             HorizontalContentAlignment="Stretch"**——Button 的默认模板会画自己的底与描边，
+             不显式关掉就会在卡片里再套一层按钮外观（本会话已踩过这个坑）；
+          4) 悬停/按下只做极轻的位移反馈，不换材质（避免与卡片材质语言打架）。
+    -->
+    <ItemsControl ItemsSource="{x:Bind Nav.Items, Mode=OneWay}">
+        <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="pres:StepNavItem">
+                <Button x:Name="StepCardButton"
+                        Click="StepCard_Click"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Padding="0"
+                        HorizontalContentAlignment="Stretch"
+                        HorizontalAlignment="Stretch"
+                        Margin="0,0,0,10"
+                        ToolTipService.ToolTip="{x:Bind Subtitle}"
+                        AutomationProperties.Name="{x:Bind Title}">
+                    <!-- 说明（20260928 调查，未修）：本卡的 Button PointerOver/Pressed 画刷在下方 Button.Resources 里被置为全透明，
+                         实测悬停像素差 = 0%（整卡零反馈）。为恢复"克制但有"的反馈，本轮尝试过两种方案：
+                           (a) 在 Button 内容的 Border 上挂 VisualStateManager → 无效（Setter 的 this 为 null，被静默忽略）；
+                           (b) 在 Button.Template 里的 ContentPresenter 上挂 VisualStateManager（照抄 PCMigSecondaryButton
+                               的写法，并用 AccentGradientBrush 这类醒目色做对照实验）→ 仍然无效。
+                         进一步用 PointerEntered/PointerExited 代码后置事件做判别：**处理器一次都没被调用**，
+                         但同一屏幕坐标的合成点击能正常触发 Click 并完成导航 —— 即"指针移动事件没有到达这些卡片"。
+                         根因未定位，按"看不见的东西不改"（死律 7）已把 (a)(b) 与诊断代码全部回退，保持原状。
+                         另注：本文件第 17 行原本声称"悬停/按下只做极轻的位移反馈"，但实现里既无位移也无材质反馈
+                         （上述画刷被清零），属"注释声称但未实现"，此条已在 docs\工作交接-20260928-*.md 记录待办。
+                         复现证据：archive\screenshots\final-polish-20260928\hover\j1-idle.png 与 j2-hover.png
+                         的侧栏裁剪（20,180,420,560）逐像素完全相同（均 166207 字节）。 -->
+                    <Button.Resources>
+                        <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#00FFFFFF"/>
+                        <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#00FFFFFF"/>
+                        <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#00FFFFFF"/>
+                        <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#00FFFFFF"/>
+                    </Button.Resources>
+                    <!-- 选中态/普通态改用**画刷绑定**而不是 Style 绑定：x:Bind 到 Style 属性不会随属性变更刷新（实测选中态渲染不出来），画刷绑定已验证会刷新。 -->
+                    <!-- §27：Selected 不能 Hard Cut。过去选中时**一帧灰→蓝硬切**。
+                         BrushTransition 会在画刷属性变化时自动补间 —— 画刷身份（SolidColorBrush 实例）不变、
+                         没有替换 RenderTransform，因此不会打断选中态渲染（这正是上一条注释踩过的坑）。
+                         时长用 Token PCMigMotionDurationSelection(0.16s)，克制到"看不到过程、但看不到硬切"。
+                         ScalarTransition 用在选中竖条的不透明度上，让竖条淡入淡出而不是突然出现/消失。
+                         **本机实测边界**：WinUI 3 只提供 Border.BackgroundTransition 与 UIElement.OpacityTransition；
+                         BorderBrushTransition / TextBlock.ForegroundTransition / FontIcon.ForegroundTransition
+                         **均不存在**（XamlCompiler WMC0011）。因此描边与文字/图标颜色仍是瞬时切换 ——
+                         此项为平台限制，已记入交接文档待办，不用伪动画掩盖。 -->
+                    <!-- A31（20260928，用户第二轮标注）：Step Card 表面质量重做。
+                         用户判词：「边框过于明显、描边感过强、表面过平、阴影比较粗糙、
+                         高光不自然、四周轮廓有明显『框出来』的感觉」，
+                         并以侧栏底部「提示 Card」为 Surface Quality Reference。
+
+                         ★ 关键改动：把上轮那套"强对比浮雕"（NavCardEmbossTopBrush /
+                           NavCardEmbossEdgeBrush + ElevationMedium）**撤掉** ——
+                           它虽然把边缘对比度做上去了，但方向做成了"深色描边感"，
+                           正是用户说的"框出来"。改为与提示 Card **同源**的材质语言：
+                             · 边缘 = 渐变高光边（上缘亮 → 下缘渐隐），不是实色描边；
+                             · 阴影 = ElevationLow（与提示 Card 同档）；
+                             · 表面 = CardBackground 绑定（选中更白一档），
+                               未选中改为 SemiTransparent 白面，与提示 Card 同族；
+                             · 顶部 1 DIP 亮线（NavStepCardSheenBrush）强化 45° 光源。
+                           状态逻辑（CardBackground / CardBorder / SelectionBarOpacity /
+                           Click / x:Bind）完全保留，只换材质。 -->
+                    <Grid>
+                    <Border Background="{x:Bind CardBackground, Mode=OneWay}"
+                            BorderBrush="{x:Bind CardBorder, Mode=OneWay}"
+                            BorderThickness="0" CornerRadius="15"
+                            Padding="13,15" Shadow="{StaticResource ElevationLow}">
+                        <Border.BackgroundTransition>
+                            <BrushTransition Duration="{StaticResource PCMigMotionDurationSelection}"/>
+                        </Border.BackgroundTransition>
+                        <Grid ColumnSpacing="14">
+
+                            <!-- A23 修正（20260928）：选中竖线与数字圆**曾同处第 0 列**。
+                                 旧结构列宽 32 = 数字圆直径，竖线 Width=4 且 HorizontalAlignment=Left，
+                                 因此竖线被画在数字圆的左内缘上 —— 视觉上"竖线插进圆里"（用户标注为重叠）。
+                                 现在把竖线拆到**独立的 4 DIP 列**，列间距 10 明确隔开两者：
+                                   第 0 列＝竖线（4）｜间距 10｜第 1 列＝功能图标（32）｜间距 10｜第 2 列＝文字（*）
+                                 数字圆的 32 DIP 与功能图标共用第 1 列（图标作为圆的底衬，保持原设计不位移）。
+                                 只改布局列，不动任何 x:Bind、选中态画刷与 Click 行为。 -->
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="32"/>
+                                <ColumnDefinition Width="32"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Width="4" CornerRadius="2" Background="{StaticResource AccentBrush}"
+                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                                    Margin="0,3,0,3" Opacity="{x:Bind SelectionBarOpacity, Mode=OneWay}">
+                                <Border.OpacityTransition>
+                                    <ScalarTransition Duration="{StaticResource PCMigMotionDurationSelection}"/>
+                                </Border.OpacityTransition>
+                            </Border>
+                            <FontIcon Grid.Column="1"
+                                      Glyph="{x:Bind Glyph}"
+                                      FontSize="20"
+                                      Foreground="{x:Bind IconBrush, Mode=OneWay}"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"/>
+                            <Border Grid.Column="1" Width="32" Height="32" CornerRadius="16"
+                                    Background="{x:Bind BadgeBrush, Mode=OneWay}">
+                                <Border.BackgroundTransition>
+                                    <BrushTransition Duration="{StaticResource PCMigMotionDurationSelection}"/>
+                                </Border.BackgroundTransition>
+                                <TextBlock Style="{StaticResource PCMigTextStepIndex}"
+                                           Text="{x:Bind Index}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="2" Spacing="2">
+                                <TextBlock Style="{StaticResource PCMigTextStepTitle}"
+                                           Text="{x:Bind Title}"
+                                           Foreground="{x:Bind TitleBrush, Mode=OneWay}"/>
+                                <TextBlock x:Name="SubtitleText"
+                                           Style="{StaticResource PCMigTextStepSubtitle}"
+                                           Text="{x:Bind Subtitle}"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{x:Bind SubtitleBrush, Mode=OneWay}"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                        <!-- ══ A41（20260928）Liquid Glass-inspired Edge Lighting ══
+                             = Directional Rim Light + Directional Edge Shadow
+
+                             性质：**纯附加视觉层**。材质归材质、光照归光照 ——
+                             本层不写 Background、不写死任何固定色画刷、不改几何、不参与 DVT、
+                             不改 x:Bind、不改 Click，只把一套「左上受光 / 右下收阴」的
+                             方向性边缘光学叠在既有材质之上。
+
+                             实现机制 = PCMig 历史**已验证成功**的做法：
+                               1 DIP 的 Border 环 + **径向渐变** BorderBrush
+                               （旧版 src\PCMig.Gui\Theme\Glass.xaml 的 EdgeHighlight，与
+                                 Controls.xaml L36 / L88 / L144 的 edge 层；
+                                 侧栏底部提示 Card 的 SecondarySurface 用的是同一"渐变描边环"
+                                 机制，只是线性而非径向）。
+                               为什么不采用"四条独立边线"方案：Materials.xaml 的 A32/A33 注释里
+                               那套自建边线（PCMigTopEdgeBrush 等）实测"上边亮线中段反而比右端暗，
+                               读起来像三条装饰线，不是表面受光"；且第 19 条禁止双描边。
+                               · 环是连续的 ⇒ 高光沿 CornerRadius 15 自然过渡，圆角处不断线；
+                               · 卡片自身 BorderThickness=0 ⇒ 不存在「Border + Highlight」两条平行线；
+                               · Border 只有 1 DIP ⇒ 不是粗白边；渐变决定四边**不等强**（左上亮、右下暗）。
+
+                             与材质透明度的关系（用户要求：不得 1:1 同步）：
+                               本层是 StaticResource，**完全独立于 Developer Visual Tuning**。
+                               低材质档（很透明）→ 由白高光承担轮廓识别；
+                               高材质档（近实体白）→ 白高光自然减弱，由右下蓝灰暗边承担轮廓识别。
+                               两者互补 ⇒ 轮廓在 Card Material 20 / 50 / 80 三档都成立。
+
+                             状态覆盖：Normal 状态即完整生效；Hover/Pressed 的画刷在上方
+                             Button.Resources 中被置为全透明（历史实测"整卡零反馈"，根因未定位，
+                             按死律 7 保持原状），故本层在三态下表现一致，不引入突变。
+
+                             光源：全应用**唯一**主光源 左上 → 右下 ≈45°（旧版 LightDirection = 315°）。
+
+                             A42：本层行为已抽到通用 PCMigDAELOverlayStyle
+                             （BorderThickness=1 / IsHitTestVisible=False / Stretch），
+                             画刷经别名指向通用 PCMigSurfaceRimLightBrush；
+                             **CornerRadius 仍由本卡自己提供（15）—— 光照层服从宿主几何。** -->
+                        <Border x:Name="StepCardRimLight"
+                                Style="{StaticResource PCMigSurfaceLightingOverlayStyle}"
+                                BorderBrush="{StaticResource PCMigDAELBrushSubtle}"
+                                CornerRadius="15"/>
+                    </Grid>
+                </Button>
+            </DataTemplate>
+        </ItemsControl.ItemTemplate>
+    </ItemsControl>
+</UserControl>

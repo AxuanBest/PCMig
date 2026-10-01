@@ -11,10 +11,50 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- GBK/CP936 code page for real robocopy log fixtures -->
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\PCMig.Core\PCMig.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    ══════════════════════════════════════════════════════════════════════════
+    A.5 行为级回归测试的「源码链入」（不是复制、不是桩实现）
+    ══════════════════════════════════════════════════════════════════════════
+    背景：A.5 新增的 Presentation 逻辑（三态目录树 / 精确选择同步 / MT 线程数恢复 /
+    CompletedWithErrors 百分比 / Job 切换复位）位于 src\PCMig.WinUI（WinUI 3 应用项目）。
+    测试项目不能 project-reference 它（UseWinUI + net8.0-windows + 会与构建进程抢锁），
+    故把**不依赖 XAML 运行时**的 Presentation 源码按文件链入本测试项目编译，
+    从而能真正 new 出对象并断言行为（而不是只扫描源码文本）。
+
+    链入判据（逐文件核对过 using 与类型闭包）：
+      · 这些文件只 using System.* / PCMig.Core.*，唯一 WinUI 依赖是
+        Microsoft.UI.Dispatching.DispatcherQueue（由 TestOnlyDispatcherQueueShim.cs 提供替身，
+        该替身恒返回 null = 产品源码里"当前线程无 UI 队列"的真实分支）；
+      · 闭包内的其它 Presentation 类型（ObservableObject / ShareItem / PageReadiness /
+        DirNode / FileRow）一并链入，无需再引入任何 WinUI 程序集。
+
+    ★ 纪律：不得把 src\PCMig.WinUI 里**依赖 XAML 运行时**的文件（Views\*.xaml.cs、
+      Converters、MotionDirector 等）加进这个列表；也不得为了让测试变绿去改 src\ 下任何
+      产品代码。若某个链入文件将来引入了 WinUI 运行时类型，本测试项目会编译失败 ——
+      那是**必须被看见的信号**，正确做法是把该逻辑下沉为不依赖 UI 的类型，而不是加引用糊过去。
+  -->
+  <ItemGroup Label="A5LinkedPresentationSources">
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\ObservableObject.cs" Link="LinkedPresentation\ObservableObject.cs" />
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\ShareItem.cs" Link="LinkedPresentation\ShareItem.cs" />
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\DirTreeModels.cs" Link="LinkedPresentation\DirTreeModels.cs" />
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\DirectoryTreeViewModel.cs" Link="LinkedPresentation\DirectoryTreeViewModel.cs" />
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\ConnectionViewModel.cs" Link="LinkedPresentation\ConnectionViewModel.cs" />
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\PageReadiness.cs" Link="LinkedPresentation\PageReadiness.cs" />
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\MigrationSessionViewModel.cs" Link="LinkedPresentation\MigrationSessionViewModel.cs" />
+    <!-- A.5（P1-5 / D1 / D2）：UI 节流的**纯逻辑**缓冲（只 using System.*）。
+         ★ 不得把持 DispatcherQueueTimer 的 UiFlushPump.cs 加进来 ★ —— 本测试项目没有
+         DispatcherQueueTimer 替身，链入它会编译失败；那正是"薄泵与纯逻辑分层"的原因。 -->
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\UiBatchBuffer.cs" Link="LinkedPresentation\UiBatchBuffer.cs" />
+    <!-- A.5（P1-5）诊断出口：只 using System.IO，零 WinUI 依赖 ⇒ 可链入（VM 会调用它）。 -->
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\UiFlushTrace.cs" Link="LinkedPresentation\UiFlushTrace.cs" />
   </ItemGroup>
 
 </Project>

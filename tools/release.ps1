@@ -1,14 +1,14 @@
 ﻿# PCMig 发版脚本 —— 先写日志，再打包；没写日志就打不出包。
-# 用法：powershell -NoProfile -ExecutionPolicy Bypass -File "I:\deepseek work\PCMig\tools\release.ps1" -Version 0.4.5
+# 用法：powershell -NoProfile -ExecutionPolicy Bypass -File "E:\Project\deepseek work\PCMig\tools\release.ps1" -Version 0.4.5
 # 路径纪律（见 docs\发版铁律.md）：
-#   本机（个人电脑）：仓库 I:\deepseek work\PCMig ｜ 交付 I:\PCMig ｜ 工作副本 D:\PCMig ｜ 源码镜像 I:\镜像备份源码\PCMig
+#   本机（个人电脑）：仓库 E:\Project\deepseek work\PCMig ｜ 交付 E:\Project\PCMig ｜ 工作副本 D:\PCMig ｜ 源码镜像 E:\Project\镜像备份源码\PCMig
 #   公司电脑        ：仓库 E:\deepseek work\PCMig ｜ 交付 E:\K\PCMig ｜ 工作副本 D:\PCMig ｜ 源码镜像（按需指定）
 #   换机只改下面这几行，其余一律不动。$mirror 留空＝跳过镜像；镜像不含 dist/bin/obj，放在交付盘之外。
 param([Parameter(Mandatory = $true)][string]$Version)
 $ErrorActionPreference = 'Stop'
-$repo = 'I:\deepseek work\PCMig'
-$delivery = 'I:\PCMig'
-$mirror = 'I:\镜像备份源码\PCMig'
+$repo = 'E:\Project\deepseek work\PCMig'
+$delivery = 'E:\Project\PCMig'
+$mirror = 'E:\Project\镜像备份源码\PCMig'
 $workCopy = 'D:\PCMig'
 if (Test-Path "$env:LOCALAPPDATA\Microsoft\dotnet") {
   $env:DOTNET_ROOT = "$env:LOCALAPPDATA\Microsoft\dotnet"
@@ -76,6 +76,10 @@ Write-Output '   四处闸门通过：日志、对照表、使用说明都已写
 
 # [闸门 5/5] 仓库口令残留（真实口令绝不进交付）
 $secretPat = '1qaz' + '@' + 'wsx|pdell' + '210l|--password\s+[^\s<*$\x22\x27]{6,}'
+# 追加形态：变量名含 Password/Pwd 的赋值语句被赋了非占位字面量（覆盖管理口令与加域口令这类命名）。
+# 排除项：空串、尖括号占位、REPLACE_ME、双下划线模板令牌、以美元符开头的插值写法。
+$secretAssignPat = '(?i)\$[A-Za-z_][A-Za-z0-9_:]*(?:password|pwd)[A-Za-z0-9_]*\s*=\s*[\x22\x27](?!\s*[\x22\x27]|<|REPLACE_ME|__|\$)[^\x22\x27\s]{6,}'
+$secretPat = $secretPat + '|' + $secretAssignPat
 $secretHits = @(Get-ChildItem $repo -Recurse -File -Include *.ps1, *.py, *.md, *.txt, *.cs, *.xaml, *.iss, *.json, *.yaml -ErrorAction SilentlyContinue |
     Where-Object { $_.FullName -notmatch '\\(bin|obj|dist)\\' } |
     Select-String -Pattern $secretPat -ErrorAction SilentlyContinue)

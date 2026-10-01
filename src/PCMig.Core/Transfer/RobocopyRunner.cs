@@ -1,8 +1,12 @@
 using System.Diagnostics;
 using System.Text;
 using PCMig.Core.Matrix;
+using PCMig.Core.Diagnostics;
 using PCMig.Core.Models;
 using PCMig.Core.Native;
+using PCMig.Diagnostics.Abstractions;
+using PCMig.Diagnostics.Abstractions.Events;
+using PCMig.Diagnostics.Abstractions.Payloads;
 using Serilog;
 
 namespace PCMig.Core.Transfer;
@@ -163,6 +167,96 @@ public sealed class RobocopyRunner
         if (mode is LargeChannelRestartable or "z" or "resume") return false;
         return IsNetworkPath(src) || IsNetworkPath(dst);
     }
+
+    /// <summary>文件行采样上限：Deep 下也只采样有限条（2.1M 文件绝不能逐条建事件）。</summary>
+    private const int MaxFileLineSamples = 100;
+
+    /// <summary>
+    /// 诊断上下文（由编排器在每次对象/尝试/通道开始时注入 ⇒ 子进程事件能**正确归属到对象**，
+    /// 而不是靠时间顺序去猜）。默认是组件级上下文，绝不影响传输行为。
+    /// </summary>
+    public DiagnosticContext Diagnostics { get; set; } = CoreDiagnostics.ContextFor("RobocopyRunner");
+
+    /// <summary>当前通道 token（供子进程事件与 kill 事件对齐）。</summary>
+    private string _activePassText = DiagnosticPass.Bulk;
+
+    /// <summary>通道 → 稳定 token（编排器也用它，保证两处口径一致）。</summary>
+    public static string PassToken(PassKind pass) => pass switch
+    {
+        PassKind.Bulk => DiagnosticPass.Bulk,
+        PassKind.RootFiles => DiagnosticPass.RootFiles,
+        PassKind.Large => DiagnosticPass.Large,
+        _ => pass.ToString(),
+    };
+
+    /// <summary>发布观察事件（**绝不影响传输**：未启用时提前返回，异常一律吞进观察层）。</summary>
+    private void Publish(
+        EventDescriptor descriptor,
+        IDiagnosticPayload? payload,
+        DiagnosticLevel level,
+        DiagnosticOutcome outcome,
+        int? exitCode = null,
+        int? durationMs = null,
+        PathRef? path = null,
+        string? message = null)
+    {
+        try
+        {
+            var publisher = CoreDiagnostics.Sink.Publisher;
+            if (!publisher.IsEnabledFor(descriptor)) return;
+            publisher.TryPublish(new DiagnosticEventDraft(
+                descriptor,
+                Diagnostics.WithPass(_activePassText),
+                payload,
+                Level: level,
+                Outcome: outcome,
+                RobocopyExitCode: exitCode,
+                DurationMs: durationMs,
+                Path: path,
+                Message: message));
+        }
+        catch (Exception)
+        {
+            // 观察失败绝不影响传输。
+        }
+    }
+
+    private static string ProcessIdentityOf(System.Diagnostics.Process process)
+    {
+        try { return $"pid:{process.Id}:{process.StartTime.ToUniversalTime():O}"; }
+        catch (Exception) { return "pid:" + process.Id; }
+    }
+
+    private static int CountDistinctErrorCodes(List<string> errorLines)
+    {
+        try
+        {
+            var codes = new HashSet<int>();
+            foreach (var line in errorLines)
+            {
+                var m = s_errCodeRx.Match(line);
+                if (!m.Success) continue;
+                codes.Add(m.Groups["code"].Success
+                    ? int.Parse(m.Groups["code"].Value)
+                    : Convert.ToInt32(m.Groups["hex"].Value, 16));
+            }
+            return codes.Count;
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>参数摘要：**只记结构化白名单**（通道模式/重试/等待/文件数），绝不整条命令行（含源与目标路径），也不含中文。</summary>
+    private static string ArgumentSummary(MigrationOptions opt, string channelMode, int fileListCount, bool hasUnicodeLog)
+        => $"{channelMode}; /R:{opt.RetryCount} /W:{opt.RetryWaitSec}" +
+           (fileListCount > 0 ? $"; files={fileListCount}" : string.Empty) +
+           (hasUnicodeLog ? "; unilog" : string.Empty);
+
+    /// <summary>通道模式 token（含是否无缓冲 /J）：稳定、可判据、不含显示文字。</summary>
+    private static string ChannelModeToken(bool restartableLarge, bool unbufferedJ)
+        => restartableLarge ? "z-restartable" : unbufferedJ ? "mt+j" : "mt";
 
     public string BuildArguments(string src, string dst, MigrationOptions opt, MigrationMatrix matrix,
         PassKind pass, string unicodeLogPath, IReadOnlyList<string>? fileList = null,
@@ -360,6 +454,14 @@ public sealed class RobocopyRunner
         _log.Information("robocopy 启动 [{Pass}/{Channel}]: robocopy {Args}", pass,
             ChannelText(pass, restartableLarge, UseUnbufferedJ(src, dst, opt)), args);
 
+        _activePassText = PassToken(pass);
+        var diagnostics = CoreDiagnostics.Sink;
+        var channelMode = ChannelModeToken(restartableLarge, UseUnbufferedJ(src, dst, opt));
+        var fileLineSamples = 0;
+        long fileLinesObserved = 0;
+
+        Publish(RobocopyEvents.ProcessStartRequested, null, DiagnosticLevel.Information, DiagnosticOutcome.Started);
+
         var psi = new ProcessStartInfo("robocopy.exe", args)
         {
             RedirectStandardOutput = true,
@@ -380,7 +482,24 @@ public sealed class RobocopyRunner
         _current = proc;
         try
         {
-            proc.Start();
+            try
+            {
+                proc.Start();
+            }
+            catch (Exception ex)
+            {
+                // 起不来就是起不来：如实记录（类型 + 错误码），异常照原样抛出。
+                Publish(RobocopyEvents.SpawnFailed, null, DiagnosticLevel.Error, DiagnosticOutcome.Failed,
+                    durationMs: null, message: ex.GetType().Name);
+                throw;
+            }
+
+            // ★ 子进程身份 = PID + 启动时间 ★ 只看 PID 会在 PID 复用后误判"同一进程还活着"。
+            Publish(RobocopyEvents.ProcessStarted,
+                new RbcProcessPayload(proc.Id, ProcessIdentityOf(proc), PassToken(pass), channelMode,
+                    ArgumentSummary(opt, channelMode, fileList?.Count ?? 0, unicodeLogPath.Length > 0)),
+                DiagnosticLevel.Information, DiagnosticOutcome.Started);
+
             ProcessJobGuard.Assign(proc, _log); // 主进程死亡时由 OS 连带终止，杜绝孤儿 robocopy
 
             var stdoutTask = PumpAsync(proc.StandardOutput, line =>
@@ -412,6 +531,18 @@ public sealed class RobocopyRunner
                             : _currentDir != null ? _currentDir + name : null;
                         if (full != null)
                         {
+                            // ★ 采样发布 ★ 文件行只采样有限条（其余只计数）：2.1M 文件不能逐条建事件，
+                            //   而每个 PathRef 都要做一次 HMAC ⇒ 必须先判 IsEnabledFor 再构造。
+                            fileLinesObserved++;
+                            if (fileLineSamples < MaxFileLineSamples
+                                && diagnostics.Publisher.IsEnabledFor(RobocopyEvents.FileAttemptObserved))
+                            {
+                                fileLineSamples++;
+                                Publish(RobocopyEvents.FileAttemptObserved, null, DiagnosticLevel.Debug,
+                                    DiagnosticOutcome.Started,
+                                    path: diagnostics.PathRef(full, PathRole.Source, "src"));
+                            }
+
                             try { FileCopied?.Invoke(full, ParseRoboSize(fm.Groups["size"].Value, fm.Groups["unit"].Value)); }
                             catch { /* 进度事件永不影响传输 */ }
                         }
@@ -444,6 +575,33 @@ public sealed class RobocopyRunner
             var success = !killed && IsSuccess(code);
             _log.Information("robocopy 退出 [{Pass}]: ExitCode={Code} (0x{CodeHex:X2}) Success={Success} Killed={Killed} 耗时 {Elapsed}",
                 pass, code, code, success, killed, sw.Elapsed);
+
+            // ★ 退出码与"被杀"分开记录 ★（0–7 是 robocopy 的成功位掩码，>=8 才是失败；
+            //   被我们强杀的进程退出码为 -1，绝不能落进 IsSuccess）。
+            Publish(RobocopyEvents.ProcessExited, null,
+                killed ? DiagnosticLevel.Warning : success ? DiagnosticLevel.Information : DiagnosticLevel.Error,
+                killed ? DiagnosticOutcome.Canceled : success ? DiagnosticOutcome.Succeeded : DiagnosticOutcome.Failed,
+                exitCode: code, durationMs: (int)Math.Min(int.MaxValue, sw.ElapsedMilliseconds),
+                message: killed ? "killed-by-us" : null);
+
+            if (errorLines.Count > 0)
+            {
+                Publish(RobocopyEvents.ErrorLinesAggregated,
+                    new RbcErrorAggregatePayload(errorLines.Count, errorLines.Count >= MaxErrorLines, CountDistinctErrorCodes(errorLines)),
+                    DiagnosticLevel.Warning, DiagnosticOutcome.Failed);
+            }
+
+            // 采样摘要：让"到底观察了多少文件行、采样是否生效"成为可核对的事实
+            // （Verbose：Operational 模式下会被过滤，这正是设计意图——它只是细节）。
+            Publish(RobocopyEvents.OutputObserved,
+                new RbcFileSampleSummaryPayload(fileLineSamples, fileLinesObserved, fileLineSamples >= MaxFileLineSamples),
+                DiagnosticLevel.Debug, DiagnosticOutcome.Succeeded);
+
+            Publish(RobocopyEvents.PassCompleted, null,
+                success ? DiagnosticLevel.Information : DiagnosticLevel.Error,
+                success ? DiagnosticOutcome.Succeeded : DiagnosticOutcome.Failed,
+                exitCode: code, durationMs: (int)Math.Min(int.MaxValue, sw.ElapsedMilliseconds));
+
             return new RobocopyRunResult(code, success, Killed: killed, sw.Elapsed, lastErrorLine, errorLines);
         }
         catch (OperationCanceledException)
@@ -462,7 +620,18 @@ public sealed class RobocopyRunner
         if (p == null || p.HasExited) return;
         _killedByUs = true;
         _log.Warning("强制终止 robocopy (PID {Pid})", p.Id);
-        try { p.Kill(entireProcessTree: true); } catch (Exception ex) { _log.Warning(ex, "终止 robocopy 失败"); }
+
+        // ★ KillRequested ≠ 已确认终止 ★ 两者分开记录：请求是我们做的，结果要看 Kill 是否成功。
+        Publish(RobocopyEvents.KillRequested, new RbcKillPayload("immediate-pause-or-cancel", false),
+            DiagnosticLevel.Warning, DiagnosticOutcome.Started);
+
+        var succeeded = false;
+        try { p.Kill(entireProcessTree: true); succeeded = true; }
+        catch (Exception ex) { _log.Warning(ex, "终止 robocopy 失败"); }
+
+        Publish(RobocopyEvents.KillResult, new RbcKillPayload("immediate-pause-or-cancel", succeeded),
+            succeeded ? DiagnosticLevel.Information : DiagnosticLevel.Error,
+            succeeded ? DiagnosticOutcome.Succeeded : DiagnosticOutcome.Failed);
     }
 
     private static async Task PumpAsync(StreamReader reader, Action<string> onLine)

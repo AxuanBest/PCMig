@@ -1800,6 +1800,11 @@ public sealed class MainViewModel : ViewModelBase
             StopLiveFeed();
             session?.Dispose();
             IsRunning = false;
+            // 可恢复性修复（本次）：修复进度条的显隐由 IsRepairing 驱动，而它必须在
+            // 「正常结束 / 取消 / 异常」三条路径上都复位。此前只在 try 里（RunAsync 之后）复位，
+            // 一旦修复被取消或抛异常，IsRepairing 会永远停在 true ——
+            // 迁移进度条与大号百分比（MigrationProgressVisibility）从此再也显示不出来。
+            IsRepairing = false;
             _lastCompletedCount = -1;
             RefreshRowsFromReceipts();
             RefreshExistingJobs();

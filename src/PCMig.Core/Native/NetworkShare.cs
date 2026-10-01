@@ -1,6 +1,10 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using PCMig.Core.Diagnostics;
 using PCMig.Core.Models;
+using PCMig.Diagnostics.Abstractions;
+using PCMig.Diagnostics.Abstractions.Events;
+using PCMig.Diagnostics.Abstractions.Payloads;
 
 namespace PCMig.Core.Native;
 
@@ -170,6 +174,11 @@ public static class NetworkShare
     {
         var ipc = $@"\\{host}\IPC$";
         var explicitCreds = !string.IsNullOrEmpty(user);
+        var hostToken = CoreDiagnostics.Sink.Token(host);
+
+        // ★ D6.1 §16 观察点 ★ 只记"用哪套凭据语义"，**绝不**记用户名/口令（连长度都不记）。
+        PublishSession(NetEvents.SmbSessionConnectStarted, ipc, hostToken, explicitCreds,
+            reused: false, win32: 0, reason: "connect-requested", level: DiagnosticLevel.Information);
 
         // 只有显式凭据才清理旧会话（避免 1219 冲突）；空凭据时保留现有会话，
         // 让用户在资源管理器里已打通的连接可以直接复用（等同 \ip\盘符 的行为）。
@@ -190,6 +199,8 @@ public static class NetworkShare
             if (HasExistingConnection(host))
             {
                 log?.Warning("凭据与现有连接冲突（{Code}）——复用现有连接（本次未使用输入的凭据）。如需强制改用输入的凭据：先 net use \\\\{Host}\\ /delete 再重试", err, host);
+                PublishSession(NetEvents.SmbSessionReused, ipc, hostToken, explicitCreds,
+                    reused: true, win32: err, reason: "credential-conflict-reuse", level: DiagnosticLevel.Information);
                 return new ShareSession(null);
             }
             // 无现存连接却报冲突（残留句柄）→ 清理后重试一次
@@ -202,6 +213,8 @@ public static class NetworkShare
         {
             // 空凭据且已有会话：复用（当前身份之前已在别处连通过这台机器）
             log?.Information("复用现有会话 {Share}", ipc);
+            PublishSession(NetEvents.SmbSessionReused, ipc, hostToken, explicitCreds,
+                reused: true, win32: err, reason: "existing-session", level: DiagnosticLevel.Information);
             return new ShareSession(ipc);
         }
 
@@ -241,12 +254,37 @@ public static class NetworkShare
                 _ => new Win32Exception(err).Message
             };
             LogConnectFailureOnce(log, $"连接 {ipc}", host, err, hint);
+            PublishSession(NetEvents.SmbConnectFailed, ipc, hostToken, explicitCreds,
+                reused: false, win32: err, reason: "wnet-add-connection-failed", level: DiagnosticLevel.Error);
             throw new IOException($"无法连接 {ipc}（错误 {err}）：{hint}");
         }
 
         log?.Information("已建立会话 {Share} (user={User})", ipc, explicitCreds ? user : "<当前 Windows 身份>");
+        PublishSession(NetEvents.SmbSessionConnected, ipc, hostToken, explicitCreds,
+            reused: false, win32: 0, reason: "session-established", level: DiagnosticLevel.Information);
         return new ShareSession(ipc);
     }
+
+    /// <summary>
+    /// D6.1 §16：会话观察（纯观察）。**不传用户名/口令**，只传凭据语义与原生错误码；
+    /// host 只以令牌出现在 envelope 的 PathRef 里（Personal 级）。
+    /// </summary>
+    private static void PublishSession(
+        PCMig.Diagnostics.Abstractions.EventDescriptor descriptor, string remotePath, string hostToken,
+        bool explicitCreds, bool reused, int win32, string reason, DiagnosticLevel level)
+        => CoreDiagnostics.PublishCore(
+            descriptor,
+            new NetSmbSessionPayload("WNetAddConnection2", reused, 0, win32 == 0)
+            {
+                Win32Error = win32,
+                UsedExplicitCreds = explicitCreds,
+                ReasonCode = reason,
+            },
+            CoreDiagnostics.ContextFor("NetworkShare"),
+            level,
+            win32 == 0 ? DiagnosticOutcome.Succeeded : DiagnosticOutcome.Failed,
+            "NetworkShare",
+            path: CoreDiagnostics.Sink.PathRef(remotePath, PathRole.Source, hostToken));
 
     /// <summary>
     /// 为传输建立会话：优先走 IPC$；若对方不导出 IPC$（错误 67/53）但给了显式凭据，
@@ -344,7 +382,23 @@ public static class NetworkShare
                 return pick;
             });
 
-        return merged.OrderBy(s => s.IsAdminShare).ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var final = merged.OrderBy(s => s.IsAdminShare).ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
+
+        // ★ D6.1 §16 观察点 ★ 枚举结果（计数 + 成败），**不写共享清单内容**。
+        CoreDiagnostics.PublishCore(
+            final.Count > 0 ? NetEvents.ShareResolved : NetEvents.ShareEnumerationFailed,
+            new NetShareDiscoveryPayload(final.Count > 0, final.Count, final.Count(s => s.IsAdminShare) > 0)
+            {
+                AdminShareCount = final.Count(s => s.IsAdminShare),
+                Level = final.Count > 0 ? "level2-or-level1" : "empty-or-denied",
+            },
+            CoreDiagnostics.ContextFor("NetworkShare"),
+            final.Count > 0 ? DiagnosticLevel.Information : DiagnosticLevel.Warning,
+            final.Count > 0 ? DiagnosticOutcome.Succeeded : DiagnosticOutcome.Unknown,
+            "NetworkShare",
+            path: CoreDiagnostics.Sink.PathRef($@"\\{host}", PathRole.Source, CoreDiagnostics.Sink.Token(host)));
+
+        return final;
     }
 
     private static List<ShareInfo>? TryEnumLevel2(string host)

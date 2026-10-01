@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PCMig.Diagnostics.Abstractions\PCMig.Diagnostics.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\PCMig.Diagnostics\PCMig.Diagnostics.csproj" />
+    <!-- D3 起：验证 Core 侧观察点（持久化阶段 / 暂停请求 / 预检）确实是"只观察"。 -->
+    <ProjectReference Include="..\..\src\PCMig.Core\PCMig.Core.csproj" />
+  </ItemGroup>
+
+<ItemGroup Label="D5LinkedPresentationSources">
+    <!--
+      诊断中心 VM 只 using System.* / PCMig.Diagnostics.*（零 WinUI 依赖）⇒ 按文件链入即可完整覆盖，
+      不必加载 WinUI 运行时（与既有 Core.Tests 链入 Presentation 源码同一纪律）。
+      ⚠ 不得把依赖 XAML 运行时的文件（Views\*.xaml.cs、Converters 等）加进来。
+    -->
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\ObservableObject.cs" Link="LinkedPresentation\ObservableObject.cs" />
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\DiagnosticCenterViewModel.cs" Link="LinkedPresentation\DiagnosticCenterViewModel.cs" />
+  </ItemGroup>
+
+</Project>

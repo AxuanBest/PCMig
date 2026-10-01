@@ -1,8 +1,12 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using PCMig.Core.Diagnostics;
 using PCMig.Core.Models;
 using PCMig.Core.Native;
+using PCMig.Diagnostics.Abstractions;
+using PCMig.Diagnostics.Abstractions.Events;
+using PCMig.Diagnostics.Abstractions.Payloads;
 using Serilog;
 
 namespace PCMig.Core.Preflight;
@@ -23,37 +27,86 @@ public sealed class PreflightChecker
     /// </summary>
     private static async Task<(bool Ok, string Detail, bool IsLiteral)> ProbeSmb445Async(string host)
     {
+        var diagnostics = CoreDiagnostics.Sink.Publisher;
+        DiagnosticContext Context() => CoreDiagnostics.ContextFor("PreflightChecker");
+        void Publish(EventDescriptor descriptor, IDiagnosticPayload payload, DiagnosticLevel level,
+            DiagnosticOutcome outcome, int? socketError = null)
+        {
+            try
+            {
+                if (!diagnostics.IsEnabledFor(descriptor)) return;
+                diagnostics.TryPublish(new DiagnosticEventDraft(
+                    descriptor, Context(), payload, Level: level, Outcome: outcome,
+                    SocketError: socketError, ErrorDomain: socketError is null ? ErrorDomain.None : ErrorDomain.Socket));
+            }
+            catch (Exception) { /* 观察失败绝不影响预检 */ }
+        }
+
         var isLiteral = IPAddress.TryParse(host, out var literal);
+        // 主机名/IP 属 Personal：只留会话内令牌，绝不写明文。
+        var hostAlias = CoreDiagnostics.Sink.Token(host);
+
+        Publish(NetEvents.ProbeStarted, new NetProbeStartedPayload(hostAlias, isLiteral, 0),
+            DiagnosticLevel.Information, DiagnosticOutcome.Started);
+
         var addrs = new List<IPAddress>();
         if (isLiteral) addrs.Add(literal!);
         else
         {
+            var dnsWatch = Stopwatch.StartNew();
             try
             {
                 foreach (var a in await Dns.GetHostAddressesAsync(host).ConfigureAwait(false))
                     if (a.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6)
                         addrs.Add(a);
+                dnsWatch.Stop();
+                Publish(NetEvents.DnsResolved, new NetDnsResultPayload(true, addrs.Count, dnsWatch.ElapsedMilliseconds, null),
+                    DiagnosticLevel.Information, DiagnosticOutcome.Succeeded);
             }
             catch (Exception ex)
             {
+                dnsWatch.Stop();
+                Publish(NetEvents.DnsFailed, new NetDnsResultPayload(false, 0, dnsWatch.ElapsedMilliseconds, ex.GetType().Name),
+                    DiagnosticLevel.Warning, DiagnosticOutcome.Failed);
                 return (false, $"电脑名「{host}」用 DNS 解析失败（{ex.Message}）；改由 SMB 直连与源路径可读性判定（Windows 可用 NetBIOS 名连上）。", false);
             }
             if (addrs.Count == 0)
+            {
+                Publish(NetEvents.DnsFailed, new NetDnsResultPayload(false, 0, dnsWatch.ElapsedMilliseconds, "no-addresses"),
+                    DiagnosticLevel.Warning, DiagnosticOutcome.Failed);
                 return (false, $"电脑名「{host}」没有解析到任何地址；改由 SMB 直连与源路径可读性判定。", false);
+            }
         }
 
         var tried = new List<string>();
+        var addressIndex = 0;
         foreach (var a in addrs.Distinct())
         {
+            var index = addressIndex++;
+            var tcpWatch = Stopwatch.StartNew();
             try
             {
                 using var tcp = new TcpClient(a.AddressFamily);
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
                 await tcp.ConnectAsync(a, 445, cts.Token).ConfigureAwait(false);
+                tcpWatch.Stop();
                 if (tcp.Connected)
+                {
+                    Publish(NetEvents.TcpProbeAttempt, new NetTcpProbePayload(index, tcpWatch.ElapsedMilliseconds, true),
+                        DiagnosticLevel.Debug, DiagnosticOutcome.Succeeded);
                     return (true, isLiteral ? $"TCP 445 连接成功（{a}）" : $"TCP 445 连接成功（{host} → {a}）", isLiteral);
+                }
+                Publish(NetEvents.TcpProbeAttempt, new NetTcpProbePayload(index, tcpWatch.ElapsedMilliseconds, false),
+                    DiagnosticLevel.Debug, DiagnosticOutcome.Failed);
             }
-            catch (Exception ex) { tried.Add($"{a} 不通({ex.GetType().Name})"); }
+            catch (Exception ex)
+            {
+                tcpWatch.Stop();
+                var socketError = ex is SocketException se ? se.SocketErrorCode : (SocketError?)null;
+                Publish(NetEvents.TcpProbeFailed, new NetTcpProbePayload(index, tcpWatch.ElapsedMilliseconds, false),
+                    DiagnosticLevel.Warning, DiagnosticOutcome.Failed, socketError is null ? null : (int)socketError.Value);
+                tried.Add($"{a} 不通({ex.GetType().Name})");
+            }
         }
 
         var tail = isLiteral
@@ -70,6 +123,20 @@ public sealed class PreflightChecker
     {
         var report = new PreflightReport { Host = host };
         _log.Information("Preflight 开始: host={Host}, sources={Count}", host, sourcePaths.Count);
+        try
+        {
+            var diagnostics = CoreDiagnostics.Sink.Publisher;
+            if (diagnostics.IsEnabledFor(PreflightEvents.PreflightStarted))
+            {
+                diagnostics.TryPublish(new DiagnosticEventDraft(
+                    PreflightEvents.PreflightStarted,
+                    CoreDiagnostics.ContextFor("PreflightChecker"),
+                    new PflSummaryPayload(false, 0, 0, 0),
+                    Level: DiagnosticLevel.Information,
+                    Outcome: DiagnosticOutcome.Started));
+            }
+        }
+        catch (Exception) { /* 观察失败绝不影响预检 */ }
 
         // 1. SMB 445 端口可达（比 ping 更真实：很多环境禁 ICMP）
         //    坑（公司环境实测）：电脑名经 DNS 可能解析到多个地址，其中一个是该机旧 IP（已失效）。
@@ -144,6 +211,8 @@ public sealed class PreflightChecker
 
         // 4. 源路径可读（真正的放行闸门：迁移只需要源可读，IPC$/枚举只是发现手段）
         var allSourceOk = sourcePaths.Count > 0;
+        var accessibleCount = 0;
+        var unavailableCount = 0;
         foreach (var src in sourcePaths)
         {
             var ok = false; string detail;
@@ -154,8 +223,24 @@ public sealed class PreflightChecker
             }
             catch (Exception ex) { detail = ex.Message; }
             Add(report, $"源路径 {src}", ok, "Error", detail);
+            if (ok) accessibleCount++; else unavailableCount++;
             allSourceOk &= ok;
         }
+
+        // ★ 源路径可读是真正的放行闸门：把"几个可读/几个不可读"变成可离线复核的事实 ★
+        try
+        {
+            var diagnostics = CoreDiagnostics.Sink.Publisher;
+            if (diagnostics.IsEnabledFor(PreflightEvents.SourcePathProbeResult))
+            {
+                diagnostics.TryPublish(new DiagnosticEventDraft(
+                    PreflightEvents.SourcePathProbeResult,
+                    CoreDiagnostics.ContextFor("PreflightChecker"),
+                    new PflSourceProbePayload(sourcePaths.Count, accessibleCount, unavailableCount),
+                    Outcome: unavailableCount == 0 ? DiagnosticOutcome.Succeeded : DiagnosticOutcome.Failed));
+            }
+        }
+        catch (Exception) { /* 观察失败绝不影响预检 */ }
 
         // 关键协议事实（公司域环境实测发现）：SMB 先 SESSION_SETUP（认证）后 TREE_CONNECT（找共享）。
         // 显式凭据 + 错误 67（找不到网络名）= 认证已通过、仅对方不导出 IPC$——凭据本身是有效的！
@@ -222,6 +307,22 @@ public sealed class PreflightChecker
                         (tooSlow ? "读速低于 10 MB/s：链路本身很慢，或被安全软件拦截扫描，建议先排查再迁移。"
                                  : "正式迁移速度明显低于此读速时，优先怀疑安全软件实时扫描。"));
                     _log.Information("吞吐基准: 读 {R:0.#} MB/s, 写 {W:0.#} MB/s @ {Root}", readMBs, writeMBs, benchRoot);
+
+                    // ★ 链路基准只在用户显式开启时存在；诊断**不会**主动跑它 ★
+                    try
+                    {
+                        var diagnostics = CoreDiagnostics.Sink.Publisher;
+                        if (diagnostics.IsEnabledFor(PreflightEvents.BenchmarkCompleted))
+                        {
+                            diagnostics.TryPublish(new DiagnosticEventDraft(
+                                PreflightEvents.BenchmarkCompleted,
+                                CoreDiagnostics.ContextFor("PreflightChecker"),
+                                new PflBenchmarkPayload(readMBs, writeMBs, tooSlow),
+                                Level: tooSlow ? DiagnosticLevel.Warning : DiagnosticLevel.Information,
+                                Outcome: DiagnosticOutcome.Succeeded));
+                        }
+                    }
+                    catch (Exception) { /* 观察失败绝不影响预检 */ }
                 }
                 catch (Exception ex)
                 {
@@ -265,8 +366,46 @@ public sealed class PreflightChecker
                 {
                     Add(report, $"目标盘 {driveRoot}", true, "Info", $"可用 {Util.Format.Bytes(drive.AvailableFreeSpace)}");
                 }
+
+                // ★ 目标卷事实（卷类型 + 空间，都是数字，不含路径明文）★
+                try
+                {
+                    var diagnostics = CoreDiagnostics.Sink.Publisher;
+                    if (diagnostics.IsEnabledFor(PreflightEvents.TargetVolumeObserved))
+                    {
+                        var need = estimatedBytes > 0 ? (long)(estimatedBytes * 1.05) : 0;
+                        diagnostics.TryPublish(new DiagnosticEventDraft(
+                            PreflightEvents.TargetVolumeObserved,
+                            CoreDiagnostics.ContextFor("PreflightChecker"),
+                            new PflTargetVolumePayload(
+                                drive.DriveType.ToString(),
+                                drive.AvailableFreeSpace / (1024 * 1024),
+                                drive.TotalSize / (1024 * 1024),
+                                need == 0 || drive.AvailableFreeSpace >= need),
+                            Outcome: DiagnosticOutcome.Succeeded));
+                    }
+                }
+                catch (Exception) { /* 观察失败绝不影响预检 */ }
             }
-            catch (Exception ex) { Add(report, "目标盘检查", false, "Error", ex.Message); }
+            catch (Exception ex)
+            {
+                // UNC（\\服务器\共享）目标不在产品契约内：本产品是"在新电脑运行、写入本机盘"的直拉模式。
+                // 此前这里直接透传 DriveInfo 的异常文案（"Drive name must be a root directory…"），
+                // 用户看不懂、也看不出"UNC 不被支持"。改为显式说明，让 CLI 与 GUI 拿到同一条清晰消息。
+                var raw = (targetRoot ?? string.Empty).Trim();
+                var isUnc = IsUncTarget(raw);
+                if (isUnc)
+                {
+                    Add(report, "目标盘检查", false, "Error",
+                        $"不支持把网络路径当作目标位置：{raw}。" +
+                        "本工具在新电脑上运行、把数据写到本机磁盘，因此目标必须是本机盘符路径（如 D:\\迁移目标）。" +
+                        "若目标是另一台机器的共享，请在那台机器上就地运行本工具，或先把共享映射为本地盘再试。");
+                }
+                else
+                {
+                    Add(report, "目标盘检查", false, "Error", ex.Message);
+                }
+            }
         }
 
         // 6. 本机 robocopy 能力（执行机轴：能力由本机 OS 决定）
@@ -284,6 +423,18 @@ public sealed class PreflightChecker
     }
 
     /// <summary>从 IOException/Win32Exception 中提取 Win32 错误码（NetworkShare 消息格式为 "（错误 N）"）。</summary>
+    /// <summary>
+    /// 判断目标位置是否为 UNC（网络）路径。
+    /// 产品契约：本工具在新电脑上运行、把数据写到本机磁盘，目标必须是本机盘符路径；
+    /// UNC 目标不在契约内。抽成纯函数是为了让该契约可被单元测试直接覆盖（不依赖网络）。
+    /// </summary>
+    internal static bool IsUncTarget(string? rawPath)
+    {
+        if (string.IsNullOrWhiteSpace(rawPath)) return false;
+        return rawPath.Trim().StartsWith(@"\\", StringComparison.Ordinal);
+    }
+
+
     internal static int ExtractWin32Error(Exception? ex)
     {
         if (ex is System.ComponentModel.Win32Exception w) return w.NativeErrorCode;
@@ -293,12 +444,72 @@ public sealed class PreflightChecker
     }
 
     private static void Add(PreflightReport r, string name, bool pass, string severity, string detail)
-        => r.Checks.Add(new PreflightCheck { Name = name, Pass = pass, Severity = severity, Detail = detail });
+    {
+        r.Checks.Add(new PreflightCheck { Name = name, Pass = pass, Severity = severity, Detail = detail });
+        PublishCheck(name, severity, pass);
+    }
+
+    /// <summary>
+    /// 检查项名称 → **稳定 checkCode**（规则只依赖 checkCode，绝不依赖中文检查名）。
+    /// 集中映射而不是改 22 个 Add 调用点：调用点继续只提供展示名，映射由本表负责，
+    /// 并有单元测试保证"已知检查名不得落到 uncoded"。
+    /// </summary>
+    internal static string CheckCodeFor(string name) => name switch
+    {
+        var n when n.StartsWith("SMB 445", StringComparison.Ordinal) => "Smb445",
+        var n when n.StartsWith("IPC$", StringComparison.Ordinal) => "IpcSession",
+        var n when n.StartsWith("直连共享凭据", StringComparison.Ordinal) => "DirectShareSession",
+        var n when n.StartsWith("共享枚举", StringComparison.Ordinal) => "ShareEnumeration",
+        var n when n.StartsWith("管理共享探测", StringComparison.Ordinal) => "AdminShareProbe",
+        var n when n.StartsWith("源路径", StringComparison.Ordinal) => "SourcePath",
+        var n when n.StartsWith("链路吞吐基准", StringComparison.Ordinal) => "Benchmark",
+        var n when n.StartsWith("目标盘文件系统", StringComparison.Ordinal) => "TargetFilesystem",
+        var n when n.Contains("可用空间", StringComparison.Ordinal) => "TargetSpace",
+        var n when n.StartsWith("目标盘", StringComparison.Ordinal) => "TargetVolume",
+        var n when n.StartsWith("Robocopy", StringComparison.Ordinal) => "Robocopy",
+        _ => "uncoded",
+    };
+
+    private static void PublishCheck(string name, string severity, bool pass)
+    {
+        try
+        {
+            var diagnostics = CoreDiagnostics.Sink.Publisher;
+            if (!diagnostics.IsEnabledFor(PreflightEvents.CheckCompleted)) return;
+            diagnostics.TryPublish(new DiagnosticEventDraft(
+                PreflightEvents.CheckCompleted,
+                CoreDiagnostics.ContextFor("PreflightChecker"),
+                new PflCheckPayload(CheckCodeFor(name), severity, pass),
+                Level: severity == "Error" ? DiagnosticLevel.Error : severity == "Warning" ? DiagnosticLevel.Warning : DiagnosticLevel.Information,
+                Outcome: pass ? DiagnosticOutcome.Succeeded : DiagnosticOutcome.Failed));
+        }
+        catch (Exception) { /* 观察失败绝不影响预检 */ }
+    }
 
     private PreflightReport Finish(PreflightReport r)
     {
         r.OverallPass = r.Checks.All(c => c.Pass || c.Severity != "Error");
         _log.Information("Preflight 结束: {Result}（{Checks} 项检查）", r.OverallPass ? "通过" : "存在阻断项", r.Checks.Count);
+
+        // ★ 结论级观察（预检是"能不能迁"的唯一闸门，其结论必须可离线复核）★
+        try
+        {
+            var diagnostics = CoreDiagnostics.Sink.Publisher;
+            if (diagnostics.IsEnabledFor(PreflightEvents.PreflightCompleted))
+            {
+                diagnostics.TryPublish(new DiagnosticEventDraft(
+                    PreflightEvents.PreflightCompleted,
+                    CoreDiagnostics.ContextFor("PreflightChecker"),
+                    new PflSummaryPayload(
+                        r.OverallPass,
+                        r.Checks.Count,
+                        r.Checks.Count(c => c.Severity == "Error"),
+                        r.Checks.Count(c => c.Severity == "Warning")),
+                    Outcome: r.OverallPass ? DiagnosticOutcome.Succeeded : DiagnosticOutcome.Failed));
+            }
+        }
+        catch (Exception) { /* 观察失败绝不影响预检 */ }
+
         return r;
     }
 }

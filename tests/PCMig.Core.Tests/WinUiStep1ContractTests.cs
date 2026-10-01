@@ -86,21 +86,29 @@ public sealed class WinUiStep1ContractTests
     }
 
     /// <summary>
-    /// [L0] WinUI 外壳**只**允许引用 PCMig.Core 一个项目。
-    /// 断言的是"ProjectReference 条数 == 1"，而不是"恰好出现了 PCMig.Core 字样"——
-    /// 否则多挂一个 PCMig.Gui 也会照样通过（这正是要拦的退火形态）。
+    /// [L0] WinUI 外壳只允许引用**获准的**项目：PCMig.Core + 诊断（运行时/契约层）。
+    ///
+    /// ★ D3 有意修订（已在 docs\诊断系统实施-阶段证据.md 登记）★
+    /// 原测试断言"ProjectReference 条数 == 1（只指向 PCMig.Core）"，其**真实意图**是
+    /// "外壳不得长出第二套迁移引擎 / 不得反向依赖 WPF 外壳"。诊断中心落地后外壳必须能装配
+    /// 诊断运行时，因此改为**显式允许清单**；上述意图由保留的禁止项（PCMig.Gui / PCMig.Cli /
+    /// 自引用）继续保证，并另有 ConnectionViewModel 的引擎反向护栏单独覆盖。
     /// </summary>
     [Fact]
-    public void WinUiProject_ReferencesCoreOnly()
+    public void WinUiProject_ReferencesOnlySanctionedProjects()
     {
         var csproj = Read(FindRepoRoot(), "src", "PCMig.WinUI", "PCMig.WinUI.csproj");
         var refs = ExtractProjectReferences(csproj);
 
-        Assert.True(refs.Count == 1,
-            "PCMig.WinUI.csproj 必须恰好有 1 个 ProjectReference（只指向 PCMig.Core），实际 "
-            + refs.Count + " 个：\n  " + string.Join("\n  ", refs));
-        Assert.Contains("PCMig.Core.csproj", refs[0], StringComparison.Ordinal);
-        Assert.DoesNotContain("PCMig.Gui", refs[0], StringComparison.OrdinalIgnoreCase);
+        string[] allowed = { "PCMig.Core.csproj", "PCMig.Diagnostics.csproj", "PCMig.Diagnostics.Abstractions.csproj" };
+        var unexpected = refs
+            .Where(r => !allowed.Any(a => r.Contains(a, StringComparison.Ordinal)))
+            .ToArray();
+        Assert.True(unexpected.Length == 0,
+            "PCMig.WinUI.csproj 出现未获准的 ProjectReference：\n  " + string.Join("\n  ", unexpected));
+
+        Assert.Contains(refs, r => r.Contains("PCMig.Core.csproj", StringComparison.Ordinal));
+        Assert.Contains(refs, r => r.Contains("PCMig.Diagnostics.csproj", StringComparison.Ordinal));
 
         // 不得自引用（自引用会让 WinUI 项目被自己再编译一遍）
         Assert.DoesNotContain(refs, r => r.Contains("PCMig.WinUI", StringComparison.OrdinalIgnoreCase));
@@ -164,23 +172,56 @@ public sealed class WinUiStep1ContractTests
     /// [L0] MainWindow.xaml 必须提供 Step 1 的完整可操作面：
     /// 三个输入/开关绑定（Host / Username / BenchmarkOnConnect）、
     /// 密码框（PasswordInput）、共享列表（Shares）、手动共享名（ManualShareName）
-    /// 与三个点击处理器（Connect_Click / AddShare_Click / NextStep_Click）。
+    /// 与页面内的点击处理器（Connect_Click / AddShare_Click / NextStep_Click）。
     /// 少任何一个，界面都会"看着还在、点了没反应"——XAML 缺处理器不会编译报错，
     /// 直到运行时 x:Bind/事件解析失败。
+    ///
+    /// A29（20260928，用户人工标注项）：用户明确要求删除四个页面右下角重复出现的
+    /// 「上一步 / 下一步」按钮组，原话是「这两个按钮在四个功能板块中都很多余 可以去除，
+    /// 这样旁边的空间才可以更高效的利用」。MainWindow.xaml 里的该按钮组（连同
+    /// PrevStepButton / NextStepButton 与两个 Click 处理器）已按指令删除，
+    /// 因此 Shell 侧的契约断言**不再要求** PrevStep_Click / NextStep_Click。
+    /// 导航能力没有减少：左侧栏四张卡与 Ctrl+1..4 / Ctrl+Tab 键盘路径全部保留。
+    /// A51（20260928，用户新决策）：Shell 层以统一 Navigation Footer 的形式**恢复了**
+    /// 「上一步 / 下一步」区（MainWindow.xaml 的 WorkspaceShell 新增第 5 行 Auto + x:Bind Nav.IsXxxCurrent），
+    /// Step 1 页面内那个同名按钮随即成为重复项，已删除（见下方页面侧 AssertNonePresent）。
     /// </summary>
     [Fact]
     public void MainWindowXaml_ExposesStep1ControlsAndHandlers()
     {
-        var xaml = Read(FindRepoRoot(), "src", "PCMig.WinUI", "MainWindow.xaml");
+        // 视图组件化之后（四页面 Shell 阶段），Step 1 的可操作面**从 MainWindow.xaml 搬到了
+        // Views\Step1ConnectPage.xaml**；MainWindow 只保留 Shell 装配与导航。
+        // 因此断言拆成两半：Shell 侧看"确实挂上了 Step 1 页"，页面侧看"可操作面完整"。
+        var shell = Read(FindRepoRoot(), "src", "PCMig.WinUI", "MainWindow.xaml");
+        AssertAllPresent(shell, "MainWindow.xaml（Shell）",
+            "StepNavigationControl", "ShellHintCard", "Step1ConnectPage", "x:Bind Nav.");
+        // A29：Shell 侧不再有上一步/下一步按钮，改为断言它们确实**已不存在**
+        // （防止有人把冗余按钮又加回来）。
+        AssertNonePresent(shell, "MainWindow.xaml（Shell）",
+            "PrevStepButton", "NextStepButton", "PrevStep_Click");
 
-        AssertAllPresent(xaml, "MainWindow.xaml",
+        var page = Read(FindRepoRoot(), "src", "PCMig.WinUI", "Views", "Step1ConnectPage.xaml");
+        AssertAllPresent(page, "Views\\Step1ConnectPage.xaml",
             "Host", "Username", "PasswordInput", "BenchmarkOnConnect", "Shares", "ManualShareName",
-            "Connect_Click", "AddShare_Click", "NextStep_Click");
+            "Connect_Click", "AddShare_Click");
+        // A51（20260928，用户截图发现 bug）：页内自带的「下一步：选择要迁移的内容 →」
+        // （Click="NextStep_Click"）与 Shell 层统一 Navigation Footer 渲染出的同名按钮上下叠着、
+        // 重复出现两遍。按用户指令 + 设计口径「导航 Footer 只在 Shell 一份，四个页面都不再各自放按钮」，
+        // 该按钮与其唯一处理器 NextStep_Click（只调 NotifyNextStepUnavailable，不导航）已一并删除。
+        // 这里改为断言它**确实已不存在**，防止冗余按钮再被加回来
+        //（与上面 Shell 侧 AssertNonePresent 同一口径）。
+        AssertNonePresent(page, "Views\\Step1ConnectPage.xaml",
+            "NextStep_Click", "下一步：选择要迁移的内容");
 
-        // 更强的绑定形态：确认上面这些名字确实接在 ViewModel 上（不是残留在文案里）
-        AssertAllPresent(xaml, "MainWindow.xaml 绑定",
-            "ViewModel.Host", "ViewModel.Username", "ViewModel.BenchmarkOnConnect",
-            "ViewModel.Shares", "ViewModel.ManualShareName");
+        // 更强的绑定形态：确认这些名字确实接在 ViewModel 上（不是残留在文案里）。
+        // 页面用**经典 {Binding}** 读 Shell 注入的 DataContext（x:Bind 的嵌套路径在
+        // UserControl 上不会随后置注入重算，实测渲染为空，故不用）。
+        // 断言 token 刻意**不带结尾引号**：文件里这些属性名后面紧跟的是逗号或大括号
+        // （例如 IsOn="{Binding BenchmarkOnConnect, Mode=TwoWay}"）——带引号会永远断言失败。
+        // 这个坑本轮实际踩过：PowerShell 独立核对说"字符串存在"，测试却报缺。
+        AssertAllPresent(page, "Views\\Step1ConnectPage.xaml 绑定",
+            "{Binding Host", "{Binding Username", "{Binding BenchmarkOnConnect",
+            "{Binding Shares}", "{Binding ManualShareName");
     }
 
     /// <summary>

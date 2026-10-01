@@ -1,0 +1,65 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <FontFamily x:Key="PCMigBodyFontFamily">Microsoft YaHei UI</FontFamily>
+  <Style x:Key="PCMigTextBase" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource PCMigBodyFontFamily}"/></Style>
+  <Style x:Key="DisplayTitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="30"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <Style x:Key="PageTitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="28"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <Style x:Key="PageSubtitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="15"/><Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+  <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="18"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <Style x:Key="FieldLabel" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/></Style>
+  <Style x:Key="BodyText" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="15"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <Style x:Key="MutedText" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></Style>
+  <Style x:Key="ButtonText" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontWeight" Value="SemiBold"/></Style>
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       V11 字号系统（单一事实来源）：每个语义角色一个命名样式，MainWindow 里 53 个 TextBlock
+       除少数"就地唯一尺寸"外**全部只引用样式**，不再散落内联 FontSize / FontFamily。
+       全部 BasedOn PCMigTextBase（= 字体族 Microsoft YaHei UI），因此不再需要逐个写 FontFamily。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <!-- 标题栏（A21 细条） -->
+  <Style x:Key="PCMigTextTitleBarProduct" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <Style x:Key="PCMigTextTitleBarVersion" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></Style>
+  <!-- 产品品牌区 -->
+  <Style x:Key="PCMigTextProductTitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="30"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <Style x:Key="PCMigTextVersionBadge" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="White"/></Style>
+  <Style x:Key="PCMigTextProductSubtitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/></Style>
+  <!-- 侧栏步骤卡 -->
+  <Style x:Key="PCMigTextStepTitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="15"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></Style>
+  <Style x:Key="PCMigTextStepSubtitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="11"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></Style>
+  <!-- 侧栏提示卡 -->
+  <Style x:Key="PCMigTextHintTitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <Style x:Key="PCMigTextHintBody" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="11"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></Style>
+  <Style x:Key="PCMigTextHintStatus" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/></Style>
+  <Style x:Key="PCMigTextHintCredit" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="10"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></Style>
+  <!-- 表单字段 -->
+  <Style x:Key="PCMigTextFieldLabel" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <!-- 动作按钮文字（主按钮内容与次级按钮内容） -->
+  <Style x:Key="PCMigTextActionButton" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="15"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+  <!-- 底栏 -->
+  <Style x:Key="PCMigTextFooterPercent" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="17"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></Style>
+  <Style x:Key="PCMigTextFooterValue" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></Style>
+  <Style x:Key="PCMigTextFooterLabel" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/></Style>
+  <Style x:Key="PCMigTextFooterAction" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="15"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+  <!-- 共享列表项 -->
+  <Style x:Key="PCMigTextListItemTitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <Style x:Key="PCMigTextListItemBody" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/></Style>
+  <Style x:Key="PCMigTextListItemMeta" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></Style>
+  <!-- 空状态 -->
+  <Style x:Key="PCMigTextStepIndex" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="15"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="White"/></Style>
+  <Style x:Key="PCMigTextPageTitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="29"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <Style x:Key="PCMigTextSourceStatus" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <Style x:Key="PCMigTextStepBadge" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="17"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="White"/></Style>
+  <Style x:Key="PCMigTextPageSubtitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+  <Style x:Key="PCMigTextFormNote" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <Style x:Key="PCMigTextStatusChipLabel" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></Style>
+  <Style x:Key="PCMigTextStatusChipValue" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <!-- Step 3 进度页 -->
+  <Style x:Key="PCMigTextTotalPercent" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="40"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></Style>
+  <Style x:Key="PCMigTextStatValue" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="20"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <!-- Step 4 结果页（深色日志面板：固定浅色字，不跟随主题） -->
+  <Style x:Key="PCMigTextLogHeader" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#E6ECFF"/></Style>
+  <Style x:Key="PCMigTextLogTagInfo" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#7BD88F"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style x:Key="PCMigTextLogTagWarn" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#F0C674"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style x:Key="PCMigTextLogTagError" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#F08A8A"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style x:Key="PCMigTextLogLine" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="#D6DEF2"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+  <Style x:Key="PCMigTextEmptyStateTitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="18"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <Style x:Key="PCMigTextEmptyStateBody" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="16"/><Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/></Style>
+</ResourceDictionary>

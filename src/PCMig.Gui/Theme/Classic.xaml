@@ -74,6 +74,8 @@
     <SolidColorBrush x:Key="SuccessColor"  Color="#FF15803D"/>
     <SolidColorBrush x:Key="WarningColor"  Color="#FFB45309"/>
     <SolidColorBrush x:Key="ErrorColor"    Color="#FFDC2626"/>
+    <SolidColorBrush x:Key="WarnTextColor"  Color="#FFB45309"/>
+    <SolidColorBrush x:Key="ErrorTextColor" Color="#FFC62828"/>
 
     <!-- 兼容层 -->
     <SolidColorBrush x:Key="GlassWindowBg"    Color="#FFE9ECF1"/>

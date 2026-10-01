@@ -3,4 +3,19 @@
   <assemblyIdentity version="1.0.0.0" name="PCMig.WinUI.app"/>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false"/></requestedPrivileges></security></trustInfo>
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1"><application><supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/></application></compatibility>
+  <!--
+    DPI Awareness（纯 Shell / Presentation Runtime 配置，不含任何业务语义）。
+    声明前：进程 DPI 不感知，125% 缩放下由系统做 1.25× 位图拉伸（RasterizationScale=1），
+            字体与边缘发虚；且 AppWindow 尺寸语义与物理像素脱钩。
+    声明后：PerMonitorV2 —— XAML 按真实缩放率光栅化，RasterizationScale 正常，
+            字体/边缘清晰，跨显示器缩放切换可用。
+    配套：MainWindow 的初始尺寸必须按窗口 DPI 换算（见 MainWindow.xaml.cs 的
+            ApplyCanonicalClientSize），否则 XAML 可用空间会随缩放率变化而破坏 Canonical 布局。
+  -->
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+    </windowsSettings>
+  </application>
 </assembly>

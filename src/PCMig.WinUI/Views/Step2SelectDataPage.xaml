@@ -1,0 +1,528 @@
+<UserControl
+    x:Class="PCMig.WinUI.Views.Step2SelectDataPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:pres="using:PCMig.WinUI.Presentation"
+    xmlns:conv="using:PCMig.WinUI.Presentation.Converters">
+    <!-- 页面入场动画由 Shell 统一播放（方向性，见 Presentation\MotionDirector.cs）。 -->
+
+    <!--
+        Step 2 — 选择数据与目标（视觉基准：正式参考图 ref2）。
+        结构（自上而下 / 左右两栏）照参考图落位：
+          页标题区（步骤徽章 2 + 大标题 + 说明句）
+          左栏：内容目录（卡）— 目录树 / 空状态 + 超大数据模式开关
+          右栏：存放位置（新电脑）卡 → 执行卡（预检并生成计划 / 开始迁移 / 暂停·停止·恢复）→ 连接与安全提示卡
+        业务接线（阶段 A 包 2）：8 个业务控件 + 目标框补 x:Name 并由代码后置（PushState + 事件处理器）
+        驱动；目录区改为「空状态 / TreeView 目录树」二选一（Visibility 由代码互斥切换）。
+    -->
+    <!-- 目录树三态显示用的 bool→Visibility 转换器（本页唯一使用的转换器；只服务半勾方块的显隐，
+         不参与任何业务判定）。放在页面资源里而不是 App 级：避免影响其它已冻结页面。
+         两个 DataTemplate 覆盖 DirNode（目录，有层级）与 FileRow（文件，叶子），
+         由代码后置把 DirTreeTemplateSelector 挂到 TreeView.ItemTemplateSelector。
+         这里刻意**不用 x:Bind**：本页实测 x:Bind 会让 XAML 编译器抛内部错误（WMC9999），
+         而经典 {Binding} 在本项目 WinUI 页面上已验证可用（Step1ConnectPage / StepNavigationControl 同款）。 -->
+    <UserControl.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
+        <conv:TreeRowNameConverter x:Key="RowName"/>
+        <conv:TreeRowCheckedConverter x:Key="RowChecked"/>
+        <conv:TreeRowIndeterminateConverter x:Key="RowIndeterminate"/>
+        <conv:TreeRowSizeConverter x:Key="RowSize"/>
+        <!-- ★ A7.1 ★ Task Picker 行内取字段（绑定项本身 + ConverterParameter；见 TaskFieldConverter 注释） -->
+        <conv:TaskFieldConverter x:Key="TaskField"/>
+
+        <!-- ══════════════════════════════════════════════════════════════════════════
+             ★ A7.1（2026-09-30）Task Picker 三段视觉 —— **只继承，不重新设计**
+             取值全部来自框架同一套 ComboBox 主题资源（收起态/下拉面板/条目态），
+             因此圆角、字体、材质、阴影、选中色与 Light/Dark 行为与旁边控件一致，
+             不会变成"默认 WinUI 灰色 Flyout"。
+             ══════════════════════════════════════════════════════════════════════════ -->
+
+        <!-- ① 收起态 Presenter：与 ComboBox 收起态同款背景/边框/圆角，高度固定 ≈32px（不被任务文本撑高） -->
+        <Style x:Key="PCMigTaskPickerPresenterStyle" TargetType="Button">
+            <Setter Property="Background" Value="{ThemeResource ComboBoxBackground}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource ComboBoxBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Height" Value="{ThemeResource ComboBoxMinHeight}"/>
+            <Setter Property="MinHeight" Value="{ThemeResource ComboBoxMinHeight}"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="Root" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{ThemeResource ControlCornerRadius}"/>
+                            <ContentPresenter x:Name="Presenter" Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal"/>
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background" Value="{ThemeResource ComboBoxBackgroundPointerOver}"/>
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background" Value="{ThemeResource ComboBoxBackgroundPressed}"/>
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Opacity" Value="0.6"/>
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ② Flyout 面板：沿用 ComboBox 下拉面板的同款材质（Acrylic 背景）/边框/圆角/内边距 -->
+        <Style x:Key="PCMigTaskPickerFlyoutStyle" TargetType="FlyoutPresenter">
+            <Setter Property="Background" Value="{ThemeResource ComboBoxDropDownBackground}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource ComboBoxDropDownBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="{ThemeResource ComboBoxDropdownBorderThickness}"/>
+            <Setter Property="CornerRadius" Value="{ThemeResource OverlayCornerRadius}"/>
+            <Setter Property="Padding" Value="2"/>
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="MaxWidth" Value="380"/>
+        </Style>
+
+        <!-- ③ 条目：两行（JobId / 状态 + 百分比），选中与悬停沿用 ComboBox 条目同款底色 -->
+        <Style x:Key="PCMigTaskPickerItemStyle" TargetType="ListViewItem">
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="MinHeight" Value="44"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListViewItem">
+                        <Grid x:Name="Root" Background="Transparent" CornerRadius="{ThemeResource ControlCornerRadius}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <!-- 选中 pill：与 ComboBox 下拉项左侧那条竖条同款（这里只做悬停/按下反馈，不表示"已载入"） -->
+                            <Rectangle x:Name="Pill" Grid.Column="0" Width="3" RadiusX="1.5" RadiusY="1.5"
+                                       Margin="1,4,0,4" Fill="{ThemeResource ComboBoxItemPillFillBrush}"
+                                       Visibility="Collapsed"/>
+                            <ContentPresenter x:Name="Presenter" Grid.Column="1" Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal"/>
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background" Value="{ThemeResource ComboBoxItemBackgroundPointerOver}"/>
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background" Value="{ThemeResource ComboBoxItemBackgroundPressed}"/>
+                                            <Setter Target="Pill.Visibility" Value="Visible"/>
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Selected">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background" Value="{ThemeResource ComboBoxItemBackgroundSelected}"/>
+                                            <Setter Target="Pill.Visibility" Value="Visible"/>
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 目录树**一行**的模板（节点模式）：把「一行内容」经显式 Converter 翻译成
+             名字 / 三态 / 体积，**不做绑定路径解析**。
+             理由：本页真机实测，模板里写 {Binding Name} 会静默绑不上（名字全空），
+             写 {Binding Content} 会显示成类型名——路径解析在这套组合下不可靠。
+             显式 Converter 的行为完全由 C# 决定，可读可测。 -->
+        <DataTemplate x:Key="DirTreeRowTemplate">
+            
+            <StackPanel Orientation="Horizontal" Spacing="6"
+                       >
+                <!-- ★ A.5（P0 目录树选择状态收敛版，2026-09-30）★ 单一数据流：
+                     · **状态源 = 模型**：`DirNode` / `FileRow` 的 `IsChecked`（`bool?`），半选 = `null`。
+                     · **写入路径 = 唯一一条**：CheckBox 直接 TwoWay 绑定 `Content.IsChecked`。
+                       用户点击 → 绑定写回模型 → 模型负责向下级联与父链回卷 → PropertyChanged
+                       → 绑定把模型忠实投影回 UI。**不再有任何 Click 处理器写模型**
+                       （历史教训：Click 里再 `ToggleFromUi()` 会形成第二套写入 ⇒ 双重 Toggle / 点一次不生效 /
+                        被点过的行留下 CheckBox 本地值、父级联时不再回写）。
+                     · **半选只是一种视觉投影**：`null` 由下面这块互斥可见的方块表达
+                       （`IsHitTestVisible=False`，不拦截鼠标）；CheckBox 自身 `IsThreeState=False`
+                       （`null` 呈现为未勾选），它**不自己创造第三套状态**。
+                     · 点击语义由模型决定：`Checked→Unchecked`；`Unchecked→Checked`；`Indeterminate→Checked`
+                       （后者即 `null` 被点击后写回 `true`，与既定产品规则一致）。
+                     本次只改绑定模式、移除 Click 与旧 Converter，**未改任何颜色/材质/圆角/字体/间距/几何/Padding/Margin/Width/Height**。 -->
+                <CheckBox
+                          IsChecked="{Binding Content.IsChecked, Mode=TwoWay}"
+                          IsThreeState="False" VerticalAlignment="Center"/>
+                <Border Width="14" Height="14" CornerRadius="3"
+                        Background="{StaticResource AccentBrush}"
+                        Visibility="{Binding Content.CheckStateIndeterminate, Converter={StaticResource RowIndeterminate}, Mode=OneWay}"
+                        VerticalAlignment="Center" IsHitTestVisible="False"/>
+                <TextBlock Style="{StaticResource PCMigTextListItemBody}"
+                           Text="{Binding Converter={StaticResource RowName}, Mode=OneWay}"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <TextBlock Style="{StaticResource PCMigTextListItemMeta}"
+                           Text="{Binding Converter={StaticResource RowSize}, Mode=OneWay}"
+                           VerticalAlignment="Center"/>
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+    <Grid RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <!-- 主体行必须是星号行：页根已不再套 ScrollViewer，整页填满 Shell 给出的有界高度，
+                 星号行才能把剩余高度真正分给下面的左右两栏；页内滚动交给内部列表。
+                 页面级导航 Footer 由 Shell 统一提供（MainWindow.xaml），页内不再保留空的 Footer 行。
+                 A50：原 Margin="0,12,0,0" 的顶部 12 已去掉 —— 外层 WorkspaceShell 自带
+                 Padding="20,20,20,18"，这 12 属重复间距；收回后主体行 +12，右栏得以在默认
+                 滚动位置完整显示。页头之上仍有 Shell 自己的 20 DIP 内边距，不会贴上沿。 -->
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+            <!-- 页标题区 -->
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Border Width="34" Height="34" CornerRadius="17" Background="{StaticResource AccentGradientBrush}" BorderBrush="#B8FFFFFF" BorderThickness="1" Translation="0,0,24" Shadow="{StaticResource ElevationHigh}">
+                    <Grid>
+                        <!-- 球形高光：与外框同宽、被圆角裁剪，给平涂渐变补上"受光"层 -->
+                        <Border CornerRadius="16" Margin="1" IsHitTestVisible="False">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0.25,0" EndPoint="0.25,1">
+                                    <GradientStop Color="#59FFFFFF" Offset="0"/>
+                                    <GradientStop Color="#14FFFFFF" Offset="0.42"/>
+                                    <GradientStop Color="#00FFFFFF" Offset="0.70"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+                        <TextBlock Style="{StaticResource PCMigTextStepBadge}" Text="2" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"/>
+                    </Grid>
+                </Border>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource PCMigTextPageTitle}" Text="选择要迁移的内容"/>
+                    <TextBlock Style="{StaticResource PCMigTextPageSubtitle}"
+                               Text="展开目录精确勾选，或勾选整个共享；右侧设置新电脑上的存放位置与线程数。"/>
+                </StackPanel>
+            </StackPanel>
+
+            <!-- 左右两栏（Compact 下由代码重排为上下单栏） -->
+            <Grid x:Name="SelectColumns" Grid.Row="1" ColumnSpacing="14" RowSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="360"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <!-- 内容行必须是星号行：外层左侧 Content Card 才能真正吃满整页剩余高度。
+                         A50：这里原来还留着一行 <RowDefinition Height="0"/>（上一轮遗留的空行）。
+                         它的唯一作用是在 Compact 下由代码后置改成 Auto 做上下单栏堆叠，但
+                         · 宽屏下它是 0 高，却仍会触发 RowSpacing="12" ⇒ 白吃 12 DIP；
+                         · 它对应的是 Step2SelectDataPage.xaml.cs:52/59 的 ApplyLayoutMode，
+                           而该方法目前是**死代码**（MainWindow 只对 PageProgress/PageResult 调用）。
+                         故本轮按"纯布局冗余可收回"删除该行：单行 Grid 的 RowSpacing 自然失效。
+                         ⚠ 若日后要重新接上 Compact 重排，必须同时补回这一行并给 RowDefinitions[1] 加边界保护。 -->
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- 左栏：内容目录（始终位于第 1 行第 1 列） -->
+                <Border x:Name="SelectLeftCard" Grid.Row="0" Grid.Column="0" Translation="0,0,12" VerticalAlignment="Stretch" Style="{StaticResource ElevatedSurface}" Padding="14">
+                    <Grid RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <!-- 数据视口行改为星号行：页根已不再套 ScrollViewer，Card 拿到的是
+                                 有界高度，星号行才能把剩余高度给目录树内框（改前这里是 Auto，
+                                 内框只能靠 MinHeight 撑着 —— 这就是"没利用剩余空间"的根因）。
+                                 MinHeight 160 只是安全下限，不是目标高度。 -->
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- ★ A6（F5，2026-09-30）★ 同 F1（Step4）：横向 StackPanel 以**无限宽度**度量子元素
+                             ⇒ 里面的 StateLineText 即便写了 TextWrapping="Wrap" 也永不折行，长状态句
+                             （StatusMessage 会追加空间守护/锁与EFS/超大规模说明，见 MigrationSessionViewModel.cs:1168-1177）
+                             会被右缘直接裁掉。改成 Auto + * 两列 Grid 让文本列拿到真实剩余宽度。
+                             几何等价：图标仍是 22px、列间距 10 等同原 Spacing="10"、文本块仍垂直居中。 -->
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE8B7;" FontSize="22" Foreground="{StaticResource AccentBrush}"/>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                                <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="内容目录"/>
+                                <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" x:Name="StateLineText" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10">
+                            <!-- ★ A.5（第 7 条 · 产品诚实性）★ 搜索框已置 IsEnabled="False"：
+                             改前用户能正常输入但**完全无效果**（筛选逻辑未接入）——"能输入却无反应"是假交互。
+                             本阶段不为它实现筛选逻辑（不在本包范围），只如实标注"暂未启用"；
+                             标注落在**占位符**上：禁用控件的 ToolTip 悬停默认不弹，不能只靠 tooltip 传达。 -->
+                        <TextBox x:Name="SearchBox" Style="{StaticResource PCMigTextBoxCentered}" Width="230" Padding="40,8,12,8"
+                                 IsEnabled="False"
+                                     PlaceholderText="搜索目录或文件名（暂未启用）"
+                                     ToolTipService.ToolTip="搜索/筛选暂未启用（筛选逻辑尚未接入）：请直接在下面目录树里勾选内容。"/>
+                            <FontIcon Glyph="&#xE721;" FontSize="15" Margin="14,0,0,0" Translation="0,-0.5,0"
+                                      HorizontalAlignment="Left" VerticalAlignment="Center"
+                                      IsHitTestVisible="False" Foreground="{StaticResource TextSecondaryBrush}"/>
+                            <!-- ★ 本开关阶段 A 未接线（ExpertMode 方案 B 决议）：其文案与旧 PCMig.Gui 的 ExpertMode 语义
+                             （忽略目录树勾选、整盘迁移、排除规则输入、超 2TB 自动开启）不一致，留待后续单独决策；
+                             阶段 A 目录树勾选恒生效（customs 恒为 CollectCustomSelections()，恒走旧实现 ExpertMode=false 路径），
+                             故保持 IsEnabled="False" 不接线，也不实现 ExpertExclusions 与超阈值自动开启。
+                             ★ A.5（第 7 条）★ tooltip 是**用户可见文案，必须与真实语义一致**：
+                             改前的"仅传输文件清单与增量，不预读全部目录"是 Core 里根本没有的产品语义（凭空的承诺），
+                             现改为"暂未启用 + 当前范围以目录选择为准"；
+                             ⚠ WinUI 3 **没有** WPF 的 ToolTipService.ShowOnDisabled（实测 XamlCompiler 报 WMC0010），
+                             禁用控件收不到指针事件 ⇒ 开关本身的 tooltip 悬停弹不出来。故把同一句话同时挂在
+                             右边的 ⓘ 说明图标上（该图标可命中，悬停可读）——"已标注"因此是可验证的，而不是写在
+                             一个永远看不到的地方。 -->
+                            <ToggleSwitch x:Name="ExpertModeToggle" MinWidth="0" OffContent="" OnContent="" IsOn="False"
+                                          IsEnabled="False"
+                                          ToolTipService.ToolTip="超大数据模式：暂未启用，当前迁移范围以目录选择为准。"/>
+                            <TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="超大数据模式" VerticalAlignment="Center"/>
+                            <FontIcon Glyph="&#xE946;" FontSize="14" VerticalAlignment="Center"
+                                  Foreground="{StaticResource TextMutedBrush}"
+                                  ToolTipService.ToolTip="超大数据模式：暂未启用，当前迁移范围以目录选择为准。"/>
+                        </StackPanel>
+
+                        <!-- 目录区：**空状态 / 目录树 二选一**（Visibility 由代码后置 PushState 互斥切换，
+                             不用转换器：本页实测经典 Binding 与嵌套 x:Bind 都渲染为空，故沿用代码直推）。
+                             目录树用 TreeView（自带滚动），**刻意不额外包 ScrollViewer**（用户否决用 ScrollViewer 掩盖布局问题）。
+                             层级接线（本包实测结论，务必照此保留）：
+                               · ItemsSource 模式下，层级由 **TreeView 自动生成的 TreeViewItem 容器**承载
+                                 （容器 DataContext = 节点模型，其 ItemsSource 由框架绑到 Children）；
+                               · **数据模板只能是节点的「内容」（StackPanel 等），模板根绝不能再写 TreeViewItem**
+                                 —— 模板根写 TreeViewItem 会让容器套容器，真机展开时直接崩溃（本包实测：
+                                 进程在展开根的瞬间消失，连空目录都崩；本文件所在页面因此改为“容器承载层级 + 内容模板”）。 -->
+                        <Border Grid.Row="2" Style="{StaticResource InsetSurface}" MinHeight="160" Padding="16" VerticalAlignment="Stretch">
+                            <Grid>
+                                <!-- 目录空状态（尚未连接 / 尚未列出共享时的 Waiting 态） -->
+                                <StackPanel x:Name="EmptyStatePanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
+                                    <FontIcon Glyph="&#xE8B7;" FontSize="30" Foreground="{StaticResource StepIconBrush}"/>
+                                    <TextBlock Style="{StaticResource PCMigTextEmptyStateTitle}" x:Name="EmptyTitleText"
+                                               HorizontalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap" MaxWidth="360"
+                                               x:Name="EmptyBodyText"
+                                               HorizontalAlignment="Center"/>
+                                </StackPanel>
+
+                                <!-- 层级与模板都由代码后置维护（节点模式）。本包真机实测的三条失败路线记在这里，
+                                     以免日后有人再往 ItemsSource 方向改回去：
+                                       · 模板根写 TreeViewItem（官方示例形态）→ 容器套容器，真机展开**直接崩**（连空目录都崩）；
+                                       · 模板根写成内容（StackPanel）+ ItemsSource → 能渲染根，但展开**不出子项**；
+                                       · 容器层绑 ItemsSource="{Binding Children}" → 展开时**无限递归**，进程消失。
+                                     故采用**节点模式**：TreeViewNode 树由 Step2SelectDataPage.xaml.cs 的
+                                     RebuildTreeNodes / SyncNodeChildren 维护，模板只负责“一行内容”。 -->
+                                <TreeView x:Name="DirTreeView" Visibility="Collapsed"
+                                          Background="Transparent" BorderThickness="0"
+                                          SelectionMode="None" CanDragItems="False" CanReorderItems="False"
+                                          Expanding="DirTreeView_Expanding"
+                                          ToolTipService.ToolTip="勾共享=整盘；点 ▶ 展开可精确勾选目录或文件"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <!-- 右栏：Compact 下整栏下沉到第 2 行，形成单栏堆叠 -->
+                <!-- 右栏卡组（A51：**撤掉**上一轮临时加的 ScrollViewer —— 用户否决"用 ScrollViewer 掩盖布局问题"，
+                     固定三卡必须在默认窗口下一次完整显示）。改为把冗余空白收干净后让它自然放下：
+                       · SelectColumns 的 0 高行已删 ⇒ 其 RowSpacing="12" 失效（+12）
+                       · 页根 Margin 顶部 12 已归零（+12）
+                       · Footer 行上间距 12 → 4（+8）
+                       · 本行 Card 间距 12 → 10（与左卡内部 RowSpacing="10" 同一节奏；两组间距共 +4）
+                     容器名仍是 SelectRightStack：代码后置 ApplyLayoutMode 在 Compact 下对它做
+                     Grid.SetRow / Grid.SetColumn 重排（Step2SelectDataPage.xaml.cs:47-62），
+                     名字必须留在 SelectColumns 的直接子元素上，重排路径才不会失效。 -->
+                <StackPanel x:Name="SelectRightStack" Grid.Row="0" Grid.Column="1" Spacing="10">
+
+                    <!-- 存放位置（新电脑） -->
+                    <Border Translation="0,0,10" Style="{StaticResource ElevatedSurface}" Padding="14">
+                        <StackPanel Spacing="10">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE8B7;" FontSize="16" Foreground="{StaticResource AccentBrush}"
+                                          VerticalAlignment="Center"/>
+                                <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="存放位置（新电脑）"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="TargetRootBox" Style="{StaticResource PCMigTextBoxCentered}" Padding="14,8,12,8"
+                                         PlaceholderText="例如：D:\迁移数据"
+                                         TextChanged="TargetRootBox_TextChanged"
+                                         ToolTipService.ToolTip="目标根目录校验由 Core 负责（TargetRootGuard）"/>
+                                <!-- 冻结态是 IsEnabled="False"（阶段一无业务）；接线后“浏览”必须可点，
+                                     否则目标路径只能手打 —— 这是“接线”本身要求的最小可用性变化，未动任何几何/材质/字面文案。 -->
+                                <Button x:Name="BrowseTargetButton" AutomationProperties.AutomationId="Step2.BrowseTarget" Grid.Column="1" Style="{StaticResource PCMigSecondaryButton}"
+                                        IsEnabled="True" Click="BrowseTarget_Click">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <FontIcon Glyph="&#xE8B7;" FontSize="14"/>
+                                        <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="浏览"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="线程数"/>
+                                    <!-- 字面文案与几何保持冻结时的原样，只补 x:Name 与接线。
+                                         第 0 项「自动（推荐）」在 job.json 里落成真实整数 16（Core 默认值）；
+                                         恢复既有任务时，旧任务的线程原值会被动态追加进本下拉并只读显示，绝不覆写。
+                                          档位已恢复完整 7 档：自动（推荐）/ 4 / 8 / 16 / 32 / 64 / 128；16 为独立档位，不与「自动」合并。 -->
+                                    <!-- ★ A7（2026-09-30）★ 挂"自上而下卷帘"下拉样式（官方模板副本，只换打开动效；
+                                         圆角/阴影/材质/选中 pill/尺寸与官方模板逐字相同）。 -->
+                                    <ComboBox x:Name="ThreadsCombo" HorizontalAlignment="Stretch" IsEnabled="True"
+                                              Style="{StaticResource PcmigComboBoxRollStyle}"
+                                              SelectedIndex="0" SelectionChanged="ThreadsCombo_SelectionChanged">
+                                        <ComboBoxItem x:Name="MtAutoItem" Content="自动（推荐）"/>
+                                        <ComboBoxItem Content="4"/>
+                                        <ComboBoxItem Content="8"/>
+                                        <ComboBoxItem Content="16"/>
+                                        <ComboBoxItem Content="32"/>
+                                        <ComboBoxItem Content="64"/>
+                                        <ComboBoxItem Content="128"/>
+                                    </ComboBox>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Spacing="4">
+                                    <TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="已有任务"/>
+                                    <!-- ★ A7.1（2026-09-30，用户裁决）★ 「已有任务」= 专用 Task Picker：
+                                         收起态 Presenter（Button，视觉沿用 ComboBox 收起态：同款背景/边框/圆角/箭头，
+                                         高度仍约 32px，长文本单行 ellipsis，**不被任务文本撑高**）
+                                         → Placement=BottomEdgeAlignedLeft 的 Flyout（**始终从控件下方展开**）
+                                         → ListView（自带滚动；每项直接绑定真实 JobSummary 对象）。
+
+                                         为什么不再用原生 ComboBox：实测它的 Popup 落位是"围绕当前选中项"计算的，
+                                         会整体上移约 6 行；且与 限高 / 限宽 / 有无选中项 / 打开后改 Popup.VerticalOffset
+                                         四组实测均无关 ⇒ 不再与其内部落位逻辑对抗。 -->
+                                    <Button x:Name="ExistingJobsPickerButton" AutomationProperties.AutomationId="Step2.ExistingJobs" HorizontalAlignment="Stretch"
+                                            Style="{StaticResource PCMigTaskPickerPresenterStyle}"
+                                            Click="ExistingJobsPickerButton_Click"
+                                            AutomationProperties.Name="已有任务">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock x:Name="ExistingJobsPreviewText" Grid.Column="0"
+                                                       Style="{StaticResource PCMigTextHintBody}"
+                                                       TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                                       VerticalAlignment="Center"/>
+                                            <FontIcon Grid.Column="1" Glyph="&#xE70D;" FontSize="12" Margin="8,0,0,0"
+                                                      VerticalAlignment="Center"
+                                                      Foreground="{ThemeResource ComboBoxDropDownGlyphForeground}"/>
+                                        </Grid>
+                                        <Button.Flyout>
+                                            <Flyout Placement="BottomEdgeAlignedLeft"
+                                                    FlyoutPresenterStyle="{StaticResource PCMigTaskPickerFlyoutStyle}">
+                                                <ListView x:Name="ExistingJobsList" SelectionMode="None"
+                                                          IsItemClickEnabled="True"
+                                                          ItemClick="ExistingJobsList_ItemClick"
+                                                          MaxHeight="320" MinWidth="220" MaxWidth="360"
+                                                          ItemContainerStyle="{StaticResource PCMigTaskPickerItemStyle}">
+                                                    <ListView.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <StackPanel Spacing="1">
+                                                                <TextBlock Text="{Binding Converter={StaticResource TaskField}, ConverterParameter=JobId}"
+                                                                           Style="{StaticResource PCMigTextListItemTitle}"
+                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                                    <TextBlock Text="{Binding Converter={StaticResource TaskField}, ConverterParameter=PhaseText}"
+                                                                               Style="{StaticResource PCMigTextListItemMeta}"
+                                                                               TextTrimming="CharacterEllipsis"/>
+                                                                    <TextBlock Text="{Binding Converter={StaticResource TaskField}, ConverterParameter=Percent}"
+                                                                               Style="{StaticResource PCMigTextListItemMeta}"/>
+                                                                </StackPanel>
+                                                            </StackPanel>
+                                                        </DataTemplate>
+                                                    </ListView.ItemTemplate>
+                                                </ListView>
+                                            </Flyout>
+                                        </Button.Flyout>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 执行 -->
+                    <Border Translation="0,0,14" Style="{StaticResource ElevatedSurface}" Padding="14">
+                        <StackPanel Spacing="10">
+                            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="执行"/>
+                            <Button x:Name="PrepareButton" AutomationProperties.AutomationId="Step2.Prepare" Style="{StaticResource PCMigSecondaryButton}" IsEnabled="True"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                    Click="Prepare_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <FontIcon Glyph="&#xE9D9;" FontSize="14"/>
+                                    <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="预检并生成计划"/>
+                                </StackPanel>
+                            </Button>
+                            <!-- 恒由真实计划驱动：HasPlan（plan.Objects.Count > 0）为假时**保持不可点**。 -->
+                            <Button x:Name="StartButton" AutomationProperties.AutomationId="Step2.Start" Style="{StaticResource PCMigPrimaryButton}" IsEnabled="False"
+                                    HorizontalAlignment="Stretch" Click="Start_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="9">
+                                    <FontIcon Glyph="&#xE768;" FontSize="15"/>
+                                    <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="开始迁移"/>
+                                </StackPanel>
+                            </Button>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button x:Name="PauseButton" AutomationProperties.AutomationId="Step2.Pause" IsEnabled="False" Style="{StaticResource PCMigFooterActionButton}"
+                                        Click="Pause_Click">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE769;" FontSize="14"/>
+                                        <TextBlock Text="暂停"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="StopButton" AutomationProperties.AutomationId="Step2.Stop" IsEnabled="False" Style="{StaticResource PCMigFooterActionButton}"
+                                        Click="Stop_Click">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE71A;" FontSize="14"/>
+                                        <TextBlock Text="立即停止"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="ResumeButton" AutomationProperties.AutomationId="Step2.Resume" IsEnabled="False" Style="{StaticResource PCMigFooterActionButton}"
+                                        Click="Resume_Click">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE72C;" FontSize="14"/>
+                                        <TextBlock Text="恢复任务"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                            <!-- 冻结文案默认显示；接线后在同一位置显示会话的真实状态句（StatusMessage）。 -->
+                            <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" TextWrapping="Wrap"
+                                       x:Name="StateMessageText"
+                                       Text="开始迁移前会先做预检（目标空间 / 权限 / 同名冲突），任一项不通过会给出可执行的修复建议。"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 连接与安全提示 -->
+                    <Border Translation="0,0,8" Style="{StaticResource SecondarySurface}" Padding="14">
+                        <StackPanel Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE72E;" FontSize="15" Foreground="{StaticResource TextSecondaryBrush}"
+                                          VerticalAlignment="Center"/>
+                                <TextBlock Style="{StaticResource PCMigTextHintTitle}" Text="连接与安全提示" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap"
+                                       Text="凭据只在建立连接时使用，不写入任务存档；迁移走 SMB 直拉，不经过中转服务器。"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
+    </Grid>
+</UserControl>

@@ -1,16 +1,385 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <Color x:Key="AccentColor">#1677F2</Color>
-  <SolidColorBrush x:Key="AccentBrush" Color="#1677F2"/>
-  <SolidColorBrush x:Key="TextPrimaryBrush" Color="#10244A"/>
-  <SolidColorBrush x:Key="TextSecondaryBrush" Color="#587094"/>
-  <SolidColorBrush x:Key="TextMutedBrush" Color="#8294B0"/>
-  <SolidColorBrush x:Key="BorderSoftBrush" Color="#8AFFFFFF"/>
-  <AcrylicBrush x:Key="ShellAcrylic" TintColor="#F5F8FF" TintOpacity="0.74" FallbackColor="#EFF5FC"/>
-  <AcrylicBrush x:Key="CardAcrylic" TintColor="#FFFFFF" TintOpacity="0.88" FallbackColor="#F8FBFF"/>
-  <Style x:Key="ShellCard" TargetType="Border"><Setter Property="Background" Value="{StaticResource ShellAcrylic}"/><Setter Property="BorderBrush" Value="{StaticResource BorderSoftBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="22"/><Setter Property="Padding" Value="18"/></Style>
-  <Style x:Key="MaterialCard" TargetType="Border"><Setter Property="Background" Value="{StaticResource CardAcrylic}"/><Setter Property="BorderBrush" Value="{StaticResource BorderSoftBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="18"/><Setter Property="Padding" Value="18"/></Style>
-  <Style x:Key="PrimaryButton" TargetType="Button"><Setter Property="Background" Value="{StaticResource AccentBrush}"/><Setter Property="Foreground" Value="White"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="18,10"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
-  <Style x:Key="SecondaryButton" TargetType="Button"><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="16,9"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
-  <Style x:Key="SectionTitle" TargetType="TextBlock"><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
-  <Style x:Key="MutedText" TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></Style>
+  <!-- V2 Material Transparency / V3 Surface Hierarchy
+       实测基线：实现主色 #E8ECF7(R232 G236 B247) vs 参考 #F1F5FD(R241 G245 B253) → 面板整体需提亮约 9 点。
+       五层靠 Tint + Opacity 表达，而不是只靠 Border/CornerRadius：
+         L0 Mica/Ambient（背景，最透）→ L1 Shell 面板（tint，环境光可透）
+         → L2 Card 卡片（更白更实，"浮在面板上"）→ L3 Input 内嵌（半透明且略暗，形成凹陷感）
+         → L4 Selected / Primary（强调 tint + 最高 elevation）
+       V2b（本轮）：把各层 TintOpacity 整体下调，让环境色真正透进玻璃（原先 0.38/0.88/0.56/0.82/0.55
+       实测把背景色挡死，整屏呈灰蓝）。 -->
+    <!-- ══════════════════════════════════════════════════════════════════════
+         Round 2：Layered Translucent Material Hierarchy —— 语义 Token（四页共用一套）
+         Layer 1 真正的 Desktop Acrylic 由窗口 SystemBackdrop 负责（Presentation\BackdropSpike.cs），
+                 **这里不重复开 Acrylic**：应用内 AcrylicBrush 采样的是桌面壁纸，而不是窗口自己的
+                 backdrop；一层套一层必然得到乳白/雾化/颜色被洗掉（本轮已实测证实）。
+         Layer 2–5 全部用**半透明 Fill + 边框高光**逐级增实：越靠内容越不透明。
+         禁止用 UIElement.Opacity 做层次（会把文字/图标/焦点一起透明）。
+         ══════════════════════════════════════════════════════════════════════ -->
+    <!-- Layer 2：Shell / Workspace —— 仍明显接受后景，但比最底层稳 -->
+    <SolidColorBrush x:Key="PCMigShellMaterial" Color="#2BFFFFFF"/>
+    <SolidColorBrush x:Key="PCMigWorkspaceMaterial" Color="#40FFFFFF"/>
+    <!-- Layer 3：Functional Card —— 稳定阅读面，允许极弱环境色 -->
+    <SolidColorBrush x:Key="PCMigCardMaterial" Color="#AFFFFFFF"/>
+    <!-- Layer 4：Inset / Input / Secondary Control —— 进一步稳定，有"嵌入卡片"感 -->
+    <SolidColorBrush x:Key="PCMigInsetMaterial" Color="#59FFFFFF"/>
+    <SolidColorBrush x:Key="PCMigControlMaterial" Color="#D6FFFFFF"/>
+    <!-- Layer 5：Primary / Important —— 视觉锚点，保持 PCMig 自己的强调语言 -->
+    <SolidColorBrush x:Key="PCMigPrimaryMaterial" Color="#F2FFFFFF"/>
+    <!-- Layer S：Semantic Dark（Step4 实时日志）—— 深色语义面，不随透明体系变浅 -->
+    <SolidColorBrush x:Key="PCMigSemanticDarkMaterial" Color="#F21A2033"/>
+    <!-- 兼容别名：四页既有引用继续可用（同一语义 → 同一 Token，禁止页面级散落参数） -->
+    <!-- ══════════════════════════════════════════════════════════════════════════════
+       A41 / A42（20260928）Liquid Glass-inspired Edge Lighting
+       = Directional Rim Light + Directional Edge Shadow
+
+       ★ A42 变更：由「Sidebar Step Card 专用」升格为**全应用通用边缘光学**。
+         资源拆成三层（用户口径：不要把"StepCard 专用 Brush"复制到几十个控件）：
+           · PCMigDAELBrush                     —— Directional Acrylic Edge Lighting 唯一定义处
+           · PCMigDAELOverlayStyle              —— 通用光照层**行为**（1 DIP / 不吃命中 / 拉伸）
+           · 各 Surface 只提供自己的 CornerRadius —— 光照层**服从宿主几何**，
+             绝不允许反过来把控件圆角改成 15（用户硬约束）。
+         Step Card 通过**别名**继续指向通用定义 ⇒ 现有 XAML 一字不改、渲染零回归。
+
+       ★ 与上面 PCMigEdgeHighlight 的关系（**不要**直接拿那支全局运行）：
+         上面那支是 A38 按「旧版原值」搬过来的**历史移植记录**，右下暗部仍偏纯黑。
+         本支是已经用户验收方向正确的那一套：暗部用**蓝灰 #0B1220**
+         （与旧版 ContactShadow 的 Color="#FF0B1220" 同色相），避免"灰黑脏阴影"。
+         两者 alpha 档位同源，差异只有：① 暗部改蓝灰；② RadiusX/RadiusY 用 1.5。
+         这样 A38 那段"旧版原值"的记录仍然准确。
+
+       ★ 几何含义（扁长圆角矩形是这个效果，方形 Card 同理）：
+         · 径向中心压在左上 (0.06,0.08) → 左上角最亮；
+         · 沿**上边向右**、沿**左边向下**单调衰减（不是整条边等亮）；
+         · 右 / 下转为低 Alpha 蓝灰暗部收边 → 右下收阴。
+         · 因为是**一个连续的环**，高光必然沿宿主 CornerRadius 自然过渡，圆角处不会断线；
+           也不会出现"Border + Highlight"两条平行线。
+
+       ★ 与材质的解耦（用户硬要求，不得 1:1 同步）：
+         本画刷是 StaticResource，**完全独立于 Developer Visual Tuning**，
+         不随材质 Alpha 缩放。低材质档（很透明）时白高光足以勾勒轮廓；
+         高材质档（近实体白）时白高光自然减弱、由右下暗边承担轮廓识别。
+         两者互补 ⇒ 轮廓在 Material 20 / 50 / 80 三档都成立。
+
+       ★ 光源：全应用**唯一**主光源 左上 → 右下 ≈45°（旧版 LightDirection = 315°）。
+         不按控件所处位置单独改方向。
+
+       ★ A42 小幅增强（用户只允许"增强一点点"）：
+         相对 A41 已验收档位，各停点 Alpha **只提高 11.8% ~ 15%**（在用户允许的 +8%~+15% 内）；
+         **BorderThickness 仍为 1 DIP**，不加密第二圈、不加 DropShadow、不动 CornerRadius。
+         ★ A42b 实测修正：曾按第 5 节试过给左上光加轻微冷色调（#F2F7FF），
+         但差分实测证明**冷色的亮度只有 246.5（纯白 255）**，alpha +11.8% 抵不过色调带来的
+         亮度损失 —— 实测左上差分从 A41 的 +8.48 **反而降到 +7.92（净 −7%）**，与"增强一点点"相反。
+         故高光停点**回到纯白**，只保留 alpha 提升，严格落在用户允许的 +8%~+15% 内。
+         第 5 节"必要时加冷色折射感"的前提在本轮**不成立**：实测 Material 80 档
+         右下暗边仍有 −13 的差分，Surface 边界已经可感知，不需要靠色相差补。
+
+       ★ 高光档位的实测标定依据（A41 差分实测）：
+         「边缘像素 − 向内 4px 参照像素」显示，用旧版原值 #33FFFFFF(20% 白) 时，
+         左上边缘只比卡面高 **+1.0 亮度单位**，低于近白区可辨阈（视觉复核确认"看不到高光"）。
+         根因不是参数没调好而是**物理上限**：白高光增益 ≈ alpha × (255 − 卡面亮度)，
+         卡面在 Material 50/80 档已达 240~253，白高光上限只有 +2~+15，没有余量。
+         故高光只能在**低材质档**发力；A41 把左上端点提到 40% 后实测差分 +8.5（可辨）。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <RadialGradientBrush x:Key="PCMigDAELBrush" MappingMode="RelativeToBoundingBox"
+                       Center="0.06,0.08" GradientOrigin="0,0" RadiusX="1.25" RadiusY="1.25">
+    <GradientStop Color="#FFFFFFFF" Offset="0.00"/>
+    <GradientStop Color="#B3FFFFFF" Offset="0.10"/>
+    <GradientStop Color="#59FFFFFF" Offset="0.26"/>
+    <GradientStop Color="#1FFFFFFF" Offset="0.48"/>
+    <GradientStop Color="#170B1220" Offset="0.70"/>
+    <GradientStop Color="#380B1220" Offset="1.00"/>
+  </RadialGradientBrush>
+
+  <!-- DAEL 强度变体：**同一套 DAEL**（同一光源方向、同一起点 0.06,0.08、同一停点偏移、同一半径），
+       仅按 Surface 类别缩放 alpha。用户口径：不同 Card 只允许有 Variant，但光源方向 / 高光逻辑 /
+       暗边逻辑 / 参数体系必须来自同一套 DAEL，禁止各写一套。
+         · PCMigDAELBrush        主内容 Card / Large Surface（基准档）
+         · PCMigDAELBrushSubtle  Sidebar Step Card（克制档，落回用户允许的 +8%~+15% 区间）
+         · PCMigDAELBrushQuiet   Utility Panel（最克制档，工具面板优先可读性） -->
+  <RadialGradientBrush x:Key="PCMigDAELBrushSubtle" MappingMode="RelativeToBoundingBox"
+                       Center="0.06,0.08" GradientOrigin="0,0" RadiusX="1.25" RadiusY="1.25">
+    <GradientStop Color="#8CFFFFFF" Offset="0.00"/>
+    <GradientStop Color="#62FFFFFF" Offset="0.10"/>
+    <GradientStop Color="#31FFFFFF" Offset="0.26"/>
+    <GradientStop Color="#11FFFFFF" Offset="0.48"/>
+    <GradientStop Color="#120B1220" Offset="0.70"/>
+    <GradientStop Color="#340B1220" Offset="1.00"/>
+  </RadialGradientBrush>
+  <!-- 控件档 DAEL：按钮体系用。同光源/同停点/同半径，alpha ≈ 基准 × 0.35，
+       保证按钮与 Card 属于同一光照语言，但强度明显更轻（绝不变成粗边高光按钮）。 -->
+  <RadialGradientBrush x:Key="PCMigDAELBrushControl" MappingMode="RelativeToBoundingBox"
+                       Center="0.06,0.08" GradientOrigin="0,0" RadiusX="1.25" RadiusY="1.25">
+    <GradientStop Color="#59FFFFFF" Offset="0.00"/>
+    <GradientStop Color="#3DFFFFFF" Offset="0.10"/>
+    <GradientStop Color="#1FFFFFFF" Offset="0.26"/>
+    <GradientStop Color="#0AFFFFFF" Offset="0.48"/>
+    <GradientStop Color="#080B1220" Offset="0.70"/>
+    <GradientStop Color="#140B1220" Offset="1.00"/>
+  </RadialGradientBrush>
+  <RadialGradientBrush x:Key="PCMigDAELBrushQuiet" MappingMode="RelativeToBoundingBox"
+                       Center="0.06,0.08" GradientOrigin="0,0" RadiusX="1.25" RadiusY="1.25">
+    <GradientStop Color="#80FFFFFF" Offset="0.00"/>
+    <GradientStop Color="#59FFFFFF" Offset="0.10"/>
+    <GradientStop Color="#2CFFFFFF" Offset="0.26"/>
+    <GradientStop Color="#10FFFFFF" Offset="0.48"/>
+    <GradientStop Color="#0C0B1220" Offset="0.70"/>
+    <GradientStop Color="#1C0B1220" Offset="1.00"/>
+  </RadialGradientBrush>
+
+  <!-- DAEL 兼容别名：现有接入点继续用旧键名，全部指向**唯一定义** PCMigDAELBrush。
+       别名必须与定义一起放在样式之前（XAML StaticResource 是顺序解析）。 -->
+  <StaticResource x:Key="PCMigSurfaceRimLightBrush" ResourceKey="PCMigDAELBrush"/>
+  <StaticResource x:Key="PCMigStepCardRimLightBrush" ResourceKey="PCMigDAELBrushSubtle"/>
+  <StaticResource x:Key="ShellMaterialBrush" ResourceKey="PCMigShellMaterial"/>
+    <StaticResource x:Key="PrimarySurfaceBrush" ResourceKey="PCMigCardMaterial"/>
+    <StaticResource x:Key="SecondarySurfaceBrush" ResourceKey="PCMigCardMaterial"/>
+    <StaticResource x:Key="ElevatedSurfaceBrush" ResourceKey="PCMigCardMaterial"/>
+    <StaticResource x:Key="InsetSurfaceBrush" ResourceKey="PCMigInsetMaterial"/>
+    <SolidColorBrush x:Key="InteractiveSurfaceBrush" Color="#30FFFFFF"/>
+  <!-- V12 Button 四态材质统一：Primary / Secondary / FooterAction 三种按钮共用同一套状态语义。
+       这里只补"面"的三档；"边"与"前景"直接复用既有 Token（AccentEdgeBrush / BorderNormalBrush /
+       SecondaryEdgeBrush / DisabledActionForegroundBrush），不再散落新的十六进制。
+       取值对齐既有实测：Hover #3DFFFFFF、Pressed #1FFFFFFF 沿用底栏按钮已验证的档位；
+       Disabled #26FFFFFF 与 RateChipSurfaceBrush 同值 → 统一后底栏零视觉位移。 -->
+  <SolidColorBrush x:Key="ButtonSurfaceHoverBrush" Color="#3DFFFFFF"/>
+  <SolidColorBrush x:Key="ButtonSurfacePressedBrush" Color="#1FFFFFFF"/>
+  <SolidColorBrush x:Key="ButtonSurfaceDisabledBrush" Color="#26FFFFFF"/>
+    <AcrylicBrush x:Key="SelectedSurfaceBrush" TintColor="#E4F1FF" TintOpacity="0.45" FallbackColor="#E4F0FF"/>
+  <ThemeShadow x:Key="ElevationLow"/><ThemeShadow x:Key="ElevationMedium"/><ThemeShadow x:Key="ElevationHigh"/>
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       A30（20260928）统一几何 Token —— 输入类控件与导航卡的圆角/表面统一入口。
+       背景（用户人工标注项）："所有输入框的圆角体系发生严重回归"，出现近似直角、
+       小圆角、且不同页面不一致。Final Polish 阶段要求**不在具体页面散写随机
+       CornerRadius / Margin / BorderThickness / Shadow**，而是共用 Token。
+
+       声明式圆角层级（Large Surface > Card > Input/Button）：
+         ShellMaterial 22 / PrimarySurface 20 / ElevatedSurface 18 /
+         SecondarySurface 16 / StepCard 16 / InsetSurface 13 / Input 14 / Button 12 / Badge 9
+       输入类控件（Standard / Search / Password / Path）**统一使用 PCMigRadiusInput**，
+       不允许按页面或按控件类型各写一套；需要不同半径只能通过明确的语义变体定义。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <CornerRadius x:Key="PCMigRadiusInput">14</CornerRadius>
+  <CornerRadius x:Key="PCMigRadiusStepCard">16</CornerRadius>
+  <CornerRadius x:Key="PCMigRadiusButton">12</CornerRadius>
+  <CornerRadius x:Key="PCMigRadiusInset">13</CornerRadius>
+  <!-- V5 Elevation：**ThemeShadow 必须配 Translation Z 才真的投影**（Z 不动 = 截图里看不到景深）。
+       V4：面板/卡片描边改用高光渐变；**V4b（本轮）**：卡片/面板顶部再叠一条 2 DIP 的横向白色亮线
+       （`TopSheenLip`），因为实测"整圈描边渐变"在卡片顶边**没有产生亮度尖峰**，而参考图顶边有 +16 亮度尖线。 -->
+  <Style x:Key="ShellMaterial" TargetType="Border"><Setter Property="Background" Value="{StaticResource ShellMaterialBrush}"/><Setter Property="BorderBrush" Value="{StaticResource PCMigSurfaceRimLightBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="22"/><Setter Property="Padding" Value="18"/><Setter Property="Shadow" Value="{StaticResource ElevationLow}"/></Style>
+  <Style x:Key="PrimarySurface" TargetType="Border"><Setter Property="Background" Value="{StaticResource PrimarySurfaceBrush}"/><Setter Property="BorderBrush" Value="{StaticResource PCMigSurfaceRimLightBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="20"/><Setter Property="Padding" Value="20"/><Setter Property="Shadow" Value="{StaticResource ElevationHigh}"/></Style>
+  <Style x:Key="SecondarySurface" TargetType="Border"><Setter Property="Background" Value="{StaticResource SecondarySurfaceBrush}"/><Setter Property="BorderBrush" Value="{StaticResource PCMigSurfaceRimLightBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="16"/><Setter Property="Padding" Value="16"/><Setter Property="Shadow" Value="{StaticResource ElevationLow}"/></Style>
+  <!-- Step 4 报告清单行：用 ListItemSurface 的半透明底 + 细边，避免每行自建一套材质 -->
+  <!-- 侧栏"当前页"卡材质：参考图里当前卡明显更白更浮起；原来的 SelectedSurfaceBrush（Acrylic #E4F1FF@0.45）与普通卡（#5CFFFFFF）亮度几乎相同，实测均色只差 3 个 R 单位 → 单独给导航选中态一个更强的白面 + 蓝边。 -->
+  <SolidColorBrush x:Key="NavSelectedSurfaceBrush" Color="#C4FFFFFF"/>
+  <SolidColorBrush x:Key="NavSelectedEdgeBrush" Color="#8A8FC0F0"/>
+
+  <Style x:Key="ListItemSurfaceBrushBorder" TargetType="Border"><Setter Property="Background" Value="{StaticResource ListItemSurfaceBrush}"/><Setter Property="BorderBrush" Value="{StaticResource BorderNormalBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="10"/></Style>
+  <Style x:Key="InsetSurface" TargetType="Border"><Setter Property="Background" Value="{StaticResource InsetSurfaceBrush}"/><Setter Property="BorderBrush" Value="{StaticResource InsetBorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="13"/><Setter Property="Padding" Value="12"/></Style>
+  <Style x:Key="ElevatedSurface" TargetType="Border"><Setter Property="Background" Value="{StaticResource ElevatedSurfaceBrush}"/><Setter Property="BorderBrush" Value="{StaticResource PCMigSurfaceRimLightBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="18"/><Setter Property="Padding" Value="16"/><Setter Property="Shadow" Value="{StaticResource ElevationMedium}"/></Style>
+  <Style x:Key="SelectedNavigationSurface" TargetType="Border"><Setter Property="Background" Value="{StaticResource SelectedSurfaceBrush}"/><Setter Property="BorderBrush" Value="{StaticResource AccentEdgeBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="15"/><Setter Property="Padding" Value="13,15"/><Setter Property="Shadow" Value="{StaticResource ElevationMedium}"/></Style>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       A31（20260928，用户人工标注项）：Step Navigation Card 表面质量重做。
+
+       用户原话：「左侧四个 Step Navigation Card 质感严重不统一……和下面的『提示』Card
+       完全不像同一套 Surface / 浮雕设计……当前提示 Card 的整体质感明显更成熟……
+       而这四个 Step Card：边框过于明显、描边感过强、表面过平、阴影比较粗糙、
+       高光不自然、四周轮廓有明显『框出来』的感觉」。
+
+       ★ 已核实的差异（读源码 + 视觉对比确认）：
+         · 提示 Card 用 SecondarySurface：**渐变高光边**（EdgeHighlightCrispBrush，上缘亮 → 下缘渐隐）
+           + ElevationLow 柔和阴影 + 近白半透明面 → 所以"浮起感/层次"好。
+         · Step Card 用 StepCardIdleBrush —— 那是**一个纯色**（#5CFFFFFF），
+           既没有上缘亮线尖峰、也没有光源方向；Selected 更是整圈换成
+           NavSelectedEdgeBrush（#8A8FC0F0）—— 一圈明显蓝边，正是用户说的"框出来"。
+
+       ★ 修法（**只统一材质语言，不复制提示 Card 的结构**；Normal/Hover/Selected/
+         Completed/Future 的状态逻辑与 x:Bind 全部保留）：
+         · 边界改由「高光边 + 表面明暗 + 柔和阴影」建立，不再靠一圈实色描边；
+         · 圆角与提示 Card 同档（PCMigRadiusStepCard = 16 vs SecondarySurface 16）；
+         · 阴影与提示 Card 同档（ElevationLow）；
+         · 顶部 1 DIP 亮线强化 45° 光源（光源在左上 → 上缘亮、右下暗）；
+         · Selected 仍保留左侧蓝色 Indicator；卡面只做**极轻**提升 + 边缘略增强，
+           不再整圈强蓝边。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+
+  <!-- ══ A40（20260928）游离画刷清理 ══
+       以下三个画刷是我在做 Step Card"材质/浮雕"试验时自建的**固定色**材质画刷，
+       它们不属于任何 Semantic Material Token、也不受 Developer Visual Tuning 控制。
+       经全仓引用检查，现已**无任何引用**（Step Card 的材质已改回
+       PCMigCardMaterial / PCMigInsetMaterial），保留只会成为"材质链路被绕开"的隐患，
+       故删除。若将来需要"更薄一档"的导航卡面，正确做法是**新增一个语义 Token**
+       并把它登记进 DeveloperVisualTuning 的 Layers 表，而不是就地再写一个固定色。
+       （原定义：NavStepCardIdleSurfaceBrush #8FFFFFFF / NavStepCardSelectedSurfaceBrush #D8FFFFFF /
+         NavStepCardSelectedEdgeBrush #4D7FB4F0 —— 已移除）
+  -->
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       A32（20260928，用户第二轮反馈）：Step Card 高光**逻辑**修正。
+
+       用户判词：「当前 Step Card 的边缘白光太粗了……一圈明显的白色描边……四条边都被框出来……
+       这不是我要的效果。我要的不是『白色描边卡片』，而是整个应用存在一个统一光源，
+       光源来自应用整体的左上角……高光主要出现在左上边缘和左上表面，越往右下高光越弱，
+       右下应主要体现轻微阴影/暗部收边……高光应该更像 Surface Highlight，而不是 Border Stroke。」
+
+       ★ 机制根因（这次是逻辑错误，不是数值问题）：
+         我上一版把高光写在 **BorderBrush** 上（NavStepCardIdleEdgeBrush / SelectedEdgeBrush）。
+         BorderBrush 会沿**整圈四条边**描一遍 —— 所以无论渐变怎么设计，
+         左右两条竖边都会各自拿到"上亮下暗"的一笔，视觉上就是
+         「每张卡片自己四周发白光 / 一圈粗白边」。这正是用户看到的错误效果。
+
+       ★ 正确做法 —— 把高光从"边框"移到"表面叠加层"：
+         · 卡片 Border 的 BorderBrush 近似透明（只留极轻的轮廓），不再承担高光；
+         · 上边：一条 1 DIP 亮线，**从左上向右逐渐衰减**（StartPoint 0,0 → EndPoint 1,0）；
+         · 左边：一条 1 DIP 亮线，**从顶部向下逐渐衰减**（StartPoint 0,0 → EndPoint 0,1）；
+         · 右下：一条 1 DIP 暗边，从右下向左上衰减（暗部收边，营造体积感）；
+         · 表面本身用左上 → 右下的极轻明暗渐变（受光面略亮、背光面略暗）。
+         这样四边**不再等强**：左上亮、右下暗，方向与应用统一光源一致。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       A33（20260928）：**全应用统一方向性受光**的唯一画刷来源。
+       所有卡片 / 面板 / 外壳经 views:PCMigSurface 共用这一套 → 光源方向必然一致。
+
+       ★ 与上一版的关键差异（用户第二轮反馈后的方向修正）：
+         上一版用"四条独立的边线"表达受光，实测上边亮线中段反而比右端暗
+         （L=213 vs 232），读起来像三条装饰线，不是"表面受光"。
+         现改为**面的明暗**：
+           ① PCMigDirectionalLightBrush —— 一整个面的对角渐变（左上亮 → 中部透明 → 右下暗），
+              光斑中心偏在左上（StartPoint 0.12,0），这是受光的主体表达；
+           ② PCMigCornerGlowBrush —— 左上角一个很淡的径向聚光，强化"光源在左上角"的方位感；
+           ③ PCMigTopEdgeBrush —— 上缘 1 DIP 亮线**只在左侧一段**可见，向右迅速消失
+              （保留玻璃质感的顶边尖峰，但不绕整圈）；
+           ④ PCMigEdgeShadeBrush —— 右下角一段的暗部收边，向该方向加深。
+         于是四边**不再等强**：左上受光、右下收阴，且全应用方向一致。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+
+  <!-- ① 主受光：对角面的明暗（左上亮 → 中部透明 → 右下暗） -->
+  <LinearGradientBrush x:Key="PCMigDirectionalLightBrush" StartPoint="0.12,0" EndPoint="0.88,1">
+    <GradientStop Color="#5AFFFFFF" Offset="0"/>
+    <GradientStop Color="#34FFFFFF" Offset="0.18"/>
+    <GradientStop Color="#14FFFFFF" Offset="0.4"/>
+    <GradientStop Color="#00000000" Offset="0.6"/>
+    <GradientStop Color="#14102038" Offset="0.84"/>
+    <GradientStop Color="#2A0D1A2C" Offset="1"/>
+  </LinearGradientBrush>
+  <!-- ② 左上角聚光（径向，只左上四分之一区域有感） -->
+  <RadialGradientBrush x:Key="PCMigCornerGlowBrush" MappingMode="RelativeToBoundingBox"
+                       Center="0,0" GradientOrigin="0,0" RadiusX="0.62" RadiusY="0.62">
+    <GradientStop Color="#2EFFFFFF" Offset="0"/>
+    <GradientStop Color="#14FFFFFF" Offset="0.45"/>
+    <GradientStop Color="#00000000" Offset="1"/>
+  </RadialGradientBrush>
+  <!-- ③ 上缘 1 DIP 亮线（只在左侧一段，向右迅速消失） -->
+  <LinearGradientBrush x:Key="PCMigTopEdgeBrush" StartPoint="0,0" EndPoint="1,0">
+    <GradientStop Color="#B4FFFFFF" Offset="0"/>
+    <GradientStop Color="#7AFFFFFF" Offset="0.3"/>
+    <GradientStop Color="#2AFFFFFF" Offset="0.7"/>
+    <GradientStop Color="#00FFFFFF" Offset="1"/>
+  </LinearGradientBrush>
+  <!-- ④ 右下角暗部收边（向该方向加深） -->
+  <LinearGradientBrush x:Key="PCMigEdgeShadeBrush" StartPoint="0,0" EndPoint="1,1">
+    <GradientStop Color="#00000000" Offset="0"/>
+    <GradientStop Color="#12263C5C" Offset="0.55"/>
+    <GradientStop Color="#32233A5E" Offset="1"/>
+  </LinearGradientBrush>
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       A38（20260928）：回到旧版**已验证成功的 SurfacePearl 浮雕光照逻辑**
+       （移植自 WPF 主题 src\PCMig.Gui\Theme\Glass.xaml），只把旧版"不透明 Surface"
+       换成当前受 Developer Visual Tuning 控制的**半透明 Semantic Material Surface**。
+
+       ★ 旧版确认成功的做法（Glass.xaml 原文）：
+         「浮雕兼容层：上一版的大面积上下渐变在此被彻底抹平，空间感改由
+           EdgeHighlight / InnerEdge / ContactShadow 承担」
+         即：**不做大面积渐变铺面**；浮雕 = 方向性边缘光 + 内缘明暗 + 接触阴影 三层独立叠加。
+       ★ LightDirection = 315°（光源在左上），所有阴影方向一致。
+
+       ★ 坐标换算（WinUI 与 WPF 不同，已查官方文档确认）：
+         WinUI 在 MappingMode=RelativeToBoundingBox 下，
+         Center/RadiusX/RadiusY 的 (0,0)=左上、(1,1)=右下；而 GradientOrigin 的 (0,0)=**中心**。
+         故 WPF 的 GradientOrigin="0.06,0.08" 等价于 WinUI 的
+         Center="0.06,0.08" + GradientOrigin="0,0"。
+         参考 https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.media.radialgradientbrush
+
+       ★ 解耦要求（用户明确）：材质透明度与光照层必须解耦 ——
+         材质由 Semantic Material Token 提供（受 DVT 控制），光照层独立叠加，
+         **不得覆盖或写死 Background Brush**。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+
+  <!-- ① 方向性边缘光（旧版 EdgeHighlight 原值）：左上最亮 → 顶部次亮 → 右侧转暗 → 右下最暗 -->
+  <RadialGradientBrush x:Key="PCMigEdgeHighlight" MappingMode="RelativeToBoundingBox"
+                       Center="0.06,0.08" GradientOrigin="0,0" RadiusX="1.5" RadiusY="1.5">
+    <GradientStop Color="#33FFFFFF" Offset="0.00"/>
+    <GradientStop Color="#1AFFFFFF" Offset="0.18"/>
+    <GradientStop Color="#0AFFFFFF" Offset="0.32"/>
+    <GradientStop Color="#04FFFFFF" Offset="0.44"/>
+    <GradientStop Color="#0D000000" Offset="0.62"/>
+    <GradientStop Color="#26000000" Offset="1.00"/>
+  </RadialGradientBrush>
+
+  <!-- ② 内部边缘（旧版 InnerEdge 原值）：距轮廓极弱明暗，暗示表面厚度，不是传统 Bevel -->
+  <RadialGradientBrush x:Key="PCMigInnerEdge" MappingMode="RelativeToBoundingBox"
+                       Center="0.06,0.08" GradientOrigin="0,0" RadiusX="1.5" RadiusY="1.5">
+    <GradientStop Color="#14FFFFFF" Offset="0.00"/>
+    <GradientStop Color="#00000000" Offset="0.42"/>
+    <GradientStop Color="#0F000000" Offset="1.00"/>
+  </RadialGradientBrush>
+
+
+  <!-- A42：Step Card 继续用旧键名指向通用定义 ⇒ 零回归。
+       （WinUI 允许以 <StaticResource> 作资源条目别名；本文件上面的
+         ShellMaterialBrush / PrimarySurfaceBrush 等已在用同一手法。） -->
+
+
+  <!-- A42：通用光照层**行为**。刻意**不设 CornerRadius** ——
+       圆角必须由宿主 Surface 自己提供，光照层服从宿主几何。 -->
+  <Style x:Key="PCMigDAELOverlayStyle" TargetType="Border">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="BorderBrush" Value="{StaticResource PCMigDAELBrush}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="IsHitTestVisible" Value="False"/>
+    <Setter Property="HorizontalAlignment" Value="Stretch"/>
+    <Setter Property="VerticalAlignment" Value="Stretch"/>
+  </Style>
+
+  <StaticResource x:Key="PCMigSurfaceLightingOverlayStyle" ResourceKey="PCMigDAELOverlayStyle"/>
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       A42（20260928）Utility Panel 固定材质 —— 高可读性工具面板专用。
+
+       ★ 为什么必须是**独立 Brush 实例**（不能引用 PCMigCardMaterial 再"指望默认 80 档"）：
+         DeveloperVisualTuning.Apply() 是**就地改画刷 Color 的 alpha**（该文件注释写明：
+         StaticResource 引用已解析，换字典对象不会刷新）。所以任何"别名指向 PCMigCardMaterial"
+         的做法都会跟着滑块一起变透明 —— 工具面板会把自己调没。
+
+       ★ A49 定案（用户口径：「直接做出和窗口背景那个一样的材质，强度 50%」）：
+         参数**直接取自窗口背景材质的 50 档真值**，不是我凭空调的：
+           BackdropSpike.TintOpacityFor(50) = 0.02     （design 锚点：50 = 当前设计默认）
+           BackdropSpike.LuminosityFor(50)  = 0.00     （50 档白雾已压掉）
+           TintColor = #F2F6FF   FallbackColor = #F2F2F2（与 DesktopAcrylicController 同值）
+         ⇒ 工具面板与窗口背景**同一套材质语言**，只是它不随 Backdrop 滑块变化（固定 50）。
+         ⚠️ 历史教训：曾用 TintOpacity 0.18~0.60 反复试，得到"白板"或"看不出面板"两个极端；
+            正确做法是**复用窗口背景的真值**，而不是自己造一套。
+         此时面板与背景的亮度差只有 3.5~8.5 —— **这正是"轻微发灰的磨砂玻璃"的来源**；
+         曾一度调到 0.28 / 0.78 变回过白，经用户指认后已回退。
+         ⚠️ 教训：不要用"面板与背景亮度差要大"来判断这个值，那会把磨砂玻璃调成白板。
+       ★ 为什么不是 Opacity=0.8、也不是手写 #CCFFFFFF（用户第 17 节）：
+         DVT 滑块走**分段线性映射**（DeveloperVisualTuning.LayerCurve）：
+             slider ≤ 50 → designAlpha × (slider/50)
+             slider > 50 → designAlpha + (255 − designAlpha) × ((slider−50)/50)
+         取 slider=80（且 Global=50 不干预）逐层解析：
+             Card    设计 0xAF(175) → 175 + 80×0.6  = 223        = 0xDF
+             Control 设计 0xD6(214) → 214 + 41×0.6  = 238.6→239  = 0xEF
+             Inset   设计 0x59(89)  →  89 + 166×0.6 = 188.6→189  = 0xBD
+         即下面三个值就是"80 档映射出来的真实材质"。RGB 全部沿用原 Token 的 #FFFFFF。
+
+       ★ 这些键**不在** DeveloperVisualTuning 的 Layers / Surfaces 表里 ⇒ 永不被滑块改写。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <AcrylicBrush x:Key="PCMigUtilityAcrylic80" TintColor="#F2F6FF" TintOpacity="0.02" TintLuminosityOpacity="0" FallbackColor="#F2F2F2"/>
+  <AcrylicBrush x:Key="PCMigUtilityAcrylicInset80" TintColor="#F2F6FF" TintOpacity="0.10" TintLuminosityOpacity="0" FallbackColor="#E9EFF8"/>
+  <SolidColorBrush x:Key="PCMigUtilityAcrylicControl80" Color="#EFFFFFFF"/>
+  <StaticResource x:Key="PCMigUtilityPanelMaterial80" ResourceKey="PCMigUtilityAcrylic80"/>
+  <StaticResource x:Key="PCMigUtilityPanelInset80" ResourceKey="PCMigUtilityAcrylicInset80"/>
+  <StaticResource x:Key="PCMigUtilityPanelControl80" ResourceKey="PCMigUtilityAcrylicControl80"/>
+  <SolidColorBrush x:Key="PCMigContourSoftBrush" Color="#14FFFFFF"/>
+  <!-- A12：未选中步骤卡。仍是完整卡面（半透明卡底 + 描边 + 低 elevation），只是 tint/阴影弱于选中卡。 -->
+  <Style x:Key="FutureNavigationCard" TargetType="Border"><Setter Property="Background" Value="{StaticResource StepCardIdleBrush}"/><Setter Property="BorderBrush" Value="{StaticResource EdgeHighlightSoftDiagonalBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="15"/><Setter Property="Padding" Value="13,15"/><Setter Property="Shadow" Value="{StaticResource ElevationLow}"/></Style>
 </ResourceDictionary>

@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Developer Visual Tuning 面板 —— 开发者材质实时调节浮层（不是业务功能）。
+  设计约束：不新开窗口；使用现有 Material Token 体系（PCMigCardMaterial/PCMigInsetMaterial/PCMigControlMaterial）；
+  只暴露 0–100 的"材质强度 Slider"，底层实现（Tint/Luminosity/Alpha）不暴露给用户。
+-->
+<UserControl
+    x:Class="PCMig.WinUI.Views.DeveloperTuningPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Width="348" VerticalAlignment="Top" HorizontalAlignment="Right">
+  <!-- A25/A26（20260928）：
+       • 位置不再固定右上角 —— 由 MainWindow.PositionOverlayPanels() 在打开与 Resize 时按触发按钮
+         的实际位置重算 Margin（贴按钮下方 10 DIP）。
+       • 标签全部中文化；每项附「影响范围」说明，解决"Inset / Control / Primary 拖动看不出区别"。 -->
+  <!-- 这里不再声明 EntranceThemeTransition：Shell 的 PreparePanelEntrance 会 Transitions.Clear() 后
+       重新挂一次（带 MotionState 防重入判定，且尊重系统动画偏好）。留着声明式转场只会在运行时被覆盖，
+       属死代码；同时避免"未经判定就自动播放"。§28 的 Fade + 右侧 12–20 DIP Slide 仍由运行时提供。 -->
+
+  <!-- A42（20260928）Utility Panel 固定材质，**彻底退出全局材质调节链路**（用户第 16/18 节）：
+       本面板是"用于调整全局材质的工具"，它自己绝不能被自己正在调的参数影响 ——
+       否则用户把材质调低 → 工具面板自己越来越透明 → 最后工具本身看不清（逻辑错误）。
+       故改用 PCMigUtilityPanelMaterial80（独立 Brush 实例，不在 DeveloperVisualTuning 的
+       Layers/Surfaces 表里 ⇒ 永不被滑块改写）；其 alpha 0xDF 是 DVT「Card 层 = 80 档」
+       按 LayerCurve 解析出来的真实值，**不是** Opacity=0.8、也不是手写 #CCFFFFFF。
+       BorderBrush 同时换用通用边缘光 PCMigSurfaceRimLightBrush（统一光源语言，CornerRadius 18 不变）。 -->
+  <Border Background="{StaticResource PCMigUtilityPanelMaterial80}"
+          BorderBrush="{StaticResource PCMigDAELBrushQuiet}" BorderThickness="1"
+          CornerRadius="18" Padding="16" Translation="0,0,24" MaxHeight="720">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <!-- A43：滚动条为覆盖式 overlay，给可滚动内容预留右侧内边距，避免压字 -->
+      <StackPanel Spacing="12" Margin="0,0,10,0">
+
+      <!-- 头部 -->
+      <Grid ColumnSpacing="8">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <FontIcon Glyph="&#xE9E9;" FontSize="18" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+        <StackPanel Grid.Column="1" Spacing="2">
+          <TextBlock Style="{StaticResource PCMigTextListItemTitle}" Text="开发者材质调节" Foreground="{StaticResource TextPrimaryBrush}"/>
+          <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="50 = 当前设计默认值（不是 50% 透明度）" Foreground="{StaticResource TextMutedBrush}"/>
+        </StackPanel>
+        <Button x:Name="CloseButton" Grid.Column="2" Click="Close_Click" Background="Transparent" BorderThickness="0"
+                Padding="6" VerticalAlignment="Top" ToolTipService.ToolTip="关闭">
+          <FontIcon Glyph="&#xE711;" FontSize="14" Foreground="{StaticResource TextSecondaryBrush}"/>
+        </Button>
+      </Grid>
+
+      <Border Height="1" Background="{StaticResource BorderSoftBrush}"/>
+
+      <!-- 全局极值提示：Global 到 0 / 100 时各层最终值被推到全透明 / 全不透明，局部滑块不再产生变化。
+           此前界面没有任何说明，用户拖局部滑块看不到反应，会误判为"滑块坏了"。 -->
+      <Border x:Name="GlobalOverrideNotice" Visibility="Collapsed"
+              Background="{StaticResource CapsuleSurfaceBrush}" BorderBrush="{StaticResource AccentEdgeBrush}"
+              BorderThickness="1" CornerRadius="10" Padding="10,7">
+        <StackPanel Spacing="3">
+          <TextBlock x:Name="GlobalOverrideTitle" Style="{StaticResource PCMigTextListItemTitle}"
+                     Text="全局强度处于极值，各分层已失去作用" Foreground="{StaticResource TextPrimaryBrush}"/>
+          <TextBlock Style="{StaticResource PCMigTextListItemMeta}"
+                     Text="把「全局材质强度」拖回 50，下面的分层滑块才会重新生效。"
+                     Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"/>
+        </StackPanel>
+      </Border>
+
+      <!-- 七个连续滑块 -->
+      <StackPanel Spacing="9">
+        <StackPanel Spacing="1">
+          <Grid><TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="全局材质强度" Foreground="{StaticResource TextPrimaryBrush}"/><TextBlock x:Name="GlobalValue" Style="{StaticResource PCMigTextListItemMeta}" HorizontalAlignment="Right" Foreground="{StaticResource AccentBrush}"/></Grid>
+          <Slider x:Name="GlobalSlider" Minimum="0" Maximum="100" StepFrequency="1" ValueChanged="Slider_ValueChanged"/>
+          <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="同时缩放下面所有分层；50 表示不干预" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"/>
+        </StackPanel>
+        <StackPanel Spacing="1">
+          <Grid><TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="窗口背景" Foreground="{StaticResource TextPrimaryBrush}"/><TextBlock x:Name="BackdropValue" Style="{StaticResource PCMigTextListItemMeta}" HorizontalAlignment="Right" Foreground="{StaticResource AccentBrush}"/></Grid>
+          <Slider x:Name="BackdropSlider" Minimum="0" Maximum="100" StepFrequency="1" ValueChanged="Slider_ValueChanged"/>
+          <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="窗口最底层的桌面毛玻璃强度" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"/>
+        </StackPanel>
+        <StackPanel Spacing="1">
+          <Grid><TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="外壳与工作区" Foreground="{StaticResource TextPrimaryBrush}"/><TextBlock x:Name="WorkspaceValue" Style="{StaticResource PCMigTextListItemMeta}" HorizontalAlignment="Right" Foreground="{StaticResource AccentBrush}"/></Grid>
+          <Slider x:Name="WorkspaceSlider" Minimum="0" Maximum="100" StepFrequency="1" ValueChanged="Slider_ValueChanged"/>
+          <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="顶部产品栏、底栏与工作区大面的通透度" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"/>
+        </StackPanel>
+        <StackPanel Spacing="1">
+          <Grid><TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="内容卡片" Foreground="{StaticResource TextPrimaryBrush}"/><TextBlock x:Name="CardValue" Style="{StaticResource PCMigTextListItemMeta}" HorizontalAlignment="Right" Foreground="{StaticResource AccentBrush}"/></Grid>
+          <Slider x:Name="CardSlider" Minimum="0" Maximum="100" StepFrequency="1" ValueChanged="Slider_ValueChanged"/>
+          <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="四页里的主要阅读卡与侧栏导航卡" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"/>
+        </StackPanel>
+        <StackPanel Spacing="1">
+          <Grid><TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="内嵌区域" Foreground="{StaticResource TextPrimaryBrush}"/><TextBlock x:Name="InsetValue" Style="{StaticResource PCMigTextListItemMeta}" HorizontalAlignment="Right" Foreground="{StaticResource AccentBrush}"/></Grid>
+          <Slider x:Name="InsetSlider" Minimum="0" Maximum="100" StepFrequency="1" ValueChanged="Slider_ValueChanged"/>
+          <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="卡片内部下沉的区块（如文件清单区）；浅色叠浅色，变化本就较轻" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"/>
+        </StackPanel>
+        <StackPanel Spacing="1">
+          <Grid><TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="输入框与控件面" Foreground="{StaticResource TextPrimaryBrush}"/><TextBlock x:Name="ControlValue" Style="{StaticResource PCMigTextListItemMeta}" HorizontalAlignment="Right" Foreground="{StaticResource AccentBrush}"/></Grid>
+          <Slider x:Name="ControlSlider" Minimum="0" Maximum="100" StepFrequency="1" ValueChanged="Slider_ValueChanged"/>
+          <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="所有输入框的常态/悬停/聚焦/禁用面，以及本面板的工具按钮" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"/>
+        </StackPanel>
+        <StackPanel Spacing="1">
+          <Grid><TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="主操作强调色" Foreground="{StaticResource TextPrimaryBrush}"/><TextBlock x:Name="PrimaryValue" Style="{StaticResource PCMigTextListItemMeta}" HorizontalAlignment="Right" Foreground="{StaticResource AccentBrush}"/></Grid>
+          <Slider x:Name="PrimarySlider" Minimum="0" Maximum="100" StepFrequency="1" ValueChanged="Slider_ValueChanged"/>
+          <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="主按钮与版本徽章的蓝色：向 0 更亮、向 100 更沉" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"/>
+        </StackPanel>
+      </StackPanel>
+
+      <Border Height="1" Background="{StaticResource BorderSoftBrush}"/>
+
+      <!-- 工具动作：2×2 网格。
+           原先是一行 4 个按钮的横向 StackPanel（不换行），在面板内容宽 316 DIP 下需要 ≈374 DIP，
+           溢出 58 DIP ⇒「导出 JSON」被硬裁切（像素实测：面板右缘 x=1390 处蓝底竖直硬切、无圆角，
+           文字墨迹止于 ≈x1360，末段约 30px 只有底色没有字）。改成两行各 2 个按钮即可容纳，
+           无需扩大面板宽度、无需改任何按钮样式。 -->
+      <Grid ColumnSpacing="8" RowSpacing="8">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <Button Grid.Row="0" Grid.Column="0" x:Name="ResetButton" Click="Reset_Click" Background="{StaticResource PCMigUtilityPanelControl80}" BorderBrush="{StaticResource BorderSoftBrush}" BorderThickness="1" CornerRadius="10" Padding="10,6" HorizontalAlignment="Stretch">
+          <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="恢复默认" Foreground="{StaticResource TextPrimaryBrush}"/>
+        </Button>
+        <Button Grid.Row="0" Grid.Column="1" x:Name="CopyButton" Click="Copy_Click" Background="{StaticResource PCMigUtilityPanelControl80}" BorderBrush="{StaticResource BorderSoftBrush}" BorderThickness="1" CornerRadius="10" Padding="10,6" HorizontalAlignment="Stretch">
+          <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="复制参数" Foreground="{StaticResource TextPrimaryBrush}"/>
+        </Button>
+        <Button Grid.Row="1" Grid.Column="0" x:Name="SaveButton" Click="Save_Click" Background="{StaticResource PCMigUtilityPanelControl80}" BorderBrush="{StaticResource BorderSoftBrush}" BorderThickness="1" CornerRadius="10" Padding="10,6" HorizontalAlignment="Stretch">
+          <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="保存" Foreground="{StaticResource TextPrimaryBrush}"/>
+        </Button>
+        <Button Grid.Row="1" Grid.Column="1" x:Name="ExportButton" Click="Export_Click" Background="{StaticResource PCMigUtilityPanelControl80}" BorderBrush="{StaticResource BorderSoftBrush}" BorderThickness="1" CornerRadius="10" Padding="10,6" HorizontalAlignment="Stretch">
+          <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="导出 JSON" Foreground="{StaticResource TextPrimaryBrush}"/>
+        </Button>
+      </Grid>
+
+      <TextBlock x:Name="StatusText" Style="{StaticResource PCMigTextHintStatus}" TextWrapping="Wrap"
+                 Foreground="{StaticResource TextMutedBrush}"
+                 Text="拖动即生效（无需重启）。视觉参数只写 LocalAppData，与业务配置完全隔离。"/>
+      </StackPanel>
+    </ScrollViewer>
+  </Border>
+</UserControl>

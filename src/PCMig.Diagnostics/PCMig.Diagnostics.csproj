@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>PCMig 诊断运行时：有界摄入 + 显式 fan-out（Analyzer/Writer/Viewer 互不拖累）+ 自身健康 + Flight Recorder + 指标 + JSONL 分段存储 + 脱敏策略。只依赖契约层与 BCL。</Description>
+  </PropertyGroup>
+
+  <!--
+    依赖方向（方案 §29）：Core ──→ Abstractions ←── Diagnostics runtime
+    本运行时**不得**引用 PCMig.Core / WinUI / Serilog：它不认识任何业务类型，
+    因此不可能去改业务状态（Observer 边界在编译期就被钉住）。
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\PCMig.Diagnostics.Abstractions\PCMig.Diagnostics.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="PCMig.Diagnostics.Tests" />
+  </ItemGroup>
+
+</Project>

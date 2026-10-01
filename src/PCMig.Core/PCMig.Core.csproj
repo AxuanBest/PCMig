@@ -4,12 +4,19 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>0.4.6</Version>
+    <Version>0.4.9</Version>
     <Description>PCMig 核心引擎：Preflight / Scan / Plan / Transfer / Verify / Report</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="PCMig.Core.Tests" />
+    <!-- D3 起：诊断测试要直接覆盖诊断观察点用到的 internal 纯函数（例如检查名→checkCode 的稳定映射）。 -->
+    <InternalsVisibleTo Include="PCMig.Diagnostics.Tests" />
+  </ItemGroup>
+
+  <!-- 诊断契约层：只依赖它（不认识诊断运行时，也不认识任何 UI 技术栈）。 -->
+  <ItemGroup>
+    <ProjectReference Include="..\PCMig.Diagnostics.Abstractions\PCMig.Diagnostics.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

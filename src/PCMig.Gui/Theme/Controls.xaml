@@ -34,9 +34,6 @@
                                     Effect="{DynamicResource ContactShadow}" SnapsToDevicePixels="True"/>
                             <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}" BorderThickness="1"
                                     BorderBrush="{DynamicResource EdgeHighlight}" IsHitTestVisible="False"/>
-                            <Border x:Name="innerEdge" CornerRadius="{DynamicResource RadiusControl}" Margin="1"
-                                    BorderThickness="1" BorderBrush="{DynamicResource InnerEdge}"
-                                    IsHitTestVisible="False"/>
                             <Border CornerRadius="{DynamicResource RadiusControl}" Padding="{TemplateBinding Padding}">
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                                   RecognizesAccessKey="True"/>
@@ -65,7 +62,6 @@
                                 <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfaceSunken}"/>
                                 <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation0}"/>
                                 <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource DividerColor}"/>
-                                <Setter TargetName="innerEdge" Property="Opacity" Value="0"/>
                                 <Setter Property="Foreground" Value="{DynamicResource TypographyDisabled}"/>
                                 <Setter Property="Cursor" Value="Arrow"/>
                             </Trigger>
@@ -87,13 +83,9 @@
                     <ControlTemplate TargetType="Button">
                         <Grid>
                             <Border x:Name="cast" CornerRadius="{DynamicResource RadiusControl}"
-                                    Background="{TemplateBinding Background}"
-                                    Effect="{DynamicResource ContactShadow}" SnapsToDevicePixels="True"/>
+                                    Background="{TemplateBinding Background}" SnapsToDevicePixels="True"/>
                             <Border x:Name="edge" CornerRadius="{DynamicResource RadiusControl}" BorderThickness="1"
                                     BorderBrush="{DynamicResource EdgeHighlight}" IsHitTestVisible="False"/>
-                            <Border x:Name="innerEdge" CornerRadius="{DynamicResource RadiusControl}" Margin="1"
-                                    BorderThickness="1" BorderBrush="{DynamicResource InnerEdge}"
-                                    IsHitTestVisible="False"/>
                             <Border CornerRadius="{DynamicResource RadiusControl}" Padding="{TemplateBinding Padding}">
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                                   RecognizesAccessKey="True"/>
@@ -102,19 +94,11 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfaceHover}"/>
-                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation1}"/>
                                 <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightStrong}"/>
-                                <Setter Property="RenderTransform">
-                                    <Setter.Value><TranslateTransform Y="-1"/></Setter.Value>
-                                </Setter>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfacePressed}"/>
-                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation0}"/>
                                 <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource EdgeHighlightPressed}"/>
-                                <Setter Property="RenderTransform">
-                                    <Setter.Value><TranslateTransform Y="1"/></Setter.Value>
-                                </Setter>
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
                                 <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource AccentColorBrush}"/>
@@ -122,9 +106,7 @@
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="cast" Property="Background" Value="{DynamicResource SurfaceSunken}"/>
-                                <Setter TargetName="cast" Property="Effect" Value="{DynamicResource Elevation0}"/>
                                 <Setter TargetName="edge" Property="BorderBrush" Value="{DynamicResource DividerColor}"/>
-                                <Setter TargetName="innerEdge" Property="Opacity" Value="0"/>
                                 <Setter Property="Foreground" Value="{DynamicResource TypographyDisabled}"/>
                                 <Setter Property="Cursor" Value="Arrow"/>
                             </Trigger>
@@ -219,11 +201,11 @@
         </Style>
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource SurfaceColor}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource EdgeHighlight}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource EdgeHighlight}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="{StaticResource RadiusCard}"/>
             <Setter Property="Padding" Value="14,12"/>
-            <Setter Property="Effect" Value="{StaticResource GlassCardShadow}"/>
+            <Setter Property="Effect" Value="{DynamicResource GlassCardShadow}"/>
             <Setter Property="SnapsToDevicePixels" Value="True"/>
         </Style>
 

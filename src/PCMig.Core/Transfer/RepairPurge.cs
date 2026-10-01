@@ -1,4 +1,4 @@
-﻿using PCMig.Core.Matrix;
+using PCMig.Core.Matrix;
 using PCMig.Core.Models;
 using PCMig.Core.Util;
 using Serilog;
@@ -23,7 +23,14 @@ namespace PCMig.Core.Transfer;
 /// </summary>
 public static class RepairPurge
 {
-    public static (long Files, long Bytes, long SkippedLarge) PurgeTargetCopies(
+    /// <summary>
+    /// 强制覆盖的删除结果。
+    /// ★ D6.1 §16 ★ 新增 <see cref="Failed"/>：删除失败原先只写 Debug 日志 ⇒
+    /// "修复后仍不一致"变得无法解释。这里**只加计数**，删除决策与业务口径一字未改。
+    /// </summary>
+    public readonly record struct PurgeResult(long Files, long Bytes, long SkippedLarge, long Failed);
+
+    public static PurgeResult PurgeTargetCopies(
         PlannedObject obj, MigrationOptions opt, MigrationMatrix matrix, ILogger log)
     {
         var exclDirs = new HashSet<string>(matrix.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
@@ -33,7 +40,7 @@ public static class RepairPurge
         var thresholdMb = matrix.LargeFileThresholdMB > 0 ? matrix.LargeFileThresholdMB : opt.LargeFileThresholdMB;
         var thresholdBytes = (long)Math.Max(thresholdMb, 1) * 1024 * 1024;
 
-        long files = 0, bytes = 0, skippedLarge = 0;
+        long files = 0, bytes = 0, skippedLarge = 0, failed = 0;
         foreach (var (rel, size) in EnumerateSource(obj, exclDirs, exclFileMatch, skipPlaceholders))
         {
             // 大文件走 /Z 通道：该通道只在计划标记了 UseRestartablePass 时才执行
@@ -50,10 +57,12 @@ public static class RepairPurge
             catch (Exception ex)
             {
                 // 删不掉（被占用等）不致命：该文件仍由后续 robocopy 按大小/时间差异决定是否重拷
+                // ★ 但必须**计数**（否则"删失败"在诊断里完全不可见）。
+                failed++;
                 log.Debug(ex, "强制覆盖：删除目标侧文件失败 {Path}", dst);
             }
         }
-        return (files, bytes, skippedLarge);
+        return new PurgeResult(files, bytes, skippedLarge, failed);
     }
 
     /// <summary>枚举"本次传输会拷贝"的源文件（相对路径 + 字节数），与 robocopy 的排除口径一致。</summary>

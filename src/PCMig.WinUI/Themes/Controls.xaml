@@ -1,0 +1,217 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       V7 Input Material Language（输入框脱离"默认 WinUI 换皮"观感）
+       做法：**不重写 ControlTemplate**，而是覆盖 WinUI 默认 TextBox / PasswordBox 模板
+       消费的那组 ThemeResource 材质键。默认模板的 PART 结构（ContentElement(ScrollViewer)、
+       PlaceholderTextContentPresenter、HeaderContentPresenter、DeleteButton、DescriptionPresenter）
+       与全部交互逻辑保持原样 → 文本选择 / Caret / IME / 复制粘贴 / 键盘输入 / Tab 导航 /
+       Focus / Password 行为 / 无障碍 均不受影响。
+       本字典在 App.xaml 中最后合并 → 对框架默认键的覆盖生效。
+
+       材质语言（四态同一套）：
+         Normal     : 半透明柔和表面 + 顶部略暗的"内嵌"渐变 + 细边缘（上暗下亮的凹入语言）
+         PointerOver: 表面略提亮 + 边缘略明确
+         Focused    : 表面更清透 + 克制 Accent（细描边 + 底部弱 Accent，不是默认 WinUI 焦点粗环）
+         Disabled   : 仍可辨认（保留表面与边缘），只降低对比
+       刻意不做：深灰硬描边 / 默认 WinUI focus ring / HTML input 感 / 过度玻璃 / 强烈内阴影
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <LinearGradientBrush x:Key="TextControlBackground" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#96DFE8F6" Offset="0"/><GradientStop Color="#B0EBF1FB" Offset="0.40"/><GradientStop Color="#C4F3F7FD" Offset="1"/></LinearGradientBrush>
+  <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#D2F6FAFF"/>
+  <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#E0FBFDFF"/>
+  <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="#7AE9EEF6"/>
+  <LinearGradientBrush x:Key="TextControlBorderBrush" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#4A6E88B4" Offset="0"/><GradientStop Color="#26809AB8" Offset="0.5"/><GradientStop Color="#3E9CB2CE" Offset="1"/></LinearGradientBrush>
+  <LinearGradientBrush x:Key="TextControlBorderBrushPointerOver" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#5E6A86B2" Offset="0"/><GradientStop Color="#3A7C96B6" Offset="0.5"/><GradientStop Color="#528EA8C8" Offset="1"/></LinearGradientBrush>
+  <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#9A1677F2"/>
+  <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="#4CA6B6CC"/>
+  <!-- 默认 WinUI 的聚焦态是"2px 底部粗 Accent 环"（被用户点名为要避免的默认焦点环）→ 改为 1px 细描边 + 底部弱 Accent 渐变 -->
+  <Thickness x:Key="TextControlBorderThemeThicknessFocused">1</Thickness>
+  <LinearGradientBrush x:Key="TextControlElevationBorderFocusedBrush" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#001677F2" Offset="0"/><GradientStop Color="#001677F2" Offset="0.55"/><GradientStop Color="#C41677F2" Offset="1"/></LinearGradientBrush>
+  <SolidColorBrush x:Key="TextControlForeground" Color="#10244A"/>
+  <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#10244A"/>
+  <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#10244A"/>
+  <SolidColorBrush x:Key="TextControlForegroundDisabled" Color="#8A93A6BC"/>
+  <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#B85A6E90"/>
+  <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#A64E6286"/>
+  <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="#A64E6286"/>
+  <SolidColorBrush x:Key="TextControlPlaceholderForegroundDisabled" Color="#6E8CA0BA"/>
+  <SolidColorBrush x:Key="TextControlSelectionHighlightColor" Color="#661677F2"/>
+  <!-- 框内清除按钮（DeleteButton）也纳入同一材质语言，避免露出版式默认观感 -->
+  <SolidColorBrush x:Key="TextControlButtonBackground" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TextControlButtonBackgroundPointerOver" Color="#33FFFFFF"/>
+  <SolidColorBrush x:Key="TextControlButtonBackgroundPressed" Color="#4DFFFFFF"/>
+  <SolidColorBrush x:Key="TextControlButtonBorderBrush" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TextControlButtonBorderBrushPointerOver" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TextControlButtonBorderBrushPressed" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TextControlButtonForeground" Color="#7186A4"/>
+  <SolidColorBrush x:Key="TextControlButtonForegroundPointerOver" Color="#465F84"/>
+  <SolidColorBrush x:Key="TextControlButtonForegroundPressed" Color="#465F84"/>
+
+  <Style x:Key="PCMigPrimaryButton" TargetType="Button"><Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="{StaticResource AccentGradientBrush}"/><Setter Property="Padding" Value="20,12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Grid><Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="12" BorderBrush="{StaticResource PCMigDAELBrushControl}" BorderThickness="1" Translation="0,0,2" Shadow="{StaticResource ElevationLow}"><Grid><Grid Padding="{TemplateBinding Padding}"><ContentPresenter x:Name="Label" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Foreground="{TemplateBinding Foreground}"/></Grid><Border x:Name="TopSheen" Height="10" VerticalAlignment="Top" CornerRadius="12,12,0,0" IsHitTestVisible="False" Margin="1,1,1,0"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#1FFFFFFF" Offset="0"/><GradientStop Color="#00FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border></Grid></Border><VisualStateManager.VisualStateGroups><VisualStateGroup x:Name="CommonStates"><VisualState x:Name="Normal"><VisualState.Setters><Setter Target="Label.Foreground" Value="White"/></VisualState.Setters></VisualState><!-- U64（2026-09-28）：Lift / Sink 的 Translation 已改由 Presentation\InteractionFeedback.cs 统一驱动
+                     （Token 化 + 平滑补间 + 接管式起点 + 尊重系统动画开关）。
+                     模板里保留 Root.Translation 的 Setter 会与它叠加成双倍位移，故按用户"统一数值、禁止 magic number"
+                     的要求把它从这里移除；本模板只在 PointerOver/Pressed 改变表面色，位移交给统一层。 -->
+              <VisualState x:Name="PointerOver"><VisualState.Setters><Setter Target="Label.Foreground" Value="White"/><Setter Target="Root.Background" Value="{StaticResource AccentHoverBrush}"/></VisualState.Setters></VisualState><VisualState x:Name="Pressed"><VisualState.Setters><Setter Target="Label.Foreground" Value="White"/><Setter Target="Root.Background" Value="{StaticResource AccentPressedBrush}"/></VisualState.Setters></VisualState><VisualState x:Name="Disabled"><VisualState.Setters><Setter Target="Root.Background" Value="{StaticResource AccentDisabledBrush}"/><Setter Target="Root.BorderBrush" Value="{StaticResource AccentDisabledEdgeBrush}"/><Setter Target="TopSheen.Opacity" Value="0"/><Setter Target="Label.Foreground" Value="{StaticResource AccentDisabledForegroundBrush}"/></VisualState.Setters></VisualState></VisualStateGroup></VisualStateManager.VisualStateGroups></Grid></ControlTemplate></Setter.Value></Setter></Style>
+  <!-- V12：Secondary 原先**没有自己的模板**，四态实际由默认 WinUI 模板的 ThemeResource 决定，
+       与 Primary/Footer 自绘的四态材质语言不一致。这里补齐显式四态（面 + 边 + 禁用前景），
+       取值全部走共用 Token；不设 Foreground Setter，保持与改前一致的继承值。 -->
+  <Style x:Key="PCMigSecondaryButton" TargetType="Button">
+    <Setter Property="Background" Value="{StaticResource InteractiveSurfaceBrush}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource PCMigDAELBrushControl}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="12"/>
+    <Setter Property="Padding" Value="16,9"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="Template"><Setter.Value>
+      <ControlTemplate TargetType="Button">
+        <Grid>
+          <Border x:Name="Root" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}" Padding="{TemplateBinding Padding}">
+            <ContentPresenter x:Name="Presenter" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Foreground="{TemplateBinding Foreground}"/>
+          </Border>
+          <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="CommonStates">
+              <VisualState x:Name="Normal"/>
+              <VisualState x:Name="PointerOver"><VisualState.Setters>
+                <Setter Target="Root.Background" Value="{StaticResource ButtonSurfaceHoverBrush}"/>
+                <Setter Target="Root.BorderBrush" Value="{StaticResource AccentEdgeBrush}"/>
+              </VisualState.Setters></VisualState>
+              <VisualState x:Name="Pressed"><VisualState.Setters>
+                <Setter Target="Root.Background" Value="{StaticResource ButtonSurfacePressedBrush}"/>
+                <Setter Target="Root.BorderBrush" Value="{StaticResource PCMigDAELBrushControl}"/>
+              </VisualState.Setters></VisualState>
+              <VisualState x:Name="Disabled"><VisualState.Setters>
+                <Setter Target="Root.Background" Value="{StaticResource ButtonSurfaceDisabledBrush}"/>
+                <Setter Target="Root.BorderBrush" Value="{StaticResource SecondaryEdgeBrush}"/>
+                <Setter Target="Presenter.Foreground" Value="{StaticResource DisabledActionForegroundBrush}"/>
+              </VisualState.Setters></VisualState>
+            </VisualStateGroup>
+          </VisualStateManager.VisualStateGroups>
+        </Grid>
+      </ControlTemplate>
+    </Setter.Value></Setter>
+  </Style>
+  <!-- V7：不再用 Style Setter 直接"涂"材质（那是"默认 WinUI 换皮"的根因），
+       改为把材质指回上面被覆盖的 ThemeResource；四态变化由模板自身的 VisualState 驱动。 -->
+  <Style x:Key="PCMigTextBox" TargetType="TextBox"><Setter Property="Background" Value="{ThemeResource TextControlBackground}"/><Setter Property="BorderBrush" Value="{ThemeResource TextControlBorderBrush}"/><Setter Property="BorderThickness" Value="{ThemeResource TextControlBorderThemeThickness}"/><Setter Property="Foreground" Value="{ThemeResource TextControlForeground}"/><Setter Property="CornerRadius" Value="{StaticResource PCMigRadiusInput}"/><Setter Property="Padding" Value="14,8"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="MinHeight" Value="46"/><Setter Property="FontSize" Value="14"/></Style>
+  <Style x:Key="PCMigPasswordBox" TargetType="PasswordBox"><Setter Property="Background" Value="{ThemeResource TextControlBackground}"/><Setter Property="BorderBrush" Value="{ThemeResource TextControlBorderBrush}"/><Setter Property="BorderThickness" Value="{ThemeResource TextControlBorderThemeThickness}"/><Setter Property="Foreground" Value="{ThemeResource TextControlForeground}"/><Setter Property="CornerRadius" Value="{StaticResource PCMigRadiusInput}"/><Setter Property="Padding" Value="14,8"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="MinHeight" Value="46"/><Setter Property="FontSize" Value="14"/></Style>
+  <Style x:Key="PCMigToggle" TargetType="ToggleSwitch"><Setter Property="MinWidth" Value="160"/></Style>
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       V10 Bottom Status Action（底栏四动作按钮：Play / Pause / Stop / Resume）
+       参考图实测：按钮＝浅色半透明圆角胶囊（比底栏条**更亮**一档）＋细白描边，
+       文字前**带图标**；Step 1 的默认态为 Disabled，**只降对比，不消失**——
+       材质面、图标、轮廓全部保留（不再叠加 Root.Opacity 二次淡化）。
+       模板只做「表面 + 1px 边 + 内容居中 + 四态切换」，不写任何业务逻辑。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <!-- A43：底栏动作按钮同样接入 DAEL 控件档 -->
+  <Style x:Key="PCMigFooterActionButton" TargetType="Button">
+    <Setter Property="Background" Value="{StaticResource RateChipSurfaceBrush}"/>
+    <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource PCMigDAELBrushControl}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="10"/>
+    <Setter Property="Padding" Value="12,6"/>
+    <Setter Property="FontSize" Value="15"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="Template"><Setter.Value>
+      <ControlTemplate TargetType="Button">
+        <Grid>
+          <Border x:Name="Root" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10" Padding="{TemplateBinding Padding}">
+            <ContentPresenter x:Name="Presenter" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Foreground="{TemplateBinding Foreground}"/>
+          </Border>
+          <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="CommonStates">
+              <VisualState x:Name="Normal"/>
+              <VisualState x:Name="PointerOver"><VisualState.Setters>
+                <Setter Target="Root.Background" Value="{StaticResource ButtonSurfaceHoverBrush}"/>
+                <Setter Target="Presenter.Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+              </VisualState.Setters></VisualState>
+              <VisualState x:Name="Pressed"><VisualState.Setters>
+                <Setter Target="Root.Background" Value="{StaticResource ButtonSurfacePressedBrush}"/>
+                <Setter Target="Presenter.Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+              </VisualState.Setters></VisualState>
+              <VisualState x:Name="Disabled"><VisualState.Setters>
+                <Setter Target="Root.Background" Value="{StaticResource ButtonSurfaceDisabledBrush}"/>
+                <Setter Target="Root.BorderBrush" Value="{StaticResource PCMigDAELBrushControl}"/>
+                <Setter Target="Presenter.Foreground" Value="{StaticResource DisabledActionForegroundBrush}"/>
+              </VisualState.Setters></VisualState>
+            </VisualStateGroup>
+          </VisualStateManager.VisualStateGroups>
+        </Grid>
+      </ControlTemplate>
+    </Setter.Value></Setter>
+  </Style>
+  <!-- V11 产品 Logo：双向迁移箭头（老机 → 新机 / 新机 → 老机 的双向语义），
+       用矢量 Path 精确实现，替代原先把 E72D（Share/导出）当产品标志的占位做法。
+       几何：两条对向箭杆 + 两个实心箭头；viewBox 24x24，引脚随使用处 Width/Height 缩放。 -->
+  <!-- A27（用户人工标注项）：
+       头部「v0.5.0」徽章按钮悬停时文字变白、在浅底上几乎看不见（用户原话：
+       「为什么我的鼠标放上去，这个版本号显示变成白色了？？」）。
+       根因：该按钮是**显式设置 Background 的普通 Button**，用的是 WinUI 默认 Button 模板，
+       PointerOver / Pressed 会叠加默认浅色悬停层并可能改写前景，把白字洗成看不清。
+       修法：给它一个**四态全部显式锁定**的模板 —— 背景只由传入的渐变决定、文字恒为白色，
+       悬停仅做极轻的透明度变化，不做任何颜色替换。徽章保留（它是更新日志入口），
+       只是不再有"看不清的悬停态"。 -->
+  <Style x:Key="PCMigVersionBadgeButton" TargetType="Button">
+    <Setter Property="Foreground" Value="White"/>
+    <Setter Property="Padding" Value="8,3"/>
+    <Setter Property="Template"><Setter.Value>
+      <ControlTemplate TargetType="Button">
+        <Grid>
+          <Border x:Name="Badge" Background="{TemplateBinding Background}" CornerRadius="9"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                              Foreground="{TemplateBinding Foreground}"/>
+          </Border>
+          <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="CommonStates">
+              <VisualState x:Name="Normal"/>
+              <VisualState x:Name="PointerOver"><VisualState.Setters>
+                <Setter Target="Badge.Opacity" Value="0.88"/>
+              </VisualState.Setters></VisualState>
+              <VisualState x:Name="Pressed"><VisualState.Setters>
+                <Setter Target="Badge.Opacity" Value="0.74"/>
+              </VisualState.Setters></VisualState>
+              <VisualState x:Name="Disabled"><VisualState.Setters>
+                <Setter Target="Badge.Opacity" Value="0.45"/>
+              </VisualState.Setters></VisualState>
+            </VisualStateGroup>
+          </VisualStateManager.VisualStateGroups>
+        </Grid>
+      </ControlTemplate>
+    </Setter.Value></Setter>
+  </Style>
+  <!-- 标题栏「更新日志」纯文字按钮：无背景无描边，四态只改前景/极轻底色，杜绝"浅底白字" -->
+  <Style x:Key="PCMigTitleBarGhostButton" TargetType="Button">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+    <Setter Property="Padding" Value="8,3"/>
+    <Setter Property="Template"><Setter.Value>
+      <ControlTemplate TargetType="Button">
+        <Grid>
+          <Border x:Name="Ghost" Background="{TemplateBinding Background}" CornerRadius="7"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter x:Name="GhostContent" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                              Foreground="{TemplateBinding Foreground}"/>
+          </Border>
+          <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="CommonStates">
+              <VisualState x:Name="Normal"/>
+              <VisualState x:Name="PointerOver"><VisualState.Setters>
+                <Setter Target="Ghost.Background" Value="{StaticResource CapsuleSurfaceBrush}"/>
+                <Setter Target="GhostContent.Foreground" Value="{StaticResource AccentBrush}"/>
+              </VisualState.Setters></VisualState>
+              <VisualState x:Name="Pressed"><VisualState.Setters>
+                <Setter Target="Ghost.Background" Value="{StaticResource ButtonSurfacePressedBrush}"/>
+                <Setter Target="GhostContent.Foreground" Value="{StaticResource AccentPressedBrush}"/>
+              </VisualState.Setters></VisualState>
+              <VisualState x:Name="Disabled"><VisualState.Setters>
+                <Setter Target="GhostContent.Foreground" Value="{StaticResource DisabledActionForegroundBrush}"/>
+              </VisualState.Setters></VisualState>
+            </VisualStateGroup>
+          </VisualStateManager.VisualStateGroups>
+        </Grid>
+      </ControlTemplate>
+    </Setter.Value></Setter>
+  </Style>
+  <FontFamily x:Key="ContentControlThemeFontFamily">Microsoft YaHei UI</FontFamily>
+</ResourceDictionary>

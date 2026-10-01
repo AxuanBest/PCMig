@@ -1,5 +1,10 @@
 using System.Collections.Concurrent;
+using PCMig.Core.Diagnostics;
+using PCMig.Core.Matrix;
 using PCMig.Core.Models;
+using PCMig.Diagnostics.Abstractions;
+using PCMig.Diagnostics.Abstractions.Events;
+using PCMig.Diagnostics.Abstractions.Payloads;
 using PCMig.Core.Util;
 using Serilog;
 
@@ -43,6 +48,17 @@ public sealed class SourceScanner
         var skipPlaceholders = string.Equals(matrix.CloudPlaceholderPolicy, "Skip", StringComparison.OrdinalIgnoreCase);
         var observed = new ObservedState { JobId = job.JobId };
         var seq = 0;
+        var scanMode = job.CustomSelections.Count > 0 ? "custom" : "whole";
+        var scanSw = System.Diagnostics.Stopwatch.StartNew();
+
+        // ★ D6.1 §16 观察点 ★ 扫描开始（只记录输入规模，不做任何额外访问）。
+        CoreDiagnostics.PublishCore(
+            FsEvents.ScanStarted,
+            new FsScanPayload(scanMode, 0, 0, 0, 0, 0, 0, 0,
+                matrix.ExcludedDirectoryNames.Count, matrix.ExcludedFileNames.Count,
+                matrix.SecurityBlockedFileNames.Count, 0, "Started"),
+            CoreDiagnostics.ContextFor("SourceScanner", job.JobId),
+            DiagnosticLevel.Information, DiagnosticOutcome.Accepted, "SourceScanner");
 
         // ---- Custom 模式：用户显式勾选的目录/文件清单 ----
         if (job.CustomSelections.Count > 0)
@@ -129,7 +145,7 @@ public sealed class SourceScanner
             if (observed.InaccessiblePaths.Count > 0)
                 _log.Warning("扫描存在不可访问位置 {Count} 处（默认拦截迁移，需修好或显式确认）: {First}",
                     observed.InaccessiblePaths.Count, observed.InaccessiblePaths.First());
-            return observed;
+          PublishScanResult(observed, matrix, job, scanMode, scanSw.ElapsedMilliseconds);          return observed;
         }
 
         // ---- Whole 模式：源根 → 一级目录拆对象 ----
@@ -237,6 +253,44 @@ public sealed class SourceScanner
         if (observed.InaccessiblePaths.Count > 0)
             _log.Warning("扫描存在不可访问位置 {Count} 处（默认拦截迁移，需修好或显式确认）: {First}",
                 observed.InaccessiblePaths.Count, observed.InaccessiblePaths.First());
+        PublishScanResult(observed, matrix, job, scanMode, scanSw.ElapsedMilliseconds);
         return observed;
+    }
+
+    /// <summary>
+    /// D6.1 §16：扫描结果汇总（纯观察）。**只用既有统计**（对象/文件/字节/不可访问位置/不完整对象/
+    /// 策略条数），不额外遍历任何目录，也不改变任何跳过决策。
+    ///
+    /// 完整性口径：有不可访问位置或有不完整对象 ⇒ Partial（"0/0 全 OK"必须能与"其实没扫全"区分）。
+    /// </summary>
+    private static void PublishScanResult(
+        ObservedState observed, MigrationMatrix matrix, JobDefinition job, string mode, long elapsedMs)
+    {
+        var incompleteObjects = observed.Objects.Count(o => o.ScanIncomplete);
+        var completeness = observed.InaccessiblePaths.Count > 0 || incompleteObjects > 0 ? "Partial" : "Complete";
+
+        // ★ D6.1 §16 ★ 有不可访问位置 ⇒ 单独发 FS.DirectoryUnavailable（目录级事实），
+        //   让"为什么这次扫描不完整"在事件流里直接可见（只用既有计数，不额外访问）。
+        if (observed.InaccessiblePaths.Count > 0)
+        {
+            CoreDiagnostics.PublishCore(
+                FsEvents.DirectoryUnavailable,
+                new FsFailPayload("scan", observed.InaccessiblePaths.Count, "inaccessible-locations"),
+                CoreDiagnostics.ContextFor("SourceScanner", job.JobId),
+                DiagnosticLevel.Warning, DiagnosticOutcome.Unknown, "SourceScanner");
+        }
+
+        CoreDiagnostics.PublishCore(
+            completeness == "Complete" ? FsEvents.ScanCompleted : FsEvents.ScanIncomplete,
+            new FsScanPayload(
+                mode, observed.Objects.Count, observed.TotalFiles, observed.TotalBytes,
+                observed.InaccessiblePaths.Count, incompleteObjects,
+                observed.LockRiskFiles, observed.EncryptedFiles,
+                matrix.ExcludedDirectoryNames.Count, matrix.ExcludedFileNames.Count,
+                matrix.SecurityBlockedFileNames.Count, elapsedMs, completeness),
+            CoreDiagnostics.ContextFor("SourceScanner", job.JobId),
+            completeness == "Complete" ? DiagnosticLevel.Information : DiagnosticLevel.Warning,
+            completeness == "Complete" ? DiagnosticOutcome.Succeeded : DiagnosticOutcome.Unknown,
+            "SourceScanner");
     }
 }

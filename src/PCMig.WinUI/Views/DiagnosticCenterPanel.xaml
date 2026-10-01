@@ -1,0 +1,130 @@
+<UserControl
+    x:Class="PCMig.WinUI.Views.DiagnosticCenterPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!--
+    诊断中心 = **工具浮层（Utility Panel）**，与「开发者材质调节 / 更新日志」同属一套 Utility 固定材质与光源：
+      · Base Material = PCMigUtilityPanelMaterial80（与 DVT/Changelog 完全同源，不新增画刷）；
+      · Lighting      = PCMigDAELBrushQuiet（全应用统一光源 DSL-45，不新造光源）；
+      · 几何          = CornerRadius 18 / Padding 16 / BorderThickness 1 / Translation 0,0,24（与既有两个工具面板一致）；
+      · 打开/关闭     = 由 Shell 的 Fluid Zoom（OACT）+ TryPlacePanel（TAOP）统一编排，本文件不自行做进入动画。
+    ★ 本文件只做"显示与交互"，不含任何业务动作：数据全部来自 DiagnosticCenterViewModel（只读投影）。★
+  -->
+  <Border Width="520" MaxHeight="720" HorizontalAlignment="Right" VerticalAlignment="Top"
+          Background="{StaticResource PCMigUtilityPanelMaterial80}" BorderBrush="{StaticResource PCMigDAELBrushQuiet}"
+          BorderThickness="1" CornerRadius="18" Padding="16" Translation="0,0,24"
+          AutomationProperties.AutomationId="Shell.Panel.Diagnostics">
+    <Grid RowSpacing="12">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="*"/>
+        <RowDefinition Height="Auto"/>
+      </Grid.RowDefinitions>
+
+      <!-- ① 标题行（与 Changelog 同款：标题 + 说明 + 关闭） -->
+      <Grid ColumnSpacing="8">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel Spacing="2">
+          <TextBlock Style="{StaticResource PCMigTextListItemTitle}" Text="诊断中心" Foreground="{StaticResource TextPrimaryBrush}"/>
+          <TextBlock x:Name="CaptionText" Style="{StaticResource PCMigTextListItemMeta}" Foreground="{StaticResource TextMutedBrush}"
+                     TextTrimming="CharacterEllipsis"/>
+        </StackPanel>
+        <Button x:Name="CloseButton" Grid.Column="1" Click="Close_Click" Background="Transparent" BorderThickness="0" Padding="6"
+                ToolTipService.ToolTip="关闭诊断中心">
+          <FontIcon Glyph="&#xE711;" FontSize="14" Foreground="{StaticResource TextSecondaryBrush}"/>
+        </Button>
+      </Grid>
+
+      <!-- ② 工具条：刷新 / Deep Trace / 只看警告 / 导出（全部只是"请求"，不改迁移行为） -->
+      <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+        <Button x:Name="RefreshButton" AutomationProperties.AutomationId="Diagnostics.Refresh" Click="Refresh_Click" Padding="10,6" Content="刷新"/>
+        <ToggleButton x:Name="DeepTraceToggle" AutomationProperties.AutomationId="Diagnostics.DeepTrace" Click="DeepTrace_Click" Padding="10,6" Content="Deep Trace"
+                      ToolTipService.ToolTip="开启后采集更详细（含 Verbose）；不影响迁移行为，也不捕获输入内容"/>
+        <ToggleButton x:Name="WarnOnlyToggle" AutomationProperties.AutomationId="Diagnostics.WarnOnly" Click="WarnOnly_Click" Padding="10,6" Content="只看警告及以上"/>
+        <Button x:Name="ExportButton" AutomationProperties.AutomationId="Diagnostics.Export" Click="Export_Click" Padding="10,6" Content="导出诊断包"
+                ToolTipService.ToolTip="导出到本地 ZIP（不会上传）"/>
+      </StackPanel>
+
+      <!-- ③ 主体：概览 / 事件卡 / 因果链 / 指标 / 实时日志（垂直排列，各自限高，整体可滚动） -->
+      <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" VerticalScrollMode="Auto" MaxHeight="560">
+        <StackPanel Spacing="14">
+
+          <!-- 概览 -->
+          <StackPanel Spacing="4">
+            <TextBlock Style="{StaticResource PCMigTextListItemTitle}" Text="概览" Foreground="{StaticResource TextPrimaryBrush}"/>
+            <TextBlock x:Name="HealthText" Style="{StaticResource PCMigTextListItemMeta}" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap"/>
+            <TextBlock x:Name="EvidenceText" Style="{StaticResource PCMigTextListItemMeta}" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"/>
+            <TextBlock x:Name="CountersText" Style="{StaticResource PCMigTextListItemMeta}" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"/>
+            <TextBlock x:Name="ResourceText" Style="{StaticResource PCMigTextListItemMeta}" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"/>
+          </StackPanel>
+
+          <!-- 事件卡 -->
+          <StackPanel Spacing="4">
+            <TextBlock Style="{StaticResource PCMigTextListItemTitle}" Text="事件卡" Foreground="{StaticResource TextPrimaryBrush}"/>
+            <TextBlock x:Name="IncidentSummaryText" Style="{StaticResource PCMigTextListItemMeta}" Foreground="{StaticResource TextMutedBrush}"/>
+            <ListView x:Name="IncidentList" MaxHeight="200" SelectionMode="Single" SelectionChanged="IncidentList_SelectionChanged">
+              <ListView.ItemTemplate>
+                <DataTemplate>
+                  <StackPanel Spacing="1" Padding="0,3">
+                    <TextBlock Style="{StaticResource PCMigTextListItemBody}" Text="{Binding Summary}" TextWrapping="Wrap"/>
+                    <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="{Binding Meta}" TextTrimming="CharacterEllipsis"/>
+                  </StackPanel>
+                </DataTemplate>
+              </ListView.ItemTemplate>
+            </ListView>
+            <TextBlock x:Name="IncidentDetailText" Style="{StaticResource PCMigTextListItemMeta}" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"/>
+          </StackPanel>
+
+          <!-- 因果链 -->
+          <StackPanel Spacing="4">
+            <TextBlock Style="{StaticResource PCMigTextListItemTitle}" Text="因果链" Foreground="{StaticResource TextPrimaryBrush}"/>
+            <ListView x:Name="TimelineList" MaxHeight="200" SelectionMode="None">
+              <ListView.ItemTemplate>
+                <DataTemplate>
+                  <StackPanel Spacing="1" Padding="0,2">
+                    <TextBlock Style="{StaticResource PCMigTextListItemBody}" Text="{Binding EventName}" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="{Binding Detail}" TextTrimming="CharacterEllipsis"/>
+                  </StackPanel>
+                </DataTemplate>
+              </ListView.ItemTemplate>
+            </ListView>
+          </StackPanel>
+
+          <!-- 指标 -->
+          <StackPanel Spacing="4">
+            <TextBlock Style="{StaticResource PCMigTextListItemTitle}" Text="指标与自身健康" Foreground="{StaticResource TextPrimaryBrush}"/>
+            <ListView x:Name="MetricList" MaxHeight="220" SelectionMode="None">
+              <ListView.ItemTemplate>
+                <DataTemplate>
+                  <Grid ColumnSpacing="10" Padding="0,2">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="{Binding Group}" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Grid.Column="1" Style="{StaticResource PCMigTextListItemBody}" Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Grid.Column="2" Style="{StaticResource PCMigTextListItemTitle}" Text="{Binding Value}"/>
+                  </Grid>
+                </DataTemplate>
+              </ListView.ItemTemplate>
+            </ListView>
+          </StackPanel>
+
+          <!-- 实时日志（有界 + 过滤，绝不逐条直推集合） -->
+          <StackPanel Spacing="4">
+            <TextBlock Style="{StaticResource PCMigTextListItemTitle}" Text="实时日志" Foreground="{StaticResource TextPrimaryBrush}"/>
+            <ListView x:Name="LogList" MaxHeight="200" SelectionMode="None">
+              <ListView.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="{Binding Text}" TextTrimming="CharacterEllipsis"/>
+                </DataTemplate>
+              </ListView.ItemTemplate>
+            </ListView>
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- ④ 状态行（动作结果如实回显：导出/模式切换/刷新失败都在这里） -->
+      <TextBlock x:Name="StatusText" Grid.Row="3" Style="{StaticResource PCMigTextListItemMeta}"
+                 Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"/>
+    </Grid>
+  </Border>
+</UserControl>

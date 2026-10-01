@@ -1,0 +1,54 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Color x:Key="AmbientBlueColor">#8CB4FF</Color><Color x:Key="AmbientLavenderColor">#BCA4FF</Color><Color x:Key="AmbientPinkColor">#FFA8CC</Color><Color x:Key="AmbientPeachColor">#FFD094</Color>
+  <!-- V1 Ambient：原 opacity 0.06–0.11 实测几乎不可见（整屏读数呈统一冷蓝灰 #E9EEF7），
+       参考图实测存在可辨认分区（左上蓝青 / 中央与底部薰衣草紫 / 右侧柔粉 / 右下暖桃）。
+       提高强度到肉眼可辨，同时保持 Mica 可透（不得盖掉 Mica）。 -->
+  <x:Double x:Key="AmbientBlueOpacity">0.12</x:Double><x:Double x:Key="AmbientLavenderOpacity">0.24</x:Double><x:Double x:Key="AmbientPinkOpacity">0.22</x:Double><x:Double x:Key="AmbientPeachOpacity">0.09</x:Double>
+  <!-- 底衬：参考图实测主色 #F1F5FD（冷蓝白，占比 46.9%）+ 紫调簇 #DCDEF6/#EDE8FA（R≥G）。
+       原 alpha 仅 5–8% 等于没有底衬；提高到 9–15% 并补一段薰衣草过渡。 -->
+  <LinearGradientBrush x:Key="BaseBackdropBrush" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#2E9AB4FF"/><GradientStop Color="#28947CFF" Offset="0.28"/><GradientStop Color="#2EC894FF" Offset="0.62"/><GradientStop Color="#54FF9CD6" Offset="1"/></LinearGradientBrush>
+  <LinearGradientBrush x:Key="AccentGradientBrush" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#2C9BFF"/><GradientStop Color="#1268E9" Offset="1"/></LinearGradientBrush>
+  <SolidColorBrush x:Key="AccentBrush" Color="#1677F2"/><SolidColorBrush x:Key="AccentHoverBrush" Color="#338CFA"/><SolidColorBrush x:Key="AccentPressedBrush" Color="#0D5FC8"/><SolidColorBrush x:Key="AccentDisabledBrush" Color="#DCE6F6"/><SolidColorBrush x:Key="AccentDisabledEdgeBrush" Color="#8FB0C8E8"/><SolidColorBrush x:Key="AccentDisabledForegroundBrush" Color="#44597D"/>
+  <SolidColorBrush x:Key="TextPrimaryBrush" Color="#10244A"/><SolidColorBrush x:Key="TextSecondaryBrush" Color="#465F84"/><SolidColorBrush x:Key="TextMutedBrush" Color="#7186A4"/><SolidColorBrush x:Key="TextDisabledBrush" Color="#AAB6C8"/>
+  <SolidColorBrush x:Key="SuccessBrush" Color="#16A36E"/><SolidColorBrush x:Key="WarningBrush" Color="#D99518"/><SolidColorBrush x:Key="DangerBrush" Color="#D64758"/>
+  <SolidColorBrush x:Key="BorderSoftBrush" Color="#30FFFFFF"/><SolidColorBrush x:Key="BorderNormalBrush" Color="#406783AC"/><SolidColorBrush x:Key="EdgeHighlightBrush" Color="#A8FFFFFF"/><SolidColorBrush x:Key="SecondaryEdgeBrush" Color="#4DFFFFFF"/><SolidColorBrush x:Key="AccentEdgeBrush" Color="#6689C8FF"/><SolidColorBrush x:Key="InsetBorderBrush" Color="#5A55789F"/>
+  <!-- V4 Edge Highlight：对角高光描边（左上白 → 右下淡出），形成 45° 光源方向感，
+       取代"整圈同强度描边"（后者既无方向感、又容易被看成双描边）。 -->
+  <LinearGradientBrush x:Key="EdgeHighlightDiagonalBrush" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFFFF" Offset="0"/><GradientStop Color="#8AFFFFFF" Offset="0.34"/><GradientStop Color="#3EFFFFFF" Offset="0.72"/><GradientStop Color="#2AFFFFFF" Offset="1"/></LinearGradientBrush>
+  <LinearGradientBrush x:Key="EdgeHighlightSoftDiagonalBrush" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#E0FFFFFF" Offset="0"/><GradientStop Color="#6EFFFFFF" Offset="0.34"/><GradientStop Color="#32FFFFFF" Offset="0.72"/><GradientStop Color="#22FFFFFF" Offset="1"/></LinearGradientBrush>
+  <!-- V4b Edge Highlight（第二轮）：把"高光边"做成**上缘 1–2 DIP 的清晰亮线**，而不是整圈等强度渐隐。参考图实测：卡片顶边存在 +16 亮度的白色尖峰（行剖面 236 → 196（缝）→ 245（亮线）→ 236）；上一轮的对角渐变从上到下缓慢衰减，实测**没有尖峰**。 -->
+  <LinearGradientBrush x:Key="EdgeHighlightCrispBrush" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FFFFFFFF" Offset="0"/><GradientStop Color="#C8FFFFFF" Offset="0.045"/><GradientStop Color="#68FFFFFF" Offset="0.11"/><GradientStop Color="#40FFFFFF" Offset="1"/></LinearGradientBrush>
+  <SolidColorBrush x:Key="FutureNavigationSurfaceBrush" Color="#20FFFFFF"/><SolidColorBrush x:Key="FutureStepNumberBrush" Color="#D7E2F1"/><SolidColorBrush x:Key="CapsuleSurfaceBrush" Color="#48FFFFFF"/><SolidColorBrush x:Key="AccentSubtleBrush" Color="#2E1677F2"/><SolidColorBrush x:Key="ListItemSurfaceBrush" Color="#42FFFFFF"/>
+  <x:Double x:Key="FutureNavigationOpacity">0.84</x:Double><x:Double x:Key="FutureNavigationSecondaryOpacity">0.76</x:Double>
+  <!-- Step 1 视觉对齐（A10/A11/A12/A14）：四步全部为材质卡片；未选中徽章改为饱和灰蓝底 + 白字；底栏新增进度轨道与速率占位 -->
+  <SolidColorBrush x:Key="StepBadgeIdleBrush" Color="#8FA6C6"/>
+  <SolidColorBrush x:Key="StepIconBrush" Color="#7C93B3"/>
+  <SolidColorBrush x:Key="StepCardIdleBrush" Color="#5CFFFFFF"/>
+  <SolidColorBrush x:Key="StepCardIdleEdgeBrush" Color="#5EFFFFFF"/>
+  <SolidColorBrush x:Key="StepCardSelectedTintBrush" Color="#6BDFEEFF"/>
+  <SolidColorBrush x:Key="ProgressTrackBrush" Color="#8CB8CEF8"/>
+  <SolidColorBrush x:Key="RateChipSurfaceBrush" Color="#26FFFFFF"/>
+  <SolidColorBrush x:Key="DisabledActionForegroundBrush" Color="#93A3B8"/>
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       A28（用户人工标注项）：侧栏四个步骤卡的"一致性光源"浮雕。
+       用户原话：「这四个大板块按钮 step1,2,3,4。没有做出和全局一样的浮雕效果，
+       就是高光和阴影 Liquid Glass-inspired Edge Lighting 效果里的一致性光源」。
+       ★ 已核实的物理原因：侧栏卡片自身底色实测 RGB(251,253,255)、亮度 252.9（近纯白），
+         而原"顶边亮线"用的是**白色**渐变画刷 —— 白叠白，无论多亮都不可见。
+         所以"已加高光却看不出浮雕"，不是没画，而是**没有对比度可用**。
+       ★ 修法：浮雕 = 亮边 + 暗边 的成对对比。新增两个高对比边缘画刷：
+         · 顶部亮线用近实心白（对近白底仍能形成可见亮度尖峰）；
+         · 底/右缘用半透明深蓝（浅底上形成明确的下沿收边）。
+         方向与全局一致：光源在左上 → 上缘亮、下缘暗。纯视觉，不动绑定与交互。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <LinearGradientBrush x:Key="NavCardEmbossTopBrush" StartPoint="0,0" EndPoint="1,0">
+    <GradientStop Color="#FFFFFFFF" Offset="0"/>
+    <GradientStop Color="#F2FFFFFF" Offset="0.55"/>
+    <GradientStop Color="#D8FFFFFF" Offset="1"/>
+  </LinearGradientBrush>
+  <LinearGradientBrush x:Key="NavCardEmbossEdgeBrush" StartPoint="0,0" EndPoint="1,1">
+    <GradientStop Color="#8CFFFFFF" Offset="0"/>
+    <GradientStop Color="#4D46618C" Offset="0.45"/>
+    <GradientStop Color="#B33A5478" Offset="1"/>
+  </LinearGradientBrush>
+</ResourceDictionary>

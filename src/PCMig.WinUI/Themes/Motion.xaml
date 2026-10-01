@@ -1,0 +1,53 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- WinUI Final Polish Motion Tokens. 仅供上层 Surface/Page/Panel 使用，绝不动画 Window Root 或 Backdrop。 -->
+  <Duration x:Key="PCMigMotionDurationFast">0:0:0.14</Duration>
+  <Duration x:Key="PCMigMotionDurationNormal">0:0:0.20</Duration>
+  <Duration x:Key="PCMigMotionDurationSlow">0:0:0.26</Duration>
+  <!-- §27 导航 Selected 过渡：比 Fast 更短，克制到"察觉不到过程、但看不到硬切"。 -->
+  <Duration x:Key="PCMigMotionDurationSelection">0:0:0.16</Duration>
+  <!-- WinUI ThemeTransition 跟随系统动画偏好；后续 Composition 动画统一从以下语义键取缓动。 -->
+  <x:String x:Key="PCMigMotionEaseStandard">standard</x:String>
+  <x:String x:Key="PCMigMotionEaseExit">exit</x:String>
+  <x:Double x:Key="PCMigMotionPageEnterDistance">10</x:Double>
+  <x:Double x:Key="PCMigMotionPanelEnterDistance">16</x:Double>
+  <x:Double x:Key="PCMigMotionDialogScaleStart">0.98</x:Double>
+  <!-- §26 四页 Vertical Cross-Slide（Composition 路线）：旧页上移淡出、新页自下方进入淡入。
+       跨级导航（1→4）只播一次 Forward，不分三段。 -->
+  <Duration x:Key="PCMigMotionPagePushDuration">0:0:0.42</Duration>
+  <!-- 兼容保留：旧的"小位移 Cross-Slide"距离已废弃（U57 起改为整页视口高度的 Push）。 -->
+  <x:Double x:Key="PCMigMotionPageSlideDistance">26</x:Double>
+  <!-- §Utility Panel：Origin-aware Reveal（Panel 从**真实触发入口**下方展开，非中央凭空出现）。
+       Developer Visual Tuning 与更新日志共用同一 Motion Family —— 参数只在这里定义一处。 -->
+  <Duration x:Key="PCMigMotionUtilityRevealDuration">0:0:0.26</Duration>
+  <Duration x:Key="PCMigMotionUtilityDismissDuration">0:0:0.19</Duration>
+  <x:Double x:Key="PCMigMotionUtilityRevealOffset">7</x:Double>
+  <x:Double x:Key="PCMigMotionUtilityRevealScale">0.945</x:Double>
+  <x:Double x:Key="PCMigMotionUtilityDismissScale">0.985</x:Double>
+  <x:Double x:Key="PCMigMotionUtilityDismissOffset">5</x:Double>
+  <!-- 两个 Utility Panel 与各自触发入口之间的**统一**间距（PanelTop − AnchorBottom）。
+       不要再分别手调两个面板的 Margin。 -->
+  <x:Double x:Key="PCMigUtilityPanelAnchorGap">5</x:Double>
+  <!-- ★ U62 Fluid Zoom Transition（Matched-Geometry）：**被点击的那个入口本身**连续 morph 成完整面板。
+       主视觉是几何形变（位置 / 尺寸 / 形状 / 表面 / 边缘光连续变化），不是"淡进来" —— 上一版 Origin
+       Reveal（Fade + 0.945 Scale）已被用户人工否决为"本质还是淡入弹窗"，其 Token 保留但只作 fallback。
+       时长口径（用户第 18 节）：总时长从 360 ms 起实验；关闭方向略短（"收回入口"要更干脆）。
+       0 → 45% 表面浮现 · 30–72% 边缘光浮现 · 55% 起真实 Panel 接管 · 结束前 Shell 让位。 -->
+  <Duration x:Key="PCMigFluidZoomOpenDuration">0:0:0.36</Duration>
+  <Duration x:Key="PCMigFluidZoomCloseDuration">0:0:0.30</Duration>
+  <!-- ★ U64 Hover Lift / Pressed Sink（恢复历史交互反馈，2026-09-28）
+       历史 v0.4.5 已定义过"可交互表面"的 Hover 上浮 / Pressed 下沉；v0.5.0 大改中丢失。
+       本轮**只恢复交互反馈**，其余 UI 全部冻结。数值全部集中在这里，调用点不得再写死。
+         · 主反馈只能是 Translation / Elevation（禁止用 Scale 放大 —— 会让文字发虚、边缘变形）；
+         · Card（侧栏四步导航）比 Button 略大；时长：Enter 130 ms / Exit 150 ms / Pressed 100 ms；
+           "鼠标一放上去马上有生命感，但不是瞬移"。
+       单位 = Canonical DIP，与 UniformScaleHost 同一坐标系 ⇒ **不要再乘 ApplicationUIScale**（否则双倍位移）。 -->
+  <Duration x:Key="PCMigMotionHoverEnterDuration">0:0:0.13</Duration>
+  <Duration x:Key="PCMigMotionHoverExitDuration">0:0:0.15</Duration>
+  <Duration x:Key="PCMigMotionPressedDuration">0:0:0.10</Duration>
+  <x:Double x:Key="PCMigMotionHoverLiftCard">2</x:Double>
+  <x:Double x:Key="PCMigMotionHoverLiftButton">1.3</x:Double>
+  <x:Double x:Key="PCMigMotionPressedSinkCard">0.5</x:Double>
+  <x:Double x:Key="PCMigMotionPressedSinkButton">0.6</x:Double>
+  <!-- §31 迁移中的 Progress Sweep（只在已完成 Fill 区内扫过） -->
+  <Duration x:Key="PCMigMotionProgressSweepDuration">0:0:1.60</Duration>
+</ResourceDictionary>

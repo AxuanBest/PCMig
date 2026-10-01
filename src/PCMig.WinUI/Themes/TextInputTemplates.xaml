@@ -1,0 +1,485 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       A22 输入框文字垂直居中（用户人工标注项，20260928）
+
+       问题（用户连续两轮标注）：IP / 用户名 / 密码 / 共享搜索 / 目录搜索 / 目标路径 /
+       报告搜索 —— 所有输入框的**占位文字与输入文字都偏上**，不在框体视觉中线上。
+
+       已核实的根因（两层，缺一不可）：
+         1) Themes\Controls.xaml 的 PCMigTextBox / PCMigPasswordBox 早就设了
+            VerticalContentAlignment="Center"，但**框架模板根本不消费这个属性**。
+            实测当前依赖 microsoft.windowsappsdk.winui\2.3.9 的 generic.xaml：
+              • TextBox   模板  ContentElement(ScrollViewer) 与 PlaceholderTextContentPresenter
+                          均无 VerticalContentAlignment 模板绑定（generic.xaml:23985–23986）
+              • PasswordBox 模板 同样没有（generic.xaml:23787–23788）
+            微软官方文档也明确：该属性**只有在控件模板把它用作内容的 VerticalAlignment 来源时**
+            才影响布局 —— 在别的控件上设置它没有任何效果。
+            https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.controls.control.verticalcontentalignment
+            所以"再加一次 Center"是无效修法（上一轮就是这么做的，问题依旧）。
+         2) 框架默认 Padding 上下不等（TextControlThemePadding = 10,5,6,6），
+            内容行从填充区**顶部**开始排版，46 DIP 高的框里文字因此整体上移约 5 DIP。
+
+       修法（只加两个对齐属性，不重写交互逻辑）：
+         • 复制框架**当前实际版本**的完整模板，保留全部 PART_ 名称与全部 VisualState
+           （ContentElement / PlaceholderTextContentPresenter / BorderElement / HeaderContentPresenter /
+             DeleteButton(TextBox) / RevealButton(PasswordBox) / DescriptionPresenter，
+             以及 CommonStates / ButtonStates 等所有状态与 ThemeAnimation），
+           只给 ContentElement 与 PlaceholderTextContentPresenter 增加 VerticalAlignment="Center"。
+         • 用 Style.BasedOn 继承框架 DefaultTextBoxStyle / DefaultPasswordBoxStyle，
+           再以 TargetType 隐式样式**覆盖**（框架自己的隐式样式也是 BasedOn Default*Style，
+           XamlControlsResources 在 MergedDictionaries 中位于本文件之前，故本文件声明者胜出）。
+           这样 Controls.xaml 里既有的 PCMigTextBox / PCMigPasswordBox（显式 x:Key、
+           继承隐式样式）会自动获得本模板，四页所有输入框无需逐个改。
+
+       为什么必须保留完整模板：TextBox/PasswordBox 的清除按钮、密码明文切换、焦点、
+       选择、输入法候选窗、触摸滚动都依赖这些 PART_ 与 VisualState；只写一个"精简居中模板"
+       会静默破坏这些交互（死律 7「看不见的东西不改」）。
+
+       几何验证（Wide 档，无 Header）：
+         框高 46（Controls.xaml MinHeight），Padding 14,8 → 内容行可用高 46−16 = 30；
+         行高约 19（FontSize 14）→ 居中后上下各约 5.5，文字落回框体视觉中线。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+
+  <ControlTemplate x:Key="PCMigCenteredTextBoxTemplate" TargetType="TextBox">
+    <Grid>
+      <Grid.Resources>
+        <Style x:Key="PCMigTextDeleteButtonStyle" TargetType="Button">
+          <Setter Property="Template">
+            <Setter.Value>
+              <ControlTemplate TargetType="Button">
+                <Grid x:Name="ButtonLayoutGrid" Background="{ThemeResource TextControlButtonBackground}" BorderBrush="{ThemeResource TextControlButtonBorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}">
+                  <VisualStateManager.VisualStateGroups>
+                    <VisualStateGroup x:Name="CommonStates">
+                      <VisualState x:Name="Normal" />
+                      <VisualState x:Name="PointerOver">
+                        <Storyboard>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="Background">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonBackgroundPointerOver}" />
+                          </ObjectAnimationUsingKeyFrames>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="BorderBrush">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonBorderBrushPointerOver}" />
+                          </ObjectAnimationUsingKeyFrames>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonForegroundPointerOver}" />
+                          </ObjectAnimationUsingKeyFrames>
+                        </Storyboard>
+                      </VisualState>
+                      <VisualState x:Name="Pressed">
+                        <Storyboard>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="Background">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonBackgroundPressed}" />
+                          </ObjectAnimationUsingKeyFrames>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="BorderBrush">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonBorderBrushPressed}" />
+                          </ObjectAnimationUsingKeyFrames>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonForegroundPressed}" />
+                          </ObjectAnimationUsingKeyFrames>
+                        </Storyboard>
+                      </VisualState>
+                      <VisualState x:Name="Disabled">
+                        <Storyboard>
+                          <DoubleAnimation Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="Opacity" To="0" Duration="0" />
+                        </Storyboard>
+                      </VisualState>
+                    </VisualStateGroup>
+                  </VisualStateManager.VisualStateGroups>
+                  <ContentPresenter x:Name="ContentPresenter" AutomationProperties.AccessibilityView="Raw" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" ContentTransitions="{TemplateBinding ContentTransitions}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" Margin="{TemplateBinding Padding}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                </Grid>
+              </ControlTemplate>
+            </Setter.Value>
+          </Setter>
+        </Style>
+      </Grid.Resources>
+
+      <VisualStateManager.VisualStateGroups>
+        <VisualStateGroup x:Name="CommonStates">
+          <VisualState x:Name="Normal" />
+          <VisualState x:Name="Disabled">
+            <Storyboard>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="HeaderContentPresenter" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlHeaderForegroundDisabled}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="Background">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBackgroundDisabled}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="BorderBrush">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBorderBrushDisabled}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentElement" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlForegroundDisabled}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="PlaceholderTextContentPresenter" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlPlaceholderForegroundDisabled}" />
+              </ObjectAnimationUsingKeyFrames>
+            </Storyboard>
+          </VisualState>
+          <VisualState x:Name="PointerOver">
+            <Storyboard>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="BorderBrush">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBorderBrushPointerOver}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="Background">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBackgroundPointerOver}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="PlaceholderTextContentPresenter" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlPlaceholderForegroundPointerOver}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentElement" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlForegroundPointerOver}" />
+              </ObjectAnimationUsingKeyFrames>
+            </Storyboard>
+          </VisualState>
+          <VisualState x:Name="Focused">
+            <Storyboard>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="PlaceholderTextContentPresenter" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlPlaceholderForegroundFocused}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="Background">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBackgroundFocused}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="BorderBrush">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBorderBrushFocused}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentElement" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlForegroundFocused}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentElement" Storyboard.TargetProperty="RequestedTheme">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="Light" />
+              </ObjectAnimationUsingKeyFrames>
+            </Storyboard>
+          </VisualState>
+        </VisualStateGroup>
+        <VisualStateGroup x:Name="ButtonStates">
+          <VisualState x:Name="ButtonVisible">
+            <Storyboard>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="DeleteButton" Storyboard.TargetProperty="Visibility">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="Visible" />
+              </ObjectAnimationUsingKeyFrames>
+            </Storyboard>
+          </VisualState>
+          <VisualState x:Name="ButtonCollapsed" />
+        </VisualStateGroup>
+      </VisualStateManager.VisualStateGroups>
+
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <ContentPresenter x:Name="HeaderContentPresenter" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
+                        Content="{TemplateBinding Header}" ContentTemplate="{TemplateBinding HeaderTemplate}"
+                        FontWeight="Normal" Foreground="{ThemeResource TextControlHeaderForeground}"
+                        Margin="{ThemeResource TextBoxTopHeaderMargin}" TextWrapping="Wrap"
+                        VerticalAlignment="Top" Visibility="Collapsed" x:DeferLoadStrategy="Lazy" />
+
+      <Border x:Name="BorderElement" Grid.Row="1" Grid.Column="0" Grid.RowSpan="1" Grid.ColumnSpan="2"
+              Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}"
+              Control.IsTemplateFocusTarget="True" MinWidth="{TemplateBinding MinWidth}"
+              MinHeight="{TemplateBinding MinHeight}" />
+
+      <!-- A22 正式修法（20260928，基于实测标定）：
+           用户连续三轮标注「输入框内文字偏上、未垂直居中」，并用"┌"形划线标出
+           「文字下方留白明显大于上方」。实测（同框同参数对照）：
+             基线（改动前）        墨迹 y=282..292，中心 287，框中心 293.5 → 偏移 -6.5 DIP
+             注入 +6 DIP Padding  墨迹 y=283..294，中心 288.5              → 偏移 -5.0 DIP
+           → 模板确实生效（有响应），但 ScrollViewer 的 Padding 杠杆效率约 1/4，
+             因此必须**按实测比例**反推补偿，而不是凭理论拍一个值。
+           补偿：把上内边距设为 24、下内边距设为 0（净 +16 DIP 上推量），
+           预计下移 ≈ 4 DIP，使墨迹中心落到框中心附近。
+           下一轮用同一"框内墨迹中心 vs 框中心"方法复测并微调。 -->
+      <ScrollViewer x:Name="ContentElement" Grid.Row="1" Grid.Column="0"
+                    Padding="{TemplateBinding Padding}"
+                    Margin="0"
+                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                    HorizontalScrollMode="{TemplateBinding ScrollViewer.HorizontalScrollMode}"
+                    HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                    VerticalScrollMode="{TemplateBinding ScrollViewer.VerticalScrollMode}"
+                    VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}"
+                    IsHorizontalRailEnabled="{TemplateBinding ScrollViewer.IsHorizontalRailEnabled}"
+                    IsVerticalRailEnabled="{TemplateBinding ScrollViewer.IsVerticalRailEnabled}"
+                    IsDeferredScrollingEnabled="{TemplateBinding ScrollViewer.IsDeferredScrollingEnabled}"
+                    Foreground="{TemplateBinding Foreground}" IsTabStop="False"
+                    AutomationProperties.AccessibilityView="Raw" ZoomMode="Disabled" />
+
+      <!-- A22：唯一改动 ② —— 占位文字同样显式垂直居中，与真实输入文字共用同一条中线。 -->
+      <TextBlock x:Name="PlaceholderTextContentPresenter" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                 VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                 Foreground="{Binding PlaceholderForeground, RelativeSource={RelativeSource TemplatedParent}, TargetNullValue={ThemeResource TextControlPlaceholderForeground}}"
+                 Margin="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}"
+                 Text="{TemplateBinding PlaceholderText}" TextAlignment="{TemplateBinding TextAlignment}"
+                 TextWrapping="{TemplateBinding TextWrapping}" IsHitTestVisible="False" />
+
+      <Button x:Name="DeleteButton" Grid.Row="1" Grid.Column="1" Style="{StaticResource PCMigTextDeleteButtonStyle}"
+              BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}"
+              Padding="{ThemeResource HelperButtonThemePadding}" IsTabStop="False" Visibility="Collapsed"
+              AutomationProperties.AccessibilityView="Raw" FontSize="{TemplateBinding FontSize}" Width="30"
+              VerticalAlignment="Stretch" />
+
+      <ContentPresenter x:Name="DescriptionPresenter" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                        Content="{TemplateBinding Description}"
+                        Foreground="{ThemeResource SystemControlDescriptionTextForegroundBrush}"
+                        AutomationProperties.AccessibilityView="Raw" x:Load="False" />
+    </Grid>
+  </ControlTemplate>
+
+  <ControlTemplate x:Key="PCMigCenteredPasswordBoxTemplate" TargetType="PasswordBox">
+    <Grid>
+      <Grid.Resources>
+        <Style x:Key="PCMigTextRevealButtonStyle" TargetType="ToggleButton">
+          <Setter Property="Template">
+            <Setter.Value>
+              <ControlTemplate TargetType="ToggleButton">
+                <Grid x:Name="ButtonLayoutGrid" Background="{ThemeResource TextControlButtonBackground}" BorderBrush="{ThemeResource TextControlButtonBorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}">
+                  <VisualStateManager.VisualStateGroups>
+                    <VisualStateGroup x:Name="CommonStates">
+                      <VisualState x:Name="Normal" />
+                      <VisualState x:Name="PointerOver">
+                        <Storyboard>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="Background">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonBackgroundPointerOver}" />
+                          </ObjectAnimationUsingKeyFrames>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="BorderBrush">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonBorderBrushPointerOver}" />
+                          </ObjectAnimationUsingKeyFrames>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonForegroundPointerOver}" />
+                          </ObjectAnimationUsingKeyFrames>
+                        </Storyboard>
+                      </VisualState>
+                      <VisualState x:Name="Pressed">
+                        <Storyboard>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="Background">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonBackgroundPressed}" />
+                          </ObjectAnimationUsingKeyFrames>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="BorderBrush">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonBorderBrushPressed}" />
+                          </ObjectAnimationUsingKeyFrames>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonForegroundPressed}" />
+                          </ObjectAnimationUsingKeyFrames>
+                        </Storyboard>
+                      </VisualState>
+                      <VisualState x:Name="Disabled">
+                        <Storyboard>
+                          <DoubleAnimation Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="Opacity" To="0" Duration="0" />
+                        </Storyboard>
+                      </VisualState>
+                      <VisualState x:Name="Checked">
+                        <Storyboard>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="Background">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonBackgroundPressed}" />
+                          </ObjectAnimationUsingKeyFrames>
+                        </Storyboard>
+                      </VisualState>
+                      <VisualState x:Name="CheckedPointerOver">
+                        <Storyboard>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="Background">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonBackgroundPointerOver}" />
+                          </ObjectAnimationUsingKeyFrames>
+                        </Storyboard>
+                      </VisualState>
+                      <VisualState x:Name="CheckedPressed">
+                        <Storyboard>
+                          <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="Background">
+                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlButtonBackgroundPressed}" />
+                          </ObjectAnimationUsingKeyFrames>
+                        </Storyboard>
+                      </VisualState>
+                      <VisualState x:Name="CheckedDisabled">
+                        <Storyboard>
+                          <DoubleAnimation Storyboard.TargetName="ButtonLayoutGrid" Storyboard.TargetProperty="Opacity" To="0" Duration="0" />
+                        </Storyboard>
+                      </VisualState>
+                      <VisualState x:Name="Indeterminate" />
+                      <VisualState x:Name="IndeterminatePointerOver" />
+                      <VisualState x:Name="IndeterminatePressed" />
+                      <VisualState x:Name="IndeterminateDisabled" />
+                    </VisualStateGroup>
+                  </VisualStateManager.VisualStateGroups>
+                  <ContentPresenter x:Name="ContentPresenter" AutomationProperties.AccessibilityView="Raw" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" ContentTransitions="{TemplateBinding ContentTransitions}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" Margin="{TemplateBinding Padding}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                </Grid>
+              </ControlTemplate>
+            </Setter.Value>
+          </Setter>
+        </Style>
+      </Grid.Resources>
+
+      <VisualStateManager.VisualStateGroups>
+        <VisualStateGroup x:Name="CommonStates">
+          <VisualState x:Name="Normal" />
+          <VisualState x:Name="Disabled">
+            <Storyboard>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="HeaderContentPresenter" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlHeaderForegroundDisabled}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="Background">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBackgroundDisabled}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="BorderBrush">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBorderBrushDisabled}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentElement" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlForegroundDisabled}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="PlaceholderTextContentPresenter" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlPlaceholderForegroundDisabled}" />
+              </ObjectAnimationUsingKeyFrames>
+            </Storyboard>
+          </VisualState>
+          <VisualState x:Name="PointerOver">
+            <Storyboard>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="BorderBrush">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBorderBrushPointerOver}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="Background">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBackgroundPointerOver}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="PlaceholderTextContentPresenter" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlPlaceholderForegroundPointerOver}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentElement" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlForegroundPointerOver}" />
+              </ObjectAnimationUsingKeyFrames>
+            </Storyboard>
+          </VisualState>
+          <VisualState x:Name="Focused">
+            <Storyboard>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="PlaceholderTextContentPresenter" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlPlaceholderForegroundFocused}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="Background">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBackgroundFocused}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="BorderBrush">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBorderBrushFocused}" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentElement" Storyboard.TargetProperty="Foreground">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlForegroundFocused}" />
+              </ObjectAnimationUsingKeyFrames>
+            </Storyboard>
+          </VisualState>
+        </VisualStateGroup>
+        <VisualStateGroup x:Name="RevealStates">
+          <VisualState x:Name="Hidden">
+            <Storyboard>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentElement" Storyboard.TargetProperty="Visibility">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="Visible" />
+              </ObjectAnimationUsingKeyFrames>
+            </Storyboard>
+          </VisualState>
+          <VisualState x:Name="Visible">
+            <Storyboard>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentElement" Storyboard.TargetProperty="Visibility">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="Visible" />
+              </ObjectAnimationUsingKeyFrames>
+              <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RevealButton" Storyboard.TargetProperty="Content">
+                <DiscreteObjectKeyFrame KeyTime="0" Value="&#xED1A;" />
+              </ObjectAnimationUsingKeyFrames>
+            </Storyboard>
+          </VisualState>
+        </VisualStateGroup>
+      </VisualStateManager.VisualStateGroups>
+
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <ContentPresenter x:Name="HeaderContentPresenter" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
+                        Content="{TemplateBinding Header}" ContentTemplate="{TemplateBinding HeaderTemplate}"
+                        FontWeight="Normal" Foreground="{ThemeResource TextControlHeaderForeground}"
+                        Margin="{ThemeResource PasswordBoxTopHeaderMargin}" TextWrapping="Wrap"
+                        VerticalAlignment="Top" Visibility="Collapsed" x:DeferLoadStrategy="Lazy" />
+
+      <Border x:Name="BorderElement" Grid.Row="1" Grid.Column="0" Grid.RowSpan="1" Grid.ColumnSpan="2"
+              Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}"
+              MinWidth="{ThemeResource TextControlThemeMinWidth}"
+              MinHeight="{ThemeResource TextControlThemeMinHeight}" />
+
+      <!-- A22：PasswordBox 侧的两处居中改动，与 TextBox 完全同构。 -->
+      <ScrollViewer x:Name="ContentElement" Grid.Row="1" Grid.Column="0"
+                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                    Foreground="{TemplateBinding Foreground}"
+                    HorizontalScrollMode="{TemplateBinding ScrollViewer.HorizontalScrollMode}"
+                    HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                    VerticalScrollMode="{TemplateBinding ScrollViewer.VerticalScrollMode}"
+                    VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}"
+                    IsHorizontalRailEnabled="{TemplateBinding ScrollViewer.IsHorizontalRailEnabled}"
+                    IsVerticalRailEnabled="{TemplateBinding ScrollViewer.IsVerticalRailEnabled}"
+                    IsDeferredScrollingEnabled="{TemplateBinding ScrollViewer.IsDeferredScrollingEnabled}"
+                    Margin="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}"
+                    IsTabStop="False" ZoomMode="Disabled"
+                    AutomationProperties.AccessibilityView="Raw" />
+
+      <TextBlock x:Name="PlaceholderTextContentPresenter" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                 VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                 Foreground="{ThemeResource TextControlPlaceholderForeground}"
+                 Margin="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}"
+                 Text="{TemplateBinding PlaceholderText}" IsHitTestVisible="False" />
+
+      <ToggleButton x:Name="RevealButton" Grid.Row="1" Grid.Column="1" Style="{StaticResource PCMigTextRevealButtonStyle}"
+                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}"
+                    Padding="{ThemeResource HelperButtonThemePadding}" IsTabStop="False" Visibility="Collapsed"
+                    FontSize="{TemplateBinding FontSize}" VerticalAlignment="Stretch" Width="30" />
+
+      <ContentPresenter x:Name="DescriptionPresenter" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                        Content="{TemplateBinding Description}"
+                        Foreground="{ThemeResource SystemControlDescriptionTextForegroundBrush}"
+                        AutomationProperties.AccessibilityView="Raw" x:Load="False" />
+    </Grid>
+  </ControlTemplate>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       A22 最终结论（20260928，第三轮修复）：
+       ★ 关键发现：在这个应用里，定义在合并资源字典中的**隐式样式（无 x:Key）不会被应用到
+         实际的 TextBox / PasswordBox**。本轮用两个"不可误判"的探针证实：
+           ① 在隐式样式里把 Background 设成 #FF00FFFF → 输入框**没有**变青色；
+           ② 在模板里加 8 DIP 纯红 Border → 页面上**找不到**红条。
+         而把同一个样式改成**显式 x:Key 并写到元素上**之后，红条立刻出现、文字位置随之改变。
+         因此"改隐式样式让四页自动获益"这条路在本项目**走不通**，必须显式指定样式。
+       ★ 另一个关键发现：文字位置对 ContentElement 的 Margin 响应清晰可标定
+         （框恒为 y=270..316、中心 293）：Margin.Top=30 → 偏移 +9.5 DIP；
+         Margin.Top=14 → +1.5；由此斜率 0.5 DIP/DIP，解得 Margin.Top=11 → 偏移 +0.5 DIP。
+         即：模板自身的 Baseline 会偏高，需要用 Margin.Top≈11 做光学补偿。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+
+  <!-- ★ A30 关键修正（20260928）：
+       之前这两个样式写成 BasedOn="{StaticResource DefaultTextBoxStyle}"（**框架默认样式**），
+       只覆盖 Template —— 于是**丢掉了整个应用级视觉定义**：
+         CornerRadius（PCMigTextBox 上的统一 Token PCMigRadiusInput）、Background、
+         BorderBrush、Padding、MinHeight、FontSize 全部回退成框架默认值。
+       这正是用户看到的"输入框圆角体系严重回归、近似直角、各页不一致"的根因：
+       框架默认圆角约 4px，而卡片是 16px —— 一眼就看出不是同一套。
+       ★ 现改为 BasedOn 应用样式（PCMigTextBox / PCMigPasswordBox），只增加 Template，
+         其余视觉属性全部继承，圆角由 PCMigRadiusInput 统一提供。
+       ★ 这两个样式必须**显式**写到元素上 —— 本项目合并字典里的隐式样式不生效
+         （已用青色背景 + 红色 Border 两个探针证实）。 -->
+  <Style x:Key="PCMigTextBoxCentered" TargetType="TextBox" BasedOn="{StaticResource PCMigTextBox}">
+    <Setter Property="Template" Value="{StaticResource PCMigCenteredTextBoxTemplate}" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style x:Key="PCMigPasswordBoxCentered" TargetType="PasswordBox" BasedOn="{StaticResource PCMigPasswordBox}">
+    <Setter Property="Template" Value="{StaticResource PCMigCenteredPasswordBoxTemplate}" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+</ResourceDictionary>

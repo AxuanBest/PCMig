@@ -1,0 +1,96 @@
+<UserControl
+    x:Class="PCMig.WinUI.Views.PCMigSurface"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ══════════════════════════════════════════════════════════════════════════════
+         A33（20260928）：**全应用统一方向性受光表面**。
+
+         背景（用户两轮人工标注）：
+           第一轮：「Step Card 没有做出和全局一样的浮雕效果，就是高光和阴影
+                    Liquid Glass-inspired Edge Lighting 效果里的一致性光源」；
+           第二轮：「当前 Step Card 的边缘白光太粗了……一圈明显的白色描边……四条边都被框出来……
+                    我要的不是『白色描边卡片』，而是**整个应用存在一个统一光源**，
+                    并且这个光源来自应用整体的**左上角**……高光主要出现在左上边缘和左上表面，
+                    越往右下高光越弱，右下应主要体现轻微阴影/暗部收边……
+                    高光应该更像 **Surface Highlight**，而不是 **Border Stroke**」，
+                    并要求「其他应用里面还有各种各样的卡片和板块，他们都有做这样的效果，
+                    要**全局统一**」。
+
+         ★ 机制根因（全局性问题，不是 Step Card 独有）：
+           全应用此前的"高光"一律写成 **BorderBrush**（EdgeHighlightCrispBrush /
+           EdgeHighlightDiagonalBrush / EdgeHighlightSoftDiagonalBrush 等）。
+           BorderBrush 会沿**整圈四条边**描一遍 —— 无论渐变怎么设计，
+           左右两条竖边都会各自拿到一笔高光，视觉上必然呈现
+           「每张卡片自己四周发白光 / 一圈粗白边」。
+           实测受影响样式：ShellMaterial / PrimarySurface / SecondarySurface /
+           ElevatedSurface / FutureNavigationCard（共约 20 处使用点）。
+
+         ★ 统一修正 —— 高光从"边框"移到"表面叠加层"，四边**不再等强**：
+             · BorderBrush 只留**极轻轮廓**（不再承担高光）；
+             · 上边：1 DIP 亮线，自左上向**右**衰减；
+             · 左边：1 DIP 亮线，自顶部向**下**衰减；
+             · 下边：1 DIP 暗边，自左下向**右**加深（暗部收边）；
+             · 右缘：1 DIP 暗边，自右上向**下**加深；
+             · 表面：左上略亮 → 右下略暗的极轻明暗（融在表面里）。
+           于是每张卡片的**左上亮、右下暗**，且所有卡片共享同一光源方向 ——
+           这正是"放在同一个空间里被同一盏左上角主灯照到"的效果。
+
+         用法：把原来的
+             <Border Style="{StaticResource XxxSurface}">…</Border>
+         换成
+             <views:PCMigSurface Kind="Card" Padding="16">…</views:PCMigSurface>
+         Kind 决定圆角/填充/阴影/轮廓（与既有 Surface 样式一一对应）：
+             Shell   → 22 / ShellMaterialBrush       / ElevationLow    （外壳）
+             Panel   → 20 / PrimarySurfaceBrush      / ElevationHigh   （大面板）
+             Card    → 16 / SecondarySurfaceBrush    / ElevationLow    （普通卡、提示卡）
+             Elevated→ 18 / ElevatedSurfaceBrush     / ElevationMedium （主内容卡）
+         ══════════════════════════════════════════════════════════════════════════════ -->
+
+    <Grid x:Name="Host">
+        <!-- 卡体：填充 + 极轻轮廓 + 阴影（不承担高光） -->
+        <Border x:Name="Body"
+                Background="{x:Bind SurfaceFill, Mode=OneWay}"
+                BorderBrush="{x:Bind SurfaceContour, Mode=OneWay}"
+                BorderThickness="1"
+                CornerRadius="{x:Bind SurfaceCorner, Mode=OneWay}"
+                Padding="{x:Bind Padding, Mode=OneWay}"
+                Translation="{x:Bind SurfaceTranslation, Mode=OneWay}"
+                Shadow="{x:Bind SurfaceShadow, Mode=OneWay}">
+            <ContentPresenter Content="{x:Bind Content, Mode=OneWay}"
+                              HorizontalContentAlignment="Stretch"
+                              VerticalContentAlignment="Stretch"/>
+        </Border>
+
+        <!-- ══ ① 主受光层：融在表面里的对角明暗（左上亮 → 中部透明 → 右下暗）══
+             这是"光源来自左上角照到卡面"的主体表达。
+             刻意做成**一整个面的渐变**而不是四条边线 —— 因为线状高光会读成"描边"，
+             面的明暗才会读成"受光"。光斑中心偏在左上（StartPoint 0.12,0），
+             使左上角最亮、向右下连续衰减，右下进入暗部。 -->
+        <Border x:Name="DirectionalLight" IsHitTestVisible="False"
+                CornerRadius="{x:Bind SurfaceCorner, Mode=OneWay}"
+                Margin="1" Background="{StaticResource PCMigDirectionalLightBrush}"/>
+
+        <!-- ══ ② 左上角聚光：一个很淡的径向光斑，强化"光源在左上角"的方位感 ══
+             只有左上四分之一区域有感，右侧与下方迅速衰减为 0。 -->
+        <Border x:Name="CornerGlow" IsHitTestVisible="False"
+                CornerRadius="{x:Bind SurfaceCorner, Mode=OneWay}"
+                Margin="1" Background="{StaticResource PCMigCornerGlowBrush}"/>
+
+        <!-- ══ ③ 上缘极细亮线：仅 1 DIP、且**只在左侧 45% 内可见**，向右迅速消失 ══
+             保留"顶边受光尖峰"（这是玻璃质感的标志），但不再绕整圈，
+             因此不会出现用户所说的"一圈粗白边"。 -->
+        <Border x:Name="TopEdge" Height="1" VerticalAlignment="Top" IsHitTestVisible="False"
+                HorizontalAlignment="Left" Width="{x:Bind TopEdgeLength, Mode=OneWay}"
+                Margin="{x:Bind TopEdgeInset, Mode=OneWay}"
+                Background="{StaticResource PCMigTopEdgeBrush}"/>
+
+        <!-- ══ ④ 右下暗部收边：只在右下角一段、且向下/向右加深，营造体积感 ══ -->
+        <Border x:Name="BottomEdgeShade" Height="1" VerticalAlignment="Bottom" IsHitTestVisible="False"
+                HorizontalAlignment="Right" Width="{x:Bind ShadeLength, Mode=OneWay}"
+                Margin="0,0,12,0" Background="{StaticResource PCMigEdgeShadeBrush}"/>
+        <Border x:Name="RightEdgeShade" Width="1" HorizontalAlignment="Right" IsHitTestVisible="False"
+                VerticalAlignment="Bottom" Height="{x:Bind ShadeLength, Mode=OneWay}"
+                Margin="0,0,0,12" Background="{StaticResource PCMigEdgeShadeBrush}"/>
+    </Grid>
+</UserControl>

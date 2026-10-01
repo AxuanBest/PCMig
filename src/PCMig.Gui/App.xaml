@@ -5,10 +5,20 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <!-- 玻璃主题设计 token（苹果风改造）。切回经典主题 = 只换这一个字典 -->
+                <!-- 兼容主题 token：Classic/Dark 回退仍由既有运行时装载逻辑控制。 -->
                 <ResourceDictionary Source="Theme/Glass.xaml"/>
-                <!-- 跨窗口共享控件样式（必须在 token 之后，才能解析 StaticResource） -->
                 <ResourceDictionary Source="Theme/Controls.xaml"/>
+                <!-- v0.5 Presentation-only Material System：显式 V5.* 样式，不覆写旧隐式控件。 -->
+                <ResourceDictionary Source="Theme/V5/Material.xaml"/>
+                <ResourceDictionary Source="Theme/V5/Typography.xaml"/>
+                <ResourceDictionary Source="Theme/V5/Motion.xaml"/>
+                <ResourceDictionary Source="Theme/V5/Panels.xaml"/>
+                <ResourceDictionary Source="Theme/V5/Buttons.xaml"/>
+                <ResourceDictionary Source="Theme/V5/Inputs.xaml"/>
+                <ResourceDictionary Source="Theme/V5/Navigation.xaml"/>
+                <ResourceDictionary Source="Theme/V5/Lists.xaml"/>
+                <ResourceDictionary Source="Theme/V5/Progress.xaml"/>
+                <ResourceDictionary Source="Theme/V5/Status.xaml"/>
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>

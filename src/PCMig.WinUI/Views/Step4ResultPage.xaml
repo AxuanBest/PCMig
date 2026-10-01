@@ -1,0 +1,282 @@
+<UserControl
+    x:Class="PCMig.WinUI.Views.Step4ResultPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:conv="using:PCMig.WinUI.Presentation.Converters">
+    <!-- 页面入场动画由 Shell 统一播放（方向性，见 Presentation\MotionDirector.cs）。 -->
+
+    <!--
+        Step 4 — 结果与校验（视觉基准：正式参考图 ref4）。
+        结构照参考图落位：
+          页标题区 → 顶部操作条（验证完整性 / 尝试修复 / 强制覆盖开关 / 打开报告 / 打开目标文件夹 / 恢复任务）
+          → 报告清单（表头：时间 / 位置（盘符、文件夹\文件） / 原因 + 搜索框）
+          → 实时日志（深色终端风面板，[INFO]/[WARN]/[ERROR] 前缀标签）
+
+        ★ 阶段 A 包 4：本页**已无任何示例行/假日志**。
+          报告清单数据源 = MigrationSessionViewModel.FailItems（真实失败/不一致项，时间取该项真实产生时刻）；
+          实时日志数据源 = MigrationSessionViewModel.LogLines（引擎输出行与本次会话真实动作行）。
+          两者为空时显示空状态说明；表格与日志**只在各自卡内滚动**（几何未改动）。
+          搜索框仍为冻结态（筛选逻辑属后续 Presentation 状态，本包不接线）。
+          绑定形态：页面级一律“代码直推 + PushState()”，仅 DataTemplate 内部用经典 {Binding}。
+    -->
+    <UserControl.Resources>
+        <!-- 只为 DataTemplate 内部的显隐服务（bool → Visibility），不含任何业务规则。 -->
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
+    </UserControl.Resources>
+
+    <Grid RowSpacing="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <!-- 报告清单：卡头 / 搜索 / 表头属"固定结构"，必须完整；表体是失败项数据行，
+                 按新规则允许**只在卡内**滚动。MinHeight 224 = 实测固定部分 144 + 整两行数据 80，
+                 避免出现"半行"观感。用的是 MinHeight + 星号行，不是固定 Height。 -->
+            <RowDefinition Height="3*" MinHeight="224"/>
+            <!-- 实时日志：自然高度 140（内边距 28 + 卡头行 40 + 间距 8 + 4 行日志 76）。
+                 它排在最后，剩余高度全部归它；日志文本变长时只在卡内日志区滚动。 -->
+            <RowDefinition Height="2*" MinHeight="150"/>
+        </Grid.RowDefinitions>
+
+            <!-- 页标题区
+                 ★ A6（F1 续修，2026-09-30）★ 这里**必须**用 Grid，不能用 Orientation="Horizontal" 的 StackPanel：
+                 横向 StackPanel 以**无限宽度**度量自己的子元素 ⇒ 里面的 TextBlock 即便写了
+                 TextWrapping="Wrap" 也永远"无宽可依"、不会折行，长句只会一路向右延伸并被页面右缘裁掉
+                 （实测：只给 StateLineText 加 Wrap 后仍不折行，xbf 确认新 XAML 已编入二进制 ⇒ 约束在父容器，不在 TextBlock）。
+                 改成 Auto + * 两列后，文本列拿到**真实剩余宽度**，Wrap 才真正生效；
+                 几何与原来等价：徽标仍是 34×34、列间距 12 与原来的 Spacing="12" 相同，
+                 文本列左缘位置不变、垂直仍居中。 -->
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Width="34" Height="34" CornerRadius="17" Background="{StaticResource AccentGradientBrush}" BorderBrush="#B8FFFFFF" BorderThickness="1" Translation="0,0,24" Shadow="{StaticResource ElevationHigh}">
+                    <Grid>
+                        <!-- 球形高光：与外框同宽、被圆角裁剪，给平涂渐变补上"受光"层 -->
+                        <Border CornerRadius="16" Margin="1" IsHitTestVisible="False">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0.25,0" EndPoint="0.25,1">
+                                    <GradientStop Color="#59FFFFFF" Offset="0"/>
+                                    <GradientStop Color="#14FFFFFF" Offset="0.42"/>
+                                    <GradientStop Color="#00FFFFFF" Offset="0.70"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+                        <TextBlock Style="{StaticResource PCMigTextStepBadge}" Text="4" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"/>
+                    </Grid>
+                </Border>
+                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource PCMigTextPageTitle}" Text="结果与校验"/>
+                    <TextBlock Style="{StaticResource PCMigTextPageSubtitle}"
+                               Text="完整性校验与报告清单；失败项会给出位置与原因，修复后可直接恢复任务。"/>
+                    <!-- ★ A6（F1，2026-09-30 巡检修复）★ 必须显式 Wrap：本行实际是
+                         「Step4StateText + 　 + UnfinishedProbeText + 可选闸门原因」的**多句拼接**
+                         （见 Step4ResultPage.xaml.cs:133/139-144），必然超宽；而 PCMigTextHintBody
+                         样式（Themes\Typography.xaml:29）**不含** TextWrapping ⇒ WinUI 默认 NoWrap
+                         ⇒ 右缘硬裁、句子只剩半句（巡检截图实证："…连上旧电脑后会自动再"）。
+                         Step2 的同类长文用法（Step2SelectDataPage.xaml:192/346）都是显式 Wrap，本处属遗漏。 -->
+                    <TextBlock Style="{StaticResource PCMigTextHintBody}" x:Name="StateLineText" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- 顶部操作条（Compact 下由代码折为两行，分组不变） -->
+            <Border Grid.Row="1" Translation="0,0,12" Style="{StaticResource ElevatedSurface}" Padding="12,10">
+                <Grid x:Name="ToolbarGrid" ColumnSpacing="10" RowSpacing="0" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="0"/>
+                    </Grid.RowDefinitions>
+                    <Button x:Name="ToolbarVerify" AutomationProperties.AutomationId="Step4.Verify" Grid.Row="0" Grid.Column="0" Style="{StaticResource PCMigPrimaryButton}" Padding="14,7">
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <FontIcon Glyph="&#xE73E;" FontSize="15"/>
+                            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="验证完整性"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="ToolbarRepair" AutomationProperties.AutomationId="Step4.Repair" Grid.Row="0" Grid.Column="1" Style="{StaticResource PCMigSecondaryButton}" Padding="12,6">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <FontIcon Glyph="&#xE90F;" FontSize="14"/>
+                            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="尝试修复"/>
+                        </StackPanel>
+                    </Button>
+                    <CheckBox x:Name="ToolbarOverwrite" Grid.Row="0" Grid.Column="2" IsChecked="True" MinWidth="0" Content="" ToolTipService.ToolTip="强制覆盖同名文件（谨慎使用）"/>
+                    <TextBlock x:Name="ToolbarOverwriteLabel" Grid.Row="0" Grid.Column="3" Style="{StaticResource PCMigTextFieldLabel}" Text="强制覆盖" VerticalAlignment="Center"/>
+                    <Button x:Name="ToolbarOpenReport" AutomationProperties.AutomationId="Step4.OpenReport" Grid.Row="0" Grid.Column="4" Style="{StaticResource PCMigSecondaryButton}" Padding="12,6">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <FontIcon Glyph="&#xE8A5;" FontSize="14"/>
+                            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="打开报告"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="ToolbarOpenTarget" Grid.Row="0" Grid.Column="5" Style="{StaticResource PCMigSecondaryButton}" Padding="12,6">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <FontIcon Glyph="&#xE8B7;" FontSize="14"/>
+                            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="打开目标文件夹"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="ToolbarResume" AutomationProperties.AutomationId="Step4.Resume" Grid.Row="0" Grid.Column="6" Style="{StaticResource PCMigSecondaryButton}" Padding="12,6">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <FontIcon Glyph="&#xE72C;" FontSize="14"/>
+                            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="恢复任务"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- 报告清单 -->
+            <Border Grid.Row="2" Translation="0,0,10" Style="{StaticResource ElevatedSurface}" Padding="10">
+                <Grid RowSpacing="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <!-- 表体行改星号行：失败项是动态数据，只在卡内滚动 -->
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <FontIcon Glyph="&#xE9D5;" FontSize="20" Foreground="{StaticResource DangerBrush}"/>
+                        <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="报告清单" VerticalAlignment="Center"/>
+                        <TextBlock Style="{StaticResource PCMigTextStepSubtitle}"
+                                   Text="失败的位置与原因；处理完（例如关闭旧电脑上占用文件的程序）点「恢复任务」即可补齐。"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <Grid Grid.Row="1" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <!-- ★ A.5（第 7 条 · 产品诚实性）★ 搜索框置为 IsEnabled="False"：改前可输入但完全无效果（筛选未接入）。
+                             本阶段不实现筛选逻辑，只如实标注"暂未启用"；标注落在**占位符**上
+                             （禁用控件的 ToolTip 悬停默认不弹，不能只靠 tooltip 传达）。 -->
+                        <TextBox x:Name="SearchBox" Style="{StaticResource PCMigTextBoxCentered}" MinHeight="34" Padding="36,3,10,3" MaxWidth="360" HorizontalAlignment="Left"
+                                 IsEnabled="False"
+                                 PlaceholderText="搜索文件或错误原因（暂未启用）"
+                                 ToolTipService.ToolTip="搜索/筛选暂未启用（筛选逻辑尚未接入）：请直接在下面报告清单里按时间与位置查看。"/>
+                        <FontIcon Grid.Column="0" Glyph="&#xE721;" FontSize="15" Margin="14,0,0,0" Translation="0,-0.5,0"
+                                  HorizontalAlignment="Left" VerticalAlignment="Center"
+                                  IsHitTestVisible="False" Foreground="{StaticResource TextSecondaryBrush}"/>
+                    </Grid>
+
+                    <!-- 表头 -->
+                    <Grid Grid.Row="2" ColumnSpacing="12" Padding="12,5,22,5">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="150"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="时间"/>
+                        <TextBlock Grid.Column="1" Style="{StaticResource PCMigTextFieldLabel}" Text="位置（盘符、文件夹\文件）"/>
+                        <TextBlock Grid.Column="2" Style="{StaticResource PCMigTextFieldLabel}" Text="原因"/>
+                    </Grid>
+
+                    <!-- 表体：数据源 = MigrationSessionViewModel.FailItems（真实失败 / 不一致项；
+                         「时间」取该项**真实产生时刻**，不是摆出来的示例行）。为空时显示空状态，
+                         绝不摆放示例数据；滚动仍只在卡内（ListView 自带滚动，几何未改动）。 -->
+                    <Grid Grid.Row="3">
+                        <StackPanel x:Name="FailEmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+                            <FontIcon Glyph="&#xE9D5;" FontSize="24" Foreground="{StaticResource StepIconBrush}"/>
+                            <TextBlock Style="{StaticResource PCMigTextHintBody}" Text="暂无失败项。" HorizontalAlignment="Center"/>
+                            <TextBlock Style="{StaticResource PCMigTextHintBody}"
+                                       Text="迁移或校验一旦产生失败 / 不一致项，会在这里逐条列出位置与原因。"
+                                       HorizontalAlignment="Center"/>
+                        </StackPanel>
+                        <ListView x:Name="FailList" Visibility="Collapsed" SelectionMode="None" Padding="0">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource ListItemSurfaceBrushBorder}">
+                                        <Grid ColumnSpacing="12" Padding="12,7,22,7">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="150"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                                <!-- 对象级失败 = 危险色，提示级 = 警告色：两枚互斥元素二选一
+                                                     （绑定 VM 的真实派生布尔，不引入反向转换器）。 -->
+                                                <Ellipse Width="8" Height="8" Fill="{StaticResource DangerBrush}" VerticalAlignment="Center"
+                                                         Visibility="{Binding ObjectLevel, Converter={StaticResource BoolToVisibility}, Mode=OneWay}"/>
+                                                <Ellipse Width="8" Height="8" Fill="{StaticResource WarningBrush}" VerticalAlignment="Center"
+                                                         Visibility="{Binding IsNotice, Converter={StaticResource BoolToVisibility}, Mode=OneWay}"/>
+                                                <TextBlock Style="{StaticResource PCMigTextListItemMeta}" Text="{Binding TimeText}"/>
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" Style="{StaticResource PCMigTextListItemBody}"
+                                                       Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Grid.Column="2" Style="{StaticResource PCMigTextListItemMeta}"
+                                                       Text="{Binding Detail}" TextTrimming="CharacterEllipsis"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- 实时日志（深色终端风面板） -->
+            <Border Grid.Row="3" Translation="0,0,8" Background="#F21A2033" BorderBrush="#33FFFFFF" BorderThickness="1"
+                    CornerRadius="16" Padding="14">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <!-- 日志文本区：星号行 + 只在本卡内滚动；卡本体（边框/标题/按钮）永远完整 -->
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Style="{StaticResource PCMigTextLogHeader}"
+                                   Text="实时日志（完整日志见 %ProgramData%\PCMig\Logs 与任务目录）"
+                                   VerticalAlignment="Center"/>
+                        <Button x:Name="ToolbarOpenLogs" Grid.Column="1" Style="{StaticResource PCMigSecondaryButton}" Padding="12,6">
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <FontIcon Glyph="&#xE8B7;" FontSize="14"/>
+                                <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="打开日志目录"/>
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                    <!-- 日志体：数据源 = MigrationSessionViewModel.LogLines（引擎真实输出行 + 本次会话真实动作行，
+                         每条带真实时刻与真实级别）。原先这里的 4 条硬编码示例日志已全部删除；
+                         日志变长时只在卡内滚动（ListView 自带滚动）。 -->
+                    <Grid Grid.Row="1">
+                        <TextBlock x:Name="LiveLogEmptyHint" Style="{StaticResource PCMigTextLogLine}"
+                                   Text="本次会话尚无日志行：验证 / 修复 / 报告等动作与引擎输出都会实时出现在这里。"
+                                   TextWrapping="Wrap" VerticalAlignment="Top"/>
+                        <ListView x:Name="LiveLogList" Visibility="Collapsed" SelectionMode="None" Padding="0">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <!-- 用 Grid（Auto + *）而不是水平 StackPanel：让日志文本拿到**有界宽度**，
+                                         长行才会按 PCMigTextLogLine 的 TextWrapping 折行，而不是被右缘裁掉。 -->
+                                    <Grid ColumnSpacing="8" Padding="0,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+                                            <TextBlock Style="{StaticResource PCMigTextLogTagInfo}" Text="[INFO]"
+                                                       Visibility="{Binding IsInfo, Converter={StaticResource BoolToVisibility}, Mode=OneWay}"/>
+                                            <TextBlock Style="{StaticResource PCMigTextLogTagWarn}" Text="[WARN]"
+                                                       Visibility="{Binding IsWarn, Converter={StaticResource BoolToVisibility}, Mode=OneWay}"/>
+                                            <TextBlock Style="{StaticResource PCMigTextLogTagError}" Text="[ERROR]"
+                                                       Visibility="{Binding IsError, Converter={StaticResource BoolToVisibility}, Mode=OneWay}"/>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Style="{StaticResource PCMigTextLogLine}" Text="{Binding Text}"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Grid>
+            </Border>
+    </Grid>
+</UserControl>

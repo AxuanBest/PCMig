@@ -2,35 +2,127 @@
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:local="using:PCMig.WinUI"
+    xmlns:views="using:PCMig.WinUI.Views"
  xmlns:presentation="using:PCMig.WinUI.Presentation"
- Title="PCMig WinUI 3 · 连接旧电脑">
+ Title="PCMig 迁移工具 · v0.5.0">
  <Window.SystemBackdrop><MicaBackdrop Kind="BaseAlt"/></Window.SystemBackdrop>
  <Grid Background="Transparent">
-  <Grid.RowDefinitions><RowDefinition Height="52"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-  <Grid x:Name="AppTitleBar" Grid.Row="0" Padding="22,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-   <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center"><FontIcon Glyph="&#xE72D;" FontSize="19" Foreground="{StaticResource AccentBrush}"/><TextBlock Text="PCMig 迁移工具" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}"/><TextBlock Text="WinUI 3 · Step 1" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
-   <TextBlock Grid.Column="1" Text="旧电脑 → 新电脑" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/>
+  <!-- 键盘导航用 WinUI 官方 KeyboardAccelerator（声明式）：不手动查询按键状态，避免
+       InputKeyboardSource.GetKeyStateForCurrentThread 在 KeyDown 里带来的脆弱性。 -->
+  <Grid.KeyboardAccelerators>
+    <KeyboardAccelerator Key="Number1" Modifiers="Control" Invoked="GoStep1_Invoked"/>
+    <KeyboardAccelerator Key="Number2" Modifiers="Control" Invoked="GoStep2_Invoked"/>
+    <KeyboardAccelerator Key="Number3" Modifiers="Control" Invoked="GoStep3_Invoked"/>
+    <KeyboardAccelerator Key="Number4" Modifiers="Control" Invoked="GoStep4_Invoked"/>
+    <KeyboardAccelerator Key="Tab" Modifiers="Control" Invoked="GoNextStep_Invoked"/>
+    <KeyboardAccelerator Key="Tab" Modifiers="Control,Shift" Invoked="GoPrevStep_Invoked"/>
+  </Grid.KeyboardAccelerators>
+  <!-- Low-intensity brand ambient: UI remains the visual focus. -->
+  <Grid IsHitTestVisible="False">
+   <!-- V1 Ambient（第二次定调）：这是**在系统背景材质之上、极低强度的自绘氛围**，不是参考图里那层"壁纸透出"的粉紫蓝——
+        实测结论（阶段 9）：参考图的液态彩色来自**壁纸经真透明透出**；而 WinUI 的 Mica/DesktopAcrylic 会对壁纸重度去饱和+提亮，
+        本机壁纸为 Windows 默认 img0.jpg（暖红 #DDC4C1），即使 tint 压到 0.05、换上纯品红壁纸，窗口均值仍几乎不动（#E8EDF6→#E8EBF5），
+        证明"真透明"未生效；因此保留一层**远比之前弱**的自绘氛围，保证在任意壁纸下 UI 不塌成灰白。 -->
+
+   <Ellipse Width="900" Height="900" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-330,-390,0,0" Opacity="{StaticResource AmbientBlueOpacity}"><Ellipse.Fill><RadialGradientBrush><GradientStop Color="{StaticResource AmbientBlueColor}"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+   <Ellipse Width="820" Height="820" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-400,0,0" Opacity="{StaticResource AmbientLavenderOpacity}"><Ellipse.Fill><RadialGradientBrush><GradientStop Color="{StaticResource AmbientLavenderColor}"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+   <Ellipse Width="980" Height="820" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-400" Opacity="{StaticResource AmbientLavenderOpacity}"><Ellipse.Fill><RadialGradientBrush><GradientStop Color="{StaticResource AmbientLavenderColor}"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+   <Ellipse Width="760" Height="1020" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-330,0" Opacity="{StaticResource AmbientPinkOpacity}"><Ellipse.Fill><RadialGradientBrush><GradientStop Color="{StaticResource AmbientPinkColor}"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+   <Ellipse Width="620" Height="620" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-140,-190" Opacity="{StaticResource AmbientPeachOpacity}"><Ellipse.Fill><RadialGradientBrush><GradientStop Color="{StaticResource AmbientPeachColor}"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+   <!-- V1 Ambient Light：左上 Blue/Cyan · 中央与底部 Lavender/Violet · 右侧 Soft Pink · 右下 Warm Peach/Pink -->
   </Grid>
-  <Grid Grid.Row="1" Padding="24"><Grid.ColumnDefinitions><ColumnDefinition Width="228"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-   <Border Style="{StaticResource ShellCard}"><Grid><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><StackPanel Spacing="10"><TextBlock Text="迁移步骤" Style="{StaticResource SectionTitle}" Margin="4,0,0,8"/>
-    <NavigationView x:Name="StepNavigation" PaneDisplayMode="LeftMinimal" IsPaneOpen="True" IsBackButtonVisible="Collapsed" Background="Transparent"><NavigationView.MenuItems><NavigationViewItem Content="连接旧电脑" Icon="Remote" IsSelected="True"/><NavigationViewItem Content="选择数据与目标" Icon="List" IsEnabled="False"/><NavigationViewItem Content="迁移进度" Icon="Play" IsEnabled="False"/><NavigationViewItem Content="结果与校验" Icon="Accept" IsEnabled="False"/></NavigationView.MenuItems></NavigationView>
-   </StackPanel><Border Grid.Row="1" Style="{StaticResource MaterialCard}"><StackPanel Spacing="5"><TextBlock Text="连接状态" Style="{StaticResource SectionTitle}" FontSize="13"/><TextBlock Text="{x:Bind ViewModel.DeviceSummary, Mode=OneWay}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}"/><TextBlock Text="凭据仅用于当前会话" Style="{StaticResource MutedText}" FontSize="11"/></StackPanel></Border></Grid></Border>
-   <Border Grid.Column="2" Style="{StaticResource ShellCard}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <StackPanel Spacing="6"><TextBlock Text="连接旧电脑" FontSize="30" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}"/><TextBlock Text="连接设备、识别状态并发现可迁移的共享。不会开始迁移或修改任何数据。" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"/></StackPanel>
-    <Border Grid.Row="1" Style="{StaticResource MaterialCard}" Margin="0,22,0,0"><Grid RowSpacing="12" ColumnSpacing="14"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <TextBox Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Header="旧电脑 IP 或电脑名" PlaceholderText="例如：192.168.1.100 或 DESKTOP-ABCD" Text="{x:Bind ViewModel.Host, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-      <TextBox Grid.Row="1" Grid.Column="0" Header="用户名（可选）" PlaceholderText="域名\账号 或 电脑名\Administrator" Text="{x:Bind ViewModel.Username, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-      <PasswordBox x:Name="PasswordInput" Grid.Row="1" Grid.Column="1" Header="密码（仅当前会话）" PlaceholderText="留空则使用当前 Windows 凭据"/>
-      <ToggleSwitch Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Header="连接时测速" OffContent="关闭" OnContent="开启" IsOn="{x:Bind ViewModel.BenchmarkOnConnect, Mode=TwoWay}"/>
-      <Button Grid.Row="0" Grid.RowSpan="2" Grid.Column="2" Content="连接并发现共享" Style="{StaticResource PrimaryButton}" VerticalAlignment="Center" IsEnabled="{x:Bind ViewModel.CanConnect, Mode=OneWay}" Click="Connect_Click"/>
-    </Grid></Border>
-    <Border Grid.Row="2" Style="{StaticResource MaterialCard}" Margin="0,16,0,0"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-      <Grid ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="220"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="共享工作区" Style="{StaticResource SectionTitle}"/><TextBlock Text="连接后显示可迁移共享；对方不开放枚举时可手动添加。" Style="{StaticResource MutedText}"/></StackPanel><TextBox Grid.Column="1" Header="手动共享名" PlaceholderText="d、D$ 或 Users" Text="{x:Bind ViewModel.ManualShareName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/><Button Grid.Column="2" Content="添加共享" Style="{StaticResource SecondaryButton}" VerticalAlignment="Bottom" Click="AddShare_Click"/></Grid>
-      <InfoBar Grid.Row="1" Margin="0,14,0,0" IsOpen="True" IsClosable="False" Severity="Informational" Title="连接反馈" Message="{x:Bind ViewModel.Status, Mode=OneWay}"/>
-      <Grid Grid.Row="2" Margin="0,14,0,0"><TextBlock x:Name="EmptySharesHint" Text="连接后将在这里显示可选共享。" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource TextMutedBrush}"/><ListView ItemsSource="{x:Bind ViewModel.Shares}" SelectionMode="None"><ListView.ItemTemplate><DataTemplate><Border Padding="10" Margin="0,2" CornerRadius="10" Background="#4DFFFFFF" BorderBrush="#65B7CAE4" BorderThickness="1"><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" VerticalAlignment="Center"/><StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}"/><TextBlock Text="{Binding UncPath}" Foreground="{StaticResource TextSecondaryBrush}"/><TextBlock Text="{Binding Remark}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis"/></StackPanel><TextBlock Grid.Column="2" Text="{Binding Kind}" VerticalAlignment="Center" Foreground="{StaticResource TextMutedBrush}"/></Grid></Border></DataTemplate></ListView.ItemTemplate></ListView></Grid>
-    </Grid></Border>
-    <Button Grid.Row="3" HorizontalAlignment="Right" Content="下一步：选择数据与目标 →" Style="{StaticResource PrimaryButton}" Margin="0,16,0,0" Click="NextStep_Click"/>
+  <!-- A21：真实 WinUI 3 TitleBar 细条层。左侧＝小尺寸品牌图标 + 产品名 + 版本号；右侧＝**系统原生 Caption Buttons**（不自绘）。
+       右侧安全区宽度由 AppWindow.TitleBar.RightInset 运行时换算（见 MainWindow.xaml.cs），不硬编码猜系统按钮宽度。
+       顶部高度**重新分配**（不是简单加一行）：42 + 88 + 星号行(不变) + 58 + 16 = 891，保证 D1-V9 / P1 / P2 不回归。 -->
+  <Grid><Grid.RowDefinitions><RowDefinition Height="42"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <Grid x:Name="TitleBarRoot" Grid.Row="0" Padding="20,0,0,0" ColumnSpacing="9"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition x:Name="TitleBarRightReserve" Width="142"/></Grid.ColumnDefinitions><Path Width="17" Height="17" Data="M5,4.6 L14.6,4.6 L14.6,1.8 L21.4,6.9 L14.6,12 L14.6,9.2 L5,9.2 Z M19,19.4 L9.4,19.4 L9.4,22.2 L2.6,17.1 L9.4,12 L9.4,14.8 L19,14.8 Z" Fill="{StaticResource AccentBrush}" Stretch="Uniform" VerticalAlignment="Center"/><TextBlock Style="{StaticResource PCMigTextTitleBarProduct}" Grid.Column="1" Text="PCMig 迁移工具" Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center"/><TextBlock x:Name="TitleBarVersionText" Style="{StaticResource PCMigTextTitleBarVersion}" Grid.Column="2" Text="v0.5.0" Foreground="{StaticResource TextMutedBrush}" Margin="6,0,0,0" VerticalAlignment="Center"/></Grid>
+   <Grid x:Name="ShellRowsGrid" Grid.Row="1" Margin="20,0,20,16"><Grid.RowDefinitions><RowDefinition x:Name="HeaderRow" Height="82"/><RowDefinition Height="*"/><RowDefinition x:Name="BottomBarRow" Height="64"/></Grid.RowDefinitions>
+   <!-- Product Header -->
+   <Border x:Name="AppTitleBar" Grid.Row="0" Translation="0,0,4" Style="{StaticResource ShellMaterial}" Padding="24,12"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <StackPanel x:Name="HeaderIdentityStack" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center"><Border x:Name="HeaderLogo" Width="54" Height="54" CornerRadius="16" Background="{StaticResource AccentBrush}"><Path Width="30" Height="30" Data="M5,4.6 L14.6,4.6 L14.6,1.8 L21.4,6.9 L14.6,12 L14.6,9.2 L5,9.2 Z M19,19.4 L9.4,19.4 L9.4,22.2 L2.6,17.1 L9.4,12 L9.4,14.8 L19,14.8 Z" Fill="White" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0"/></Border><StackPanel VerticalAlignment="Center" Spacing="3"><StackPanel x:Name="HeaderTitleRow" Orientation="Horizontal" Spacing="10"><TextBlock Style="{StaticResource PCMigTextProductTitle}" Text="PCMig 迁移工具" Foreground="{StaticResource TextPrimaryBrush}"/><Button x:Name="ChangelogButton" Click="ChangelogButton_Click" Style="{StaticResource PCMigVersionBadgeButton}" Background="{StaticResource AccentGradientBrush}" VerticalAlignment="Center" ToolTipService.ToolTip="查看从 v0.1.0 起的更新日志"><TextBlock Style="{StaticResource PCMigTextVersionBadge}" Text="v0.5.0" Foreground="White" VerticalAlignment="Center"/></Button><Button x:Name="DeveloperTuningButton" AutomationProperties.AutomationId="Shell.Tool.MaterialTuning" Click="DeveloperTuningButton_Click" VerticalAlignment="Center" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="开发者材质调节（Developer Visual Tuning）"><FontIcon Glyph="&#xE9E9;" FontSize="15" Foreground="{StaticResource TextSecondaryBrush}"/></Button><Button x:Name="DiagnosticCenterButton" Click="DiagnosticCenterButton_Click" AutomationProperties.AutomationId="Shell.Tool.Diagnostics" VerticalAlignment="Center" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="诊断中心（观察式自诊断：只记录与解释，不改变迁移行为）"><FontIcon Glyph="&#xE9D9;" FontSize="15" Foreground="{StaticResource TextSecondaryBrush}"/></Button></StackPanel><TextBlock x:Name="HeaderSubtitle" Style="{StaticResource PCMigTextProductSubtitle}" Text="让电脑迁移更简单 · 旧电脑 → 新电脑 数据迁移" Foreground="{StaticResource TextSecondaryBrush}"/></StackPanel></StackPanel>
+    <Border x:Name="HeaderStatusCapsule" Grid.Column="1" ToolTipService.ToolTip="{x:Bind ViewModel.Status, Mode=OneWay}" Background="{StaticResource CapsuleSurfaceBrush}" BorderBrush="{StaticResource BorderSoftBrush}" BorderThickness="1" CornerRadius="16" Padding="16,11" VerticalAlignment="Center"><StackPanel Orientation="Horizontal" Spacing="12"><StackPanel Orientation="Horizontal" Spacing="7"><FontIcon Glyph="&#xE770;" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}"/><TextBlock Style="{StaticResource PCMigTextStatusChipLabel}" Text="源"/><TextBlock x:Name="SourceStatusText" Style="{StaticResource PCMigTextSourceStatus}" MaxWidth="170" TextTrimming="CharacterEllipsis"/></StackPanel><FontIcon Glyph="&#xE72A;" FontSize="14" Foreground="{StaticResource TextMutedBrush}"/><StackPanel Orientation="Horizontal" Spacing="7"><FontIcon Glyph="&#xE74E;" FontSize="16" Foreground="{StaticResource AccentBrush}"/><TextBlock Style="{StaticResource PCMigTextStatusChipLabel}" Text="目标"/><TextBlock Style="{StaticResource PCMigTextStatusChipValue}" Text="未指定目标"/></StackPanel></StackPanel></Border>
    </Grid></Border>
+   <!-- Four-step Material Rail + current workspace -->
+   <Grid x:Name="WorkspaceLayout" Grid.Row="1" Margin="0,16,0,0"><Grid.ColumnDefinitions><ColumnDefinition x:Name="SidebarColumn" Width="276"/><ColumnDefinition x:Name="RailGapColumn" Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><StackPanel Grid.Row="1" Spacing="24" VerticalAlignment="Top"><views:StepNavigationControl x:Name="StepNav" VerticalAlignment="Top"/></StackPanel>
+      <!-- A13 提示卡（V6 结构修正：作为 Step4 的 sibling 固定在侧栏底部，不再是 Step4 的内嵌内容）；①标题行 ②就绪 ③绿色对勾圆徽 + 暂无报错 ④细分隔线 ⑤署名行 -->
+      <views:ShellHintCard Grid.Row="2"/>
+      </Grid>
+    <Border x:Name="WorkspaceShell" Grid.Column="2" Translation="0,0,4" Style="{StaticResource ShellMaterial}" Padding="20,20,20,18"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+      <Grid Grid.Row="1" Grid.RowSpan="2">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid x:Name="PageViewport" Grid.Row="0">
+          <views:Step1ConnectPage x:Name="PageConnect" Visibility="{x:Bind Nav.IsConnectCurrent, Mode=OneWay}"/>
+          <views:Step2SelectDataPage x:Name="PageSelectData" Visibility="{x:Bind Nav.IsSelectDataCurrent, Mode=OneWay}"/>
+          <views:Step3ProgressPage x:Name="PageProgress" Visibility="{x:Bind Nav.IsProgressCurrent, Mode=OneWay}"/>
+          <views:Step4ResultPage x:Name="PageResult" Visibility="{x:Bind Nav.IsResultCurrent, Mode=OneWay}"/>
+        </Grid>
+      </Grid>
+
+      <!-- ══ Shell 级页面导航 Footer（PCMig 统一页面导航）══════════════════════════════════
+           位置：**只在 Shell 一份**（四个页面都不再各自放按钮），右下对齐，位于页根星号行之下，
+                 因此只占按钮自身高度，不压缩内容区。
+           显示/隐藏与文案：全部由 x:Bind Nav.IsXxxCurrent 单向绑定决定（无需"导航变化时刷新按钮"
+                 的命令式代码）；Click 一律调既有入口 Nav.GoTo（Presentation\StepNavigation.cs），
+                 边界算术与已有的 Ctrl+Tab / Ctrl+Shift+Tab 加速键完全一致，不新增流程。
+           Style：复用既有 PCMigPrimaryButton / PCMigSecondaryButton，**未新建任何 Button Style**。
+           A50：行上间距 12 → 4，把这 8 DIP 还给内容区（口径："Footer 只占按钮自身需要的高度"）；
+                只改间距数值，按钮 / Style / 绑定 / 结构一律未动。 -->
+      <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right" Margin="0,4,0,0">
+        <Button Style="{StaticResource PCMigSecondaryButton}" Click="NavPrevious_Click"
+                Visibility="{x:Bind Nav.IsSelectDataCurrent, Mode=OneWay}">
+          <StackPanel Orientation="Horizontal" Spacing="7">
+            <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE72B;" FontSize="13"/>
+            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="上一步"/>
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource PCMigSecondaryButton}" Click="NavPrevious_Click"
+                Visibility="{x:Bind Nav.IsProgressCurrent, Mode=OneWay}">
+          <StackPanel Orientation="Horizontal" Spacing="7">
+            <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE72B;" FontSize="13"/>
+            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="上一步"/>
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource PCMigSecondaryButton}" Click="NavPrevious_Click"
+                Visibility="{x:Bind Nav.IsResultCurrent, Mode=OneWay}">
+          <StackPanel Orientation="Horizontal" Spacing="7">
+            <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE72B;" FontSize="13"/>
+            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="上一步"/>
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource PCMigPrimaryButton}" Click="NavNext_Click"
+                Visibility="{x:Bind Nav.IsConnectCurrent, Mode=OneWay}">
+          <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="下一步：选择要迁移的内容 →"/>
+        </Button>
+        <Button Style="{StaticResource PCMigPrimaryButton}" Click="NavNext_Click"
+                Visibility="{x:Bind Nav.IsSelectDataCurrent, Mode=OneWay}">
+          <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="下一步：迁移进度 →"/>
+        </Button>
+        <Button Style="{StaticResource PCMigPrimaryButton}" Click="NavNext_Click"
+                Visibility="{x:Bind Nav.IsProgressCurrent, Mode=OneWay}">
+          <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="下一步：结果与校验 →"/>
+        </Button>
+      </StackPanel>
+
+    </Grid></Border>
+   </Grid>
+   <!-- A14/A15/D3：底栏 = 真实百分比 + 已传/计划 + 进度轨道 + 两组速率（速度 / 预计剩余）+ 状态文案 + 网络绿点 + 四个动作按钮。
+        阶段 A 包 3：四个按钮与全部进度位已接回 MigrationSessionViewModel 的真实状态（见 MainWindow.xaml.cs 的 PushFooter）；
+        按钮**不得删除**（四页常驻），初始 IsEnabled="False" 只是一帧初始值，构造期即由真实 CanStart/CanPause/CanStop/CanResume 覆写。 -->
+   <Border x:Name="BottomBar" Grid.Row="2" Translation="0,0,10" Style="{StaticResource SecondarySurface}" Margin="0,10,0,0" Padding="22,9"><Grid x:Name="BottomBarGrid" ColumnSpacing="44"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="80"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="FooterPercentText" Style="{StaticResource PCMigTextFooterPercent}" Text="" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/><TextBlock x:Name="FooterBytesText" Style="{StaticResource PCMigTextFooterValue}" Grid.Column="1" Text="" VerticalAlignment="Center" Foreground="{StaticResource TextPrimaryBrush}"/><Grid Grid.Column="2" Width="320" Height="12" VerticalAlignment="Center" x:Name="FooterProgressHost"><Border Background="{StaticResource ProgressTrackBrush}" CornerRadius="6"/><ProgressBar x:Name="FooterProgressBar" Minimum="0" Maximum="100" Height="12" VerticalAlignment="Center" Foreground="{StaticResource AccentBrush}" Background="Transparent" BorderThickness="0"/></Grid><StackPanel x:Name="FooterRatePrimary" Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><FontIcon Glyph="&#xE8CB;" FontSize="14" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/><TextBlock x:Name="FooterSpeedText" Style="{StaticResource PCMigTextFooterValue}" Text="" VerticalAlignment="Center" Foreground="{StaticResource TextMutedBrush}"/></StackPanel><StackPanel x:Name="FooterRateSecondary" Grid.Column="4" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><FontIcon Glyph="&#xE8CB;" FontSize="14" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/><TextBlock x:Name="FooterEtaText" Style="{StaticResource PCMigTextFooterValue}" Text="" VerticalAlignment="Center" Foreground="{StaticResource TextMutedBrush}"/></StackPanel><StackPanel Grid.Column="7" Orientation="Horizontal" Spacing="7" VerticalAlignment="Center"><TextBlock Style="{StaticResource PCMigTextFooterLabel}" Text="网络" Foreground="{StaticResource TextSecondaryBrush}"/><Ellipse Width="9" Height="9" Fill="{StaticResource SuccessBrush}"/></StackPanel><StackPanel Grid.Column="8" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center"><!-- V10：四动作按钮＝图标 + 文字，统一 PCMigFooterActionButton 材质（Disabled 保留表面/图标/轮廓，只降对比） -->
+<Button x:Name="FooterStartButton" AutomationProperties.AutomationId="Shell.Transfer.Start" Click="FooterStart_Click" IsEnabled="False" Style="{StaticResource PCMigFooterActionButton}"><Button.Content><StackPanel Orientation="Horizontal" Spacing="7"><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE768;" FontSize="14"/><TextBlock x:Name="FooterStartLabel" Style="{StaticResource PCMigTextFooterAction}" Text="开始迁移"/></StackPanel></Button.Content></Button><Button x:Name="FooterPauseButton" AutomationProperties.AutomationId="Shell.Transfer.Pause" Click="FooterPause_Click" IsEnabled="False" Style="{StaticResource PCMigFooterActionButton}"><Button.Content><StackPanel Orientation="Horizontal" Spacing="7"><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE769;" FontSize="14"/><TextBlock x:Name="FooterPauseLabel" Style="{StaticResource PCMigTextFooterAction}" Text="暂停"/></StackPanel></Button.Content></Button><Button x:Name="FooterStopButton" AutomationProperties.AutomationId="Shell.Transfer.Stop" Click="FooterStop_Click" IsEnabled="False" Style="{StaticResource PCMigFooterActionButton}"><Button.Content><StackPanel Orientation="Horizontal" Spacing="7"><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE71A;" FontSize="14"/><TextBlock x:Name="FooterStopLabel" Style="{StaticResource PCMigTextFooterAction}" Text="停止"/></StackPanel></Button.Content></Button><Button x:Name="FooterResumeButton" AutomationProperties.AutomationId="Shell.Transfer.Resume" Click="FooterResume_Click" IsEnabled="False" Style="{StaticResource PCMigFooterActionButton}"><Button.Content><StackPanel Orientation="Horizontal" Spacing="7"><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE72C;" FontSize="14"/><TextBlock x:Name="FooterResumeLabel" Style="{StaticResource PCMigTextFooterAction}" Text="恢复"/></StackPanel></Button.Content></Button></StackPanel></Grid></Border>
   </Grid>
+  </Grid>
+  <!-- Developer Visual Tuning 浮层（默认隐藏；不属于普通业务功能；不新开窗口）
+       A25：Margin 交给 MainWindow.PositionOverlayPanels() 在打开时与 Resize 时按触发按钮实际位置重算，
+            这里不再写死 0,52,24,0（固定右上角的旧做法）。 -->
+  <views:DeveloperTuningPanel x:Name="TuningPanel" Visibility="Collapsed" Margin="0,52,24,0"/>
+   <views:ChangelogPanel x:Name="ChangelogPanel" Visibility="Collapsed" Margin="0,52,24,0"/>
+  <!-- 诊断中心浮层（工具面，默认隐藏）：与上面两个工具面板同属一套 Utility 材质/光源/几何，
+       位置同样由 MainWindow.PositionOverlayPanels() 在打开与 Resize 时按触发按钮实际位置重算。 -->
+  <views:DiagnosticCenterPanel x:Name="DiagnosticCenterPanel" Visibility="Collapsed" Margin="0,52,24,0"/>
  </Grid>
 </Window>

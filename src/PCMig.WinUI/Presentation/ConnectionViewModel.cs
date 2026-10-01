@@ -44,14 +44,48 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     public bool CanConnect => !IsConnecting && !string.IsNullOrWhiteSpace(Host);
     public string DeviceSummary => IsConnected ? $"已连接 {Host.Trim()}" : "尚未连接旧电脑";
 
+    /// <summary>
+    /// ★ 仅测试缝 ★ —— 强制"连接态"投影（生产路径**只有** <see cref="ConnectAsync"/> /
+    /// <see cref="AddManualShareAsync"/> 会改 <c>IsConnected</c>）。
+    ///
+    /// 为什么必须有：<c>IsConnected</c> 的 setter 是私有的，且只有**真实 SMB 预检成功**才会置 true；
+    /// 单测进程里不可能有旧电脑可连 ⇒ 「已连接 ⇒ 允许发起未完成任务探测」这条主路径
+    /// （P2-6 的连接门 / 立即分支 / 世代门）无法被任何行为级测试触达。
+    ///
+    /// 边界（与 <c>TransferRunner</c> 等测试缝同一纪律）：**装配层（MainWindow/App/页面）绝不可调用**；
+    /// 只允许单元测试调用，且调用会留下 Warning 日志便于事后甄别"测试缝被生产路径误用"。
+    /// </summary>
+    internal void ForceConnectedForTest(bool connected)
+    {
+        IsConnected = connected;
+        _log.Warning("ForceConnectedForTest 测试缝被调用（仅测试允许；生产路径绝不调用）：{Connected}", connected);
+    }
+
     public async Task ConnectAsync(string? password)
     {
         var original = Host?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(original)) { Status = "请先输入旧电脑的 IP 或电脑名。"; return; }
+        if (string.IsNullOrWhiteSpace(original))
+        {
+            Status = "请先输入旧电脑的 IP 或电脑名。";
+            // 观察：动作被**合法拒绝**（原判据不变；仅记录既有结果）。
+            ReportUiAction(PCMig.Diagnostics.Abstractions.Events.UiEvents.ActionRejected,
+                new PCMig.Diagnostics.Abstractions.Payloads.UiEligibilityPayload(false, "empty-host"),
+                PCMig.Diagnostics.Abstractions.DiagnosticOutcome.Rejected,
+                PCMig.Diagnostics.Abstractions.DiagnosticLevel.Warning);
+            return;
+        }
 
         // 主机框允许直接粘贴 \\IP\共享名；共享名作为源路径提示交给预检（无 IPC$ 的目标靠它完成直连验证）。
         SplitHostAndShare(original, out var host, out var directShare);
-        if (string.IsNullOrWhiteSpace(host)) { Status = "路径格式不正确，应为 \\IP\\共享名 或 IP。"; return; }
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            Status = "路径格式不正确，应为 \\IP\\共享名 或 IP。";
+            ReportUiAction(PCMig.Diagnostics.Abstractions.Events.UiEvents.ActionRejected,
+                new PCMig.Diagnostics.Abstractions.Payloads.UiEligibilityPayload(false, "invalid-host-path"),
+                PCMig.Diagnostics.Abstractions.DiagnosticOutcome.Rejected,
+                PCMig.Diagnostics.Abstractions.DiagnosticLevel.Warning);
+            return;
+        }
         if (!host.Equals(original, StringComparison.Ordinal)) Host = host; // 回填规范化主机名
 
         // 会话语义：只有连到“不同主机”时才清理旧会话；同一主机重连保持现有 SMB 会话（凭据/连接可复用）。
@@ -134,15 +168,44 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
             }
 
             IsConnected = report.OverallPass || Shares.Count > 0;
+            // 观察：VM 状态确实被写入（投影来源变化）。
+            ReportUiAction(PCMig.Diagnostics.Abstractions.Events.UiEvents.ProjectionChanged,
+                new PCMig.Diagnostics.Abstractions.Payloads.UiProjectionChangedPayload("Vm", 2),
+                PCMig.Diagnostics.Abstractions.DiagnosticOutcome.Succeeded,
+                PCMig.Diagnostics.Abstractions.DiagnosticLevel.Debug);
         }
         catch (Exception ex)
         {
             IsConnected = false;
             Status = $"连接失败：{ex.Message}";
             _log.Error(ex, "WinUI Step 1 connection failed: {Host}", host);
+            // 观察：域层动作失败（只记类型/错误码，不落异常原文）。
+            ReportUiAction(PCMig.Diagnostics.Abstractions.Events.UiEvents.ActionFaulted,
+                null,
+                PCMig.Diagnostics.Abstractions.DiagnosticOutcome.Failed,
+                PCMig.Diagnostics.Abstractions.DiagnosticLevel.Error,
+                exceptionType: ex.GetType().Name,
+                hresult: ex.HResult,
+                phase: "connect-preflight");
         }
         finally { IsConnecting = false; }
     }
+
+    /// <summary>
+    /// 观察用薄封装：按**UI 无关**路径发布"用户动作链"事件，并自动继承当前动作身份
+    /// （<c>ActionScope</c>）。放在这里而不是 WinUI 诊断层，是因为本文件会被既有测试项目
+    /// 按源码链入编译（不得依赖 WinUI 类型与诊断运行时）。
+    /// </summary>
+    private static void ReportUiAction(
+        PCMig.Diagnostics.Abstractions.EventDescriptor descriptor,
+        PCMig.Diagnostics.Abstractions.IDiagnosticPayload? payload,
+        PCMig.Diagnostics.Abstractions.DiagnosticOutcome outcome,
+        PCMig.Diagnostics.Abstractions.DiagnosticLevel level,
+        string? exceptionType = null,
+        int? hresult = null,
+        string? phase = null)
+        => PCMig.Core.Diagnostics.CoreDiagnostics.PublishUiAction(
+            descriptor, payload, outcome, level, "ConnectionViewModel", exceptionType, hresult, durationMs: null, phase);
 
     public async Task AddManualShareAsync(string? password)
     {

@@ -23,7 +23,11 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\PCMig.Core\PCMig.Core.csproj" />
+    <!-- D3 起：外壳需要装配诊断运行时（观察点仍在 Core/VM 侧，外壳只负责装配与 UI 投影观测）。 -->
+    <ProjectReference Include="..\PCMig.Diagnostics\PCMig.Diagnostics.csproj" />
     <None Include="..\..\matrix\migration-matrix.yaml" Link="matrix\migration-matrix.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 应用内更新日志：唯一内容源仍是 docs\更新日志.md，只嵌入供 WinUI 只读呈现。 -->
+    <EmbeddedResource Include="..\..\docs\更新日志.md" LogicalName="PCMig.WinUI.Assets.CHANGELOG.md" />
   </ItemGroup>
   <!--
     WinUI 3 已知缺口：self-contained publish 不会把应用自身的资源索引 <App>.pri 带进发布目录，

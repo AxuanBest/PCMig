@@ -1,5 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using PCMig.Core.Diagnostics;
+using PCMig.Diagnostics.Abstractions;
+using PCMig.Diagnostics.Abstractions.Events;
+using PCMig.Diagnostics.Abstractions.Payloads;
 
 namespace PCMig.Core.State;
 
@@ -85,16 +89,43 @@ public static class JsonStateStore
         }
     }
 
-    public static void WriteAtomic<T>(string path, T value)
+    public static void WriteAtomic<T>(string path, T value, string? artifactKind = null, DiagnosticContext? context = null)
     {
+        var kind = artifactKind ?? DeriveArtifactKind(path);
+        var ctx = context ?? CoreDiagnostics.ContextFor("JsonStateStore");
+        var diagnostics = CoreDiagnostics.Sink.Publisher;
+
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         var tmp = path + ".tmp-" + Guid.NewGuid().ToString("N")[..8];
         var existed = File.Exists(path);
+
+        // ★ 观察点 ①：进入写入（含"目标是否已存在"这一关键事实）★
+        Publish(diagnostics, ctx, kind, "Begin", existed, null, PersistenceEvents.WriteStarted, DiagnosticLevel.Debug);
         try
         {
-            var json = JsonSerializer.Serialize(value, Options);
-            File.WriteAllText(tmp, json);
+            string json;
+            try
+            {
+                json = JsonSerializer.Serialize(value, Options);
+            }
+            catch (Exception ex)
+            {
+                // 序列化失败：如实记录后**原样抛出**（业务语义不变）。
+                Publish(diagnostics, ctx, kind, "Serialize", existed, ex.GetType().Name, PersistenceEvents.WriteFailed, DiagnosticLevel.Error, ex);
+                throw;
+            }
+
+            try
+            {
+                File.WriteAllText(tmp, json);
+            }
+            catch (Exception ex)
+            {
+                Publish(diagnostics, ctx, kind, "TempWrite", existed, ex.GetType().Name, PersistenceEvents.WriteFailed, DiagnosticLevel.Error, ex);
+                throw;
+            }
+
             // 外部程序（杀毒、备份、用户用编辑器看着）可能正打开着目标文件，此时覆盖会被拒绝。
             // 退避重试；仍失败时：如果目标本来就有（视图类状态），只告警、不中断任务——
             // Receipt 才是权威，job-state.json 只是视图；如果是首次创建，如实抛出。
@@ -103,7 +134,14 @@ public static class JsonStateStore
             var maxAttempts = inCooldown ? CooldownAttempts : FullAttempts;
             for (var i = 0; ; i++)
             {
-                try { File.Move(tmp, path, overwrite: true); NoteWriteOk(path); return; }
+                try
+                {
+                    File.Move(tmp, path, overwrite: true);
+                    NoteWriteOk(path);
+                    // ★ 观察点 ②：Move 真的成功了才叫 Written（"方法返回"不等于"已落盘"）★
+                    Publish(diagnostics, ctx, kind, "Move", existed, null, PersistenceEvents.WriteSucceeded, DiagnosticLevel.Debug, durabilityNote: "api-complete");
+                    return;
+                }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     if (i >= maxAttempts - 1)
@@ -112,8 +150,11 @@ public static class JsonStateStore
                         {
                             var msg = NoteSkip(path, ex, inCooldown);
                             if (msg != null) OnWarning?.Invoke(msg);
+                            // ★ 观察点 ③：已存在目标写入被跳过（**不是**成功）★
+                            Publish(diagnostics, ctx, kind, "Move", true, ex.GetType().Name, PersistenceEvents.WriteSkipped, DiagnosticLevel.Warning, ex);
                             return;
                         }
+                        Publish(diagnostics, ctx, kind, "Move", false, ex.GetType().Name, PersistenceEvents.WriteFailed, DiagnosticLevel.Error, ex);
                         throw;
                     }
                     Thread.Sleep(40 * (i + 1));
@@ -123,6 +164,73 @@ public static class JsonStateStore
         finally
         {
             try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* 残件不影响正确性 */ }
+        }
+    }
+
+    /// <summary>
+    /// 观察点发布（**绝不影响业务**）：诊断未安装时 IsEnabledFor 为假 ⇒ 提前返回、零构造。
+    /// Path 只给脱敏引用（角色 + 工件类型），不写明文路径。
+    /// </summary>
+    private static void Publish(
+        IDiagnosticPublisher diagnostics,
+        DiagnosticContext context,
+        string artifactKind,
+        string stage,
+        bool destinationExisted,
+        string? reasonCode,
+        EventDescriptor descriptor,
+        DiagnosticLevel level,
+        Exception? exception = null,
+        string? durabilityNote = null)
+    {
+        try
+        {
+            if (!diagnostics.IsEnabledFor(descriptor)) return;
+
+            diagnostics.TryPublish(new DiagnosticEventDraft(
+                descriptor,
+                context,
+                new PstWritePayload(artifactKind, stage, destinationExisted, reasonCode),
+                Level: level,
+                Outcome: descriptor == PersistenceEvents.WriteSucceeded ? DiagnosticOutcome.Succeeded
+                    : descriptor == PersistenceEvents.WriteSkipped ? DiagnosticOutcome.Skipped
+                    : descriptor == PersistenceEvents.WriteFailed ? DiagnosticOutcome.Failed
+                    : DiagnosticOutcome.Started,
+                ExceptionType: exception?.GetType().Name,
+                HResult: exception?.HResult,
+                ErrorDomain: exception is null ? ErrorDomain.None : ErrorDomain.Managed,
+                Message: durabilityNote,
+                CorrelationId: null));
+        }
+        catch (Exception)
+        {
+            // 观察失败绝不改变持久化行为。
+        }
+    }
+
+    /// <summary>从文件名/目录推断工件类型（工件的**语义分类**，不是路径明文）。</summary>
+    internal static string DeriveArtifactKind(string path)
+    {
+        try
+        {
+            var name = Path.GetFileName(path);
+            var parent = Path.GetFileName(Path.GetDirectoryName(path) ?? string.Empty);
+            if (string.Equals(parent, "receipts", StringComparison.OrdinalIgnoreCase)) return "Receipt";
+            return name.ToLowerInvariant() switch
+            {
+                "job-state.json" => "JobState",
+                "observed-state.json" => "ObservedState",
+                "plan.json" => "Plan",
+                "job.json" => "JobDefinition",
+                "preflight.json" => "PreflightReport",
+                "verify-report.json" => "VerifyReport",
+                "pause.request" => "PauseRequest",
+                _ => "Unknown",
+            };
+        }
+        catch (Exception)
+        {
+            return "Unknown";
         }
     }
 
@@ -137,7 +245,30 @@ public static class JsonStateStore
     {
         value = default;
         try { value = Read<T>(path); return true; }
-        catch { return false; }
+        catch (Exception ex)
+        {
+            // ★ 观察点 ④：只有"文件确实存在却读不出来"才是有价值的失败事实 ★
+            //   文件不存在是正常的首次运行，不应当成事故（也避免刷屏）。
+            try
+            {
+                if (File.Exists(path))
+                {
+                    var diagnostics = CoreDiagnostics.Sink.Publisher;
+                    if (diagnostics.IsEnabledFor(PersistenceEvents.ReadFailed))
+                    {
+                        diagnostics.TryPublish(new DiagnosticEventDraft(
+                            PersistenceEvents.ReadFailed,
+                            CoreDiagnostics.ContextFor("JsonStateStore"),
+                            new PstReadFailurePayload(DeriveArtifactKind(path), ex.GetType().Name),
+                            Outcome: DiagnosticOutcome.Failed,
+                            ExceptionType: ex.GetType().Name,
+                            ErrorDomain: ErrorDomain.Managed));
+                    }
+                }
+            }
+            catch (Exception) { /* 观察失败不影响读取语义 */ }
+            return false;
+        }
     }
 
     /// <summary>读取 Receipt 目录下全部凭证（用于状态重建 / 恢复）。损坏的单条凭证跳过并记录。</summary>
@@ -148,7 +279,27 @@ public static class JsonStateStore
         foreach (var f in Directory.EnumerateFiles(receiptsDir, "*.json").OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
         {
             try { list.Add(Read<T>(f)); }
-            catch (Exception ex) { onCorrupt?.Invoke($"{f}: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                onCorrupt?.Invoke($"{f}: {ex.Message}");
+                // ★ 观察点 ⑤：损坏回执被跳过（业务既有的"跳过并继续"语义不变）★
+                try
+                {
+                    var diagnostics = CoreDiagnostics.Sink.Publisher;
+                    if (diagnostics.IsEnabledFor(PersistenceEvents.ReceiptCorrupt))
+                    {
+                        diagnostics.TryPublish(new DiagnosticEventDraft(
+                            PersistenceEvents.ReceiptCorrupt,
+                            CoreDiagnostics.ContextFor("JsonStateStore"),
+                            new PstReadFailurePayload("Receipt", ex.GetType().Name),
+                            Level: DiagnosticLevel.Warning,
+                            Outcome: DiagnosticOutcome.Skipped,
+                            ExceptionType: ex.GetType().Name,
+                            ErrorDomain: ErrorDomain.Managed));
+                    }
+                }
+                catch (Exception) { /* 观察失败不影响读取语义 */ }
+            }
         }
         return list;
     }

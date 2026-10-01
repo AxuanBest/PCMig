@@ -1,5 +1,9 @@
-﻿using PCMig.Core.Matrix;
+using PCMig.Core.Diagnostics;
+using PCMig.Core.Matrix;
 using PCMig.Core.Models;
+using PCMig.Diagnostics.Abstractions;
+using PCMig.Diagnostics.Abstractions.Events;
+using PCMig.Diagnostics.Abstractions.Payloads;
 using Serilog;
 
 namespace PCMig.Core.Planning;
@@ -18,6 +22,26 @@ public sealed class Planner
         var plan = new MigrationPlan { JobId = job.JobId };
         var opt = job.Options;
         var threshold = (long)(matrix.LargeFileThresholdMB > 0 ? matrix.LargeFileThresholdMB : opt.LargeFileThresholdMB) * 1024 * 1024;
+
+        // ★ D6.1 §16 观察点 ★ 计划产出的输入规模（只读既有输入，不做任何额外扫描）。
+        CoreDiagnostics.PublishCore(
+            PlanEvents.PlanRequested,
+            new PlnPlanRequestedPayload(
+                job.Sources.Count(s => s.Enabled), observed.Objects.Count,
+                opt.SplitLargeFiles, job.CustomSelections.Count > 0),
+            CoreDiagnostics.ContextFor("Planner", job.JobId),
+            DiagnosticLevel.Information, DiagnosticOutcome.Accepted, "Planner");
+
+        // ★ D6.1 §16 ★ 选择快照摘要（只报规模：源根/自定义选择/启用源/树勾选节点数）。
+        var treeSelectedNodes = observed.Objects.Sum(o => o.FileList?.Count ?? 0);
+        CoreDiagnostics.PublishCore(
+            PlanEvents.SelectionSnapshot,
+            new PlnSelectionPayload(job.Sources.Count, job.CustomSelections.Count,
+                job.Sources.Count(s => s.Enabled), treeSelectedNodes),
+            CoreDiagnostics.ContextFor("Planner", job.JobId),
+            DiagnosticLevel.Information, DiagnosticOutcome.Succeeded, "Planner");
+        var objectsWithoutSourceRoot = 0;
+        var restartableObjects = 0;
 
         // 排序策略：先 DataVolume，后 UserProfile/AppState；同类内大对象在前（尽早开始大头传输）
         var ordered = observed.Objects
@@ -51,6 +75,10 @@ public sealed class Planner
                 UseRestartablePass = opt.SplitLargeFiles && obj.HasLargeFiles,
                 FileList = obj.FileList
             });
+
+            // 只统计（不参与映射决策）：有多少对象定位不到源根、多少走 /Z 可续传通道。
+            if (sourceRoot is null) objectsWithoutSourceRoot++;
+            if (opt.SplitLargeFiles && obj.HasLargeFiles) restartableObjects++;
         }
 
         // 记录策略排除（写进 plan 供审计；真正执行由 robocopy /XD /XF 完成）
@@ -62,6 +90,29 @@ public sealed class Planner
 
         _log.Information("计划生成: {Objects} 个对象, 总计 {Bytes}, 大文件阈值 {Threshold}",
             plan.Objects.Count, Util.Format.Bytes(plan.TotalBytes), Util.Format.Bytes(threshold));
+
+        // ★ D6.1 §16 观察点 ★ 产出摘要或"空计划"事实（业务返回值一字未改）。
+        var planContext = CoreDiagnostics.ContextFor("Planner", job.JobId);
+        if (plan.Objects.Count == 0)
+        {
+            CoreDiagnostics.PublishCore(
+                PlanEvents.PlanEmpty,
+                new PlnPlanEmptyPayload(
+                    observed.Objects.Count, job.Sources.Count(s => s.Enabled),
+                    observed.Objects.Count == 0 ? "no-observed-objects" : "all-objects-filtered"),
+                planContext, DiagnosticLevel.Warning, DiagnosticOutcome.Skipped, "Planner");
+        }
+        else
+        {
+            CoreDiagnostics.PublishCore(
+                PlanEvents.PlanCreated,
+                new PlnPlanCreatedPayload(
+                    plan.Objects.Count, plan.TotalBytes,
+                    plan.Objects.Count == 0 ? 0 : plan.Objects.Max(o => o.EstimatedBytes),
+                    plan.ExcludedByPolicy.Count, objectsWithoutSourceRoot, restartableObjects),
+                planContext, DiagnosticLevel.Information, DiagnosticOutcome.Succeeded, "Planner");
+        }
+
         return plan;
     }
 
