@@ -29,9 +29,11 @@
 | D6.2 Real World Validation | **NOT STARTED**（等用户明确触发语） |
 | Stage B | **NOT AUTHORIZED** |
 | 测试基线 | `PCMig.Core.Tests` 290 + `PCMig.Diagnostics.Tests` 286 = **576 / 0** |
-| 构建基线 | sln `0 error / 1 warning`（既有 xUnit2031）；WinUI `0 error / 3 warning`（既有 WMC1506 ×3） |
-| Git 分支 / 治理前 Checkpoint | `feature/winui-v0.5.0` · **`2c0183b`**（`checkpoint: preserve v0.5.0 PMML frozen and Diagnostics D6.1`） |
-| 当前工作交接 | `docs\工作交接-20261001-D6.1诊断收口与全量验收.md` |
+| Solution | `PCMig.sln` **8 个工程**（2026-10-01 补齐 WinUI 与 Diagnostics；见下文 §十） |
+| 构建基线 | `dotnet build PCMig.sln -c Release` → **0 error / 4 warning**（既有：xUnit2031 ×1 + WMC1506 ×3，无新增） |
+| Git 分支 / Commits | `feature/winui-v0.5.0` · checkpoint **`2c0183b`**（治理前真实产品状态）→ solution **`7ba2bc1`** → governance **`c5e668c`** |
+| Workspace 治理 | **COMPLETE**（2026-10-01 第二轮：docs 顶层 `.md` 83 → 29；清出 ≈1.09 GiB 可重建产物） |
+| 当前工作交接 | `docs\工作交接-20261001-Workspace治理完成与D6.2起点.md` |
 | 文档入口 | 本文件（`docs\INDEX.md`） |
 
 **一句话**：产品功能处于冻结状态（PMML v1.0 FROZEN / D6.1 COMPLETE），下一步是 D6.2 真实环境验证，但**未获授权前不得开始**。
@@ -146,7 +148,7 @@
 
 ## 七、【Current Handover】当前工作交接
 
-**当前**：`docs\工作交接-20261001-D6.1诊断收口与全量验收.md`
+**当前**：`docs\工作交接-20261001-Workspace治理完成与D6.2起点.md`
 
 规则（与 `AGENTS.md` 铁律 10 一致）：
 
@@ -159,7 +161,7 @@
 
 ## 八、【History】历史与归档（仅追溯，不覆盖当前规则）
 
-- `docs\handover\history\` —— 全部历史工作交接（`工作交接-*.md`、`工作交接说明_v0.4.*.md`）。这些文档**互相引用多为同目录相对名**，整体归档后互引自动保持有效。
+- `docs\handover\history\` —— 全部历史工作交接（`工作交接-*.md`、`工作交接说明_v0.4.*.md`）。这些文档**互相引用多为同目录相对名**，整体归档后互引自动保持有效。当前共 **42 篇**（含 2026-10-01 归档的 `工作交接-20261001-D6.1诊断收口与全量验收.md`）。
 - `docs\archive\` —— 已被取代 / 已交付的历史文档（Superseded / Historical）：
   - `公司域环境验证清单.md` —— 已被 `First-Day-Company-Test-Checklist.md` 取代（两块独有内容已合并保留）
   - `FinalPolish-用户指令原文-20260927.md` —— 用户 67 节指令原文归档（文件带只读属性，**不可删**）
@@ -199,7 +201,7 @@
 - 第一轮（Workspace Inventory，只读）：`docs\工作区治理\第一轮-Workspace-Inventory-20261001.md`
 - 第二轮（Workspace Cleanup & Governance，执行）：`docs\工作区治理\第二轮-Workspace-Cleanup-Report-20261001.md`
 - 治理证据与脚本：`E:\Project\deepseek work\archive\pcmig-governance-20261001\`
-- 治理前增量备份：`PCMig\archive\backup-pre-governance-20261001-133659\`（336 文件，SHA256 336/336 MATCH）
+- 治理前增量备份：`PCMig\archive\backup-pre-governance-20261001-133659\`（341 文件 = 336 项目文件 + 5 份证据，SHA256 336/336 MATCH）
 
 ---
 
