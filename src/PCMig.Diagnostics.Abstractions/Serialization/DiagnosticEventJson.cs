@@ -38,7 +38,18 @@ public static class DiagnosticEventJson
         writer.WriteNumber("eventId", evt.Descriptor.EventId);
         writer.WriteString("eventCode", evt.Descriptor.Code);
         writer.WriteString("eventName", evt.Descriptor.Name);
-        writer.WriteNumber("eventVersion", evt.Descriptor.Version);
+        // ★ D6.3 §6.5 ★ 版本纪律：写**这一行声明的版本**，绝不改写成当前契约版本。
+        //   旧实现写 `evt.Descriptor.Version`（当前版本）⇒ 一行 `eventVersion=999` 经
+        //   Parse→ToJsonLine→Parse 之后会变成"当前版本且完全受支持"，未来版本被洗白成事实。
+        //   · 有声明版本 ⇒ 原样写出（受支持与否由再解析按声明版本重新判定）；
+        //   · 无声明版本但**不受支持**（源行本来就没写版本）⇒ 不发明一个版本，保持"缺失"；
+        //   · 新产生的事件（无声明、且不受支持=false）⇒ 写当前契约版本，与旧行为一致。
+        if (evt.DeclaredEventVersion is { } declaredVersion)
+            writer.WriteNumber("eventVersion", declaredVersion);
+        else if (!evt.VersionUnsupported)
+            writer.WriteNumber("eventVersion", evt.Descriptor.Version);
+        if (evt.VersionUnsupported)
+            writer.WriteBoolean("versionUnsupported", true);
         writer.WriteString("category", evt.Descriptor.Category.ToString());
 
         writer.WriteString("level", evt.Level.ToString());
@@ -165,6 +176,9 @@ public static class DiagnosticEventJson
             string? eventName = null;
             var eventVersion = 0;
             var hasEventVersion = false;
+            // ★ D6.3 §6.5 ★ 行里可以自述"不受支持"：再解析必须尊重它，
+            //   否则一次导出往返就能把不支持的证据洗成受支持。
+            var declaredUnsupported = false;
             var hasEventId = false;
             var hasSessionId = false;
             var hasSequence = false;
@@ -215,6 +229,7 @@ public static class DiagnosticEventJson
                     case "eventCode": eventCode = ReadString(ref reader); break;
                     case "eventName": eventName = ReadString(ref reader); break;
                     case "eventVersion": hasEventVersion = true; eventVersion = reader.TokenType == JsonTokenType.Number ? reader.GetInt32() : 0; break;
+                    case "versionUnsupported": declaredUnsupported = reader.TokenType == JsonTokenType.True; break;
                     case "category": category = ReadEnum(ref reader, DiagnosticCategory.Unknown, ref unknownTokens); break;
                     // ★ 存在性单独记 ★ "字段在场但 token 不认识"（例如 level:"Catastrophic"）**不是**缺字段：
                     //   保留 raw token 并回落到 catalog 声明的值（这是既有契约，必须保持）。
@@ -326,8 +341,9 @@ public static class DiagnosticEventJson
             //   · 行里没有 eventVersion（旧数据/手写数据）⇒ 无法核对 ⇒ 视为不受支持；
             //   · 已知事件但版本不匹配 ⇒ UnsupportedVersion（绝不静默归一成当前版本）；
             //   · 未知事件（IsKnown=false）⇒ 本来就不可解释，同样不解码 payload。
-            var versionUnsupported = !hasEventVersion || (descriptor.IsKnown && eventVersion != descriptor.Version);
-            if (versionUnsupported && descriptor.IsKnown && hasEventVersion)
+            var versionMismatch = descriptor.IsKnown && hasEventVersion && eventVersion != descriptor.Version;
+            var versionUnsupported = declaredUnsupported || !hasEventVersion || versionMismatch;
+            if (versionMismatch)
                 AddUnknownToken(ref unknownTokens, "eventVersion:" + eventVersion);
             else if (!hasEventVersion)
                 AddUnknownToken(ref unknownTokens, "eventVersion:missing");

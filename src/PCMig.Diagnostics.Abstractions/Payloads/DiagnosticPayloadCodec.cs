@@ -84,6 +84,7 @@ public static class DiagnosticPayloadCodec
         [UiStateObservedPayload.Name] = ReadUiStateObserved,
         [UiDispatchRejectedPayload.Name] = ReadUiDispatchRejected,
         [UiInputObservedPayload.Name] = ReadUiInputObserved,
+        [UiNavigationPayload.Name] = ReadUiNavigation,
         [PstWritePayload.Name] = ReadPstWrite,
         [PstReadFailurePayload.Name] = ReadPstReadFailure,
         [TrnPauseRequestPayload.Name] = ReadTrnPauseRequest,
@@ -369,6 +370,16 @@ public static class DiagnosticPayloadCodec
         PayloadJson.StrOr(e, "actionKind", "unknown"),
         PayloadJson.StrOr(e, "source", "unknown"));
 
+    // 导航读回：from/to/reasonCode 必须**逐字解回来**（少解一个字段 = 一次 Parse→ToJsonLine 往返就把它洗掉，
+    // 与 eventVersion 被清洗是同一类缺陷，见 D6.3 WP G）。未知 step 用 "(unknown)"、未知原因用 "unspecified"，
+    // 都是"诚实的不知道"，不猜。
+    private static IDiagnosticPayload ReadUiNavigation(JsonElement e) => new UiNavigationPayload(
+        PayloadJson.StrOr(e, "from", "(unknown)"),
+        PayloadJson.StrOr(e, "to", "(unknown)"),
+        PayloadJson.StrOr(e, "reasonCode", "unspecified"),
+        PayloadJson.Str(e, "actionKind"),
+        PayloadJson.Str(e, "operationId"));
+
     private static IDiagnosticPayload ReadUiEligibility(JsonElement e) => new UiEligibilityPayload(
         PayloadJson.BoolOr(e, "allowed", false),
         PayloadJson.StrOr(e, "reasonCode", "unknown"));
@@ -409,7 +420,12 @@ public static class DiagnosticPayloadCodec
         PayloadJson.BoolOr(e, "isEnabled", false),
         PayloadJson.BoolOr(e, "isVisible", false),
         PayloadJson.IntOr(e, "suppressedDuplicates", 0),
-        PayloadJson.IntOr(e, "droppedSensitive", 0));
+        PayloadJson.IntOr(e, "droppedSensitive", 0))
+    {
+        // ★ D6.3 §14 ★ 停止理由必须能穿过一次"解析→重写"往返：
+        //   否则导出/回放后的证据就答不出"观测为什么停了"（"到期"与"用户关了"再次糊成一片）。
+        ReasonCode = PayloadJson.Str(e, "reasonCode"),
+    };
 
     private static IDiagnosticPayload ReadPstWrite(JsonElement e) => new PstWritePayload(
         PayloadJson.StrOr(e, "artifactKind", "unknown"),
@@ -424,7 +440,10 @@ public static class DiagnosticPayloadCodec
     private static IDiagnosticPayload ReadTrnPauseRequest(JsonElement e) => new TrnPauseRequestPayload(
         PayloadJson.BoolOr(e, "immediate", false),
         PayloadJson.BoolOr(e, "succeeded", false),
-        PayloadJson.Str(e, "reasonCode"));
+        PayloadJson.Str(e, "reasonCode"),
+        // ★ D6.3 §11（缺口③）★ 缺字段 ⇒ null（"不适用/不知道"），绝不当成 false。
+        PayloadJson.Bool(e, "requestExisted"),
+        PayloadJson.Bool(e, "deleted"));
 
     // ────────────────────────── APP ──────────────────────────
 

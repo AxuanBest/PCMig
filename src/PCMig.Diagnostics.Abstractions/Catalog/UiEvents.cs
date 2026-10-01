@@ -84,10 +84,10 @@ public static class UiEvents
         DiagnosticCategory.Ui, 15, "UI.TestIntentObserved",
         DiagnosticLevel.Information, DeliveryClass.Verbose, PrivacyClassification.Public, "UiAction");
 
-    /// <summary>页面/步骤导航变化。</summary>
+    /// <summary>页面/步骤导航变化（语义事实：from/to/reasonCode[/actionKind][/operationId]，不含帧与视觉状态）。</summary>
     public static readonly EventDescriptor NavigationChanged = EventDescriptor.Define(
         DiagnosticCategory.Ui, 16, "UI.NavigationChanged",
-        DiagnosticLevel.Information, DeliveryClass.Operational, PrivacyClassification.Public, "UiAction");
+        DiagnosticLevel.Information, DeliveryClass.Operational, PrivacyClassification.Public, "UiNavigation");
 
     internal static readonly EventDescriptor[] All =
     {

@@ -19,6 +19,33 @@ public sealed record UiActionPayload(string ActionKind, string Source) : IDiagno
     }
 }
 
+/// <summary>
+/// 页面/步骤导航变化（**语义事实**：从哪一页到哪一页、为什么、由哪个动作/操作触发）。
+///
+/// 只记语义——**不记帧、不记指针位置、不记任何视觉状态**：
+///   · <c>from</c>/<c>to</c> 是稳定步骤 token（<c>Connect</c>/<c>SelectData</c>/<c>Progress</c>/<c>Result</c>）；
+///     首屏没有"前一页"时 from = <c>(none)</c> —— 诚实地说"之前不在任何一页"，而不是编造一个 Step0；
+///   · <c>reasonCode</c> 只允许来自封闭集合（`PCMig.Core.Diagnostics.NavigationReasons`），
+///     未知一律降级为 <c>unspecified</c>，绝不把自由文本带进事件；
+///   · <c>actionKind</c>/<c>operationId</c> 是可选的因果链线索，**没有就省略该属性**（不编造）。
+///
+/// 为什么**不复用** <see cref="UiActionPayload"/>：导航不是"用户动作"，
+/// 若共用载荷，反馈契约的期望匹配（按 ActionKind 匹配动作期望）会把一次导航误判成一次动作。
+/// </summary>
+public sealed record UiNavigationPayload(string From, string To, string ReasonCode, string? ActionKind = null, string? OperationId = null) : IDiagnosticPayload
+{
+    public const string Name = "UiNavigation";
+    public string PayloadName => Name;
+    public void WriteJson(Utf8JsonWriter w)
+    {
+        w.WriteString("from", From);
+        w.WriteString("to", To);
+        w.WriteString("reasonCode", ReasonCode);
+        PayloadJson.WriteStringOrNull(w, "actionKind", ActionKind);
+        PayloadJson.WriteStringOrNull(w, "operationId", OperationId);
+    }
+}
+
 /// <summary>原有 guard/CanExecute 判断的结果（只观察已执行的结果，不为诊断多调用一次判据）。</summary>
 public sealed record UiEligibilityPayload(bool Allowed, string ReasonCode) : IDiagnosticPayload
 {
@@ -157,6 +184,15 @@ public sealed record UiInputObservedPayload(
     public const string Name = "UiInputObserved";
     public string PayloadName => Name;
 
+    /// <summary>
+    /// 观测生命周期标记的**停止理由**（D6.3 §14）：只对
+    /// <see cref="InputCategories.LifecycleStopped"/> 有意义，取值必定来自
+    /// <see cref="DeepTraceStopReasons"/> 的固定集合（不是自由文本）。
+    /// 普通输入事件为 null。它回答的是"观测为什么结束了"——
+    /// 否则"到期自动停"和"用户关掉了"在证据里无法区分。
+    /// </summary>
+    public string? ReasonCode { get; init; }
+
     /// <summary>DroppedSensitive：因命中敏感来源（PasswordBox／密码类 ControlId）而**整体丢弃**的输入条数。
     /// 只记**条数**，绝不记被丢弃的来源身份或按键身份。</summary>
     public void WriteJson(Utf8JsonWriter w)
@@ -168,6 +204,7 @@ public sealed record UiInputObservedPayload(
         w.WriteBoolean("isVisible", IsVisible);
         w.WriteNumber("suppressedDuplicates", SuppressedDuplicates);
         w.WriteNumber("droppedSensitive", DroppedSensitive);
+        PayloadJson.WriteStringOrNull(w, "reasonCode", ReasonCode);
     }
 }
 
@@ -205,8 +242,22 @@ public sealed record PstReadFailurePayload(string ArtifactKind, string ReasonCod
 
 // ────────────────────────── TRN：暂停/恢复请求文件（只观察，不代改业务） ──────────────────────────
 
-/// <summary>暂停请求写入/清除的结果（"点了暂停没反应"的第一手事实）。</summary>
-public sealed record TrnPauseRequestPayload(bool Immediate, bool Succeeded, string? ReasonCode) : IDiagnosticPayload
+/// <summary>
+/// 暂停请求写入/清除的结果（"点了暂停没反应"的第一手事实）。
+///
+/// ★ D6.3 §11（缺口③收口）★ `Succeeded` 原来只表示"调用没抛异常"，包内因此**无法回答**
+/// "当时到底有没有暂停请求文件、有没有真的删掉" —— 审计红灯"TRN.PauseRequestCleared 恒报 Succeeded"。
+/// 现在把两个事实作为**可选**字段如实带上（写入路径不适用 ⇒ 不写，缺字段 ⇒ 解码为 null，
+/// 绝不用 false 冒充"当时不存在"）：
+///   · <see cref="RequestExisted"/>：清除动作执行**前**暂停请求文件是否存在；
+///   · <see cref="Deleted"/>：本次是否真的删除了它。
+/// </summary>
+public sealed record TrnPauseRequestPayload(
+    bool Immediate,
+    bool Succeeded,
+    string? ReasonCode,
+    bool? RequestExisted = null,
+    bool? Deleted = null) : IDiagnosticPayload
 {
     public const string Name = "TrnPauseRequest";
     public string PayloadName => Name;
@@ -215,5 +266,7 @@ public sealed record TrnPauseRequestPayload(bool Immediate, bool Succeeded, stri
         w.WriteBoolean("immediate", Immediate);
         w.WriteBoolean("succeeded", Succeeded);
         PayloadJson.WriteStringOrNull(w, "reasonCode", ReasonCode);
+        PayloadJson.WriteBoolOrNull(w, "requestExisted", RequestExisted);
+        PayloadJson.WriteBoolOrNull(w, "deleted", Deleted);
     }
 }
