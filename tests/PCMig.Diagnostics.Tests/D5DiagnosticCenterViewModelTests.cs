@@ -115,7 +115,7 @@ public sealed class D5DiagnosticCenterViewModelTests
         source.RecentEvents = new[] { MakeEvent(1), MakeEvent(2) };
         source.Flight = new FlightStats(10, 10, 4096, 0, 0, 0, 1, 1, 0, 0, 0, 128, 1);
         source.Rules = new RuleEngineStats(50, 2, 1, 0, 0, 0, 0, 2, 0);
-        source.Expectations = new ExpectationTrackerStats(3, 2, 0, 0, 1, 0, 1);
+        source.Expectations = new ExpectationTrackerStats(3, 2, 0, 0, 1, 0, 1, 0);
 
         var vm = new DiagnosticCenterViewModel(source);
         vm.Refresh();

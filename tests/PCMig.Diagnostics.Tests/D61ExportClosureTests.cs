@@ -71,6 +71,23 @@ public sealed class D61ExportClosureTests : IDisposable
         => Assert.True(D2TestSupport.WaitUntil(() => runtime.Health.EventsWritten >= expected, 10_000),
             $"只写下了 {runtime.Health.EventsWritten} 条，期望 {expected}");
 
+    /// <summary>
+    /// 等 **viewer 消费者**也把这些事件追上（有界）。
+    /// ★ D6.3 修正 ★ viewer 与 writer 是两条独立通道：只等 <see cref="WaitForWritten"/> 就去读
+    /// <c>TryGetViewerSnapshot</c>，在并发负载下会读到落后快照（实测在全量套件里偶发失败）。
+    /// 这里只补"等的条件"，断言强度不变（仍要求这些事件一条不少地出现在 viewer 里）。
+    /// </summary>
+    private static void WaitForViewer(DiagnosticRuntime runtime, int expected)
+    {
+        var seen = 0;
+        Assert.True(D2TestSupport.WaitUntil(() =>
+        {
+            if (!runtime.TryGetViewerSnapshot(out var snapshot)) return false;
+            seen = snapshot.Count(e => e.Descriptor.Name == PersistenceEvents.WriteFailed.Name);
+            return seen >= expected;
+        }, 10_000), $"viewer 只看到 {seen} 条，期望 {expected}");
+    }
+
     /// <summary>活动段可能仍被 writer 打开 ⇒ 共享方式读（不复制产品逻辑，只是同样的文件共享口径）。</summary>
     private static string ReadAllTextShared(string path)
     {
@@ -231,8 +248,9 @@ public sealed class D61ExportClosureTests : IDisposable
         const int published = 25;
         var runtime = StartRuntime("cutoff", events: published);
         WaitForWritten(runtime, published);                  // 事件真的落盘之后才谈截止点
+        WaitForViewer(runtime, published);                   // ★ D6.3 ★ viewer 是独立消费者，必须也追平再读快照
 
-        runtime.TryGetViewerSnapshot(out var all);
+        Assert.True(runtime.TryGetViewerSnapshot(out var all), "viewer 快照不可得");
         var publishedSequences = all.Where(e => e.Descriptor.Name == PersistenceEvents.WriteFailed.Name)
             .Select(e => e.Sequence).ToArray();
         Assert.True(publishedSequences.Length >= published);

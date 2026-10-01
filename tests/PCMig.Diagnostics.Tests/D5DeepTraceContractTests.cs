@@ -108,15 +108,23 @@ public sealed class D5DeepTraceContractTests
         var code = StripCode(Observer);
 
         Assert.Contains("DefaultMaxDuration", code, StringComparison.Ordinal);
-        Assert.Contains("_deadlineUtc", code, StringComparison.Ordinal);
         Assert.Contains("DuplicateWindow", code, StringComparison.Ordinal);
-        Assert.Contains("Suppressed", code, StringComparison.Ordinal);
+        // 重复抑制仍由本类限流，但计数与判决已交给契约层的**有界**窗口（D6.3 §14）。
+        Assert.Contains("_window.TryObserve(dedupeKey, now, out var suppressed)", code, StringComparison.Ordinal);
 
-        // 到期自动停（不需要用户记得关）——Tick 里必须有 Stop()。
+        // ★ D6.3 §14 ★ 截止点仍然存在，但判决已经搬到契约层的**有限窗口**上，
+        //   而且只读**单调**时钟（墙上时钟会被 NTP/DST/改表拨动 ⇒ "限时"会是假的）。
+        //   断言随之改为针对新的权威判据（不是放宽，而是换成更强的口径）。
+        Assert.Contains("_window.IsExpired(", code, StringComparison.Ordinal);
+        Assert.Contains("InputObservationWindow", code, StringComparison.Ordinal);
+        Assert.Contains("IMonotonicClock", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("DateTime.UtcNow", code, StringComparison.Ordinal);
+
+        // 到期自动停（不需要用户记得关）——Tick 里必须有带理由的 Stop。
         var tickIndex = code.IndexOf("_timer.Tick +=", StringComparison.Ordinal);
         Assert.True(tickIndex > 0);
         var tickBody = code.Substring(tickIndex, Math.Min(400, code.Length - tickIndex));
-        Assert.Contains("Stop()", tickBody, StringComparison.Ordinal);
+        Assert.Contains("Stop(DeepTraceStopReasons.DeadlineReached)", tickBody, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -148,10 +156,11 @@ public sealed class D5DeepTraceContractTests
         var shutdownIndex = mw.IndexOf("private void ShutdownAndExit()", StringComparison.Ordinal);
         Assert.True(shutdownIndex > 0);
         var shutdownBody = mw.Substring(shutdownIndex, Math.Min(1600, mw.Length - shutdownIndex));
-        Assert.Contains("_deepTraceObserver?.Stop();", shutdownBody, StringComparison.Ordinal);
+        // ★ D6.3 §14 ★ 停机必须走唯一出口并**带理由**（"关窗停"与"到期停"必须能区分）。
+        Assert.Contains("_deepTraceObserver?.Stop(DeepTraceStopReasons.WindowClosing);", shutdownBody, StringComparison.Ordinal);
 
         // 关窗注销必须排在诊断收尾之前（先停止产生新证据，再封段）。
-        var stopIndex = shutdownBody.IndexOf("_deepTraceObserver?.Stop();", StringComparison.Ordinal);
+        var stopIndex = shutdownBody.IndexOf("_deepTraceObserver?.Stop(DeepTraceStopReasons.WindowClosing);", StringComparison.Ordinal);
         var diagIndex = shutdownBody.IndexOf("DiagnosticBootstrap.Shutdown();", StringComparison.Ordinal);
         Assert.True(stopIndex < diagIndex, "注销输入观测必须早于诊断收尾");
     }

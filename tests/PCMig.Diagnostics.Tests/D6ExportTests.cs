@@ -197,7 +197,11 @@ public sealed class D6ExportTests : IDisposable
         var m = manifest.RootElement;
         Assert.Equal("local-file-only", m.GetProperty("delivery").GetString());
         Assert.Equal(exporter.LastExportKeyId, m.GetProperty("redaction").GetProperty("keyId").GetString());
-        Assert.Equal("unlinkable-by-default", m.GetProperty("redaction").GetProperty("crossPackageCorrelation").GetString());
+        // ★ D6.3 §6.4 ★ 废除 "unlinkable-by-default" 这类绝对承诺：假名化 ≠ 匿名，
+        //   时间/顺序/内容仍可能形成关联，必须在包里说清楚。
+        Assert.Equal("pseudonymized-per-package", m.GetProperty("redaction").GetProperty("crossPackageCorrelation").GetString());
+        Assert.Contains("不保证匿名或跨包不可关联",
+            m.GetProperty("redaction").GetProperty("crossPackageCorrelationNotice").GetString()!, StringComparison.Ordinal);
         Assert.True(m.GetProperty("entryCount").GetInt32() >= 4);
         Assert.Equal(EventCatalog.CatalogHash, m.GetProperty("catalogHash").GetString());
         Assert.False(m.TryGetProperty("sessionId", out _));                 // 默认不写原始 SessionId

@@ -226,15 +226,32 @@ public sealed class D2RuntimeTests
             first.Publisher.TryPublish(new DiagnosticEventDraft(
                 TransferEvents.JobRunStarted, DiagnosticContext.Root(first.SessionId, "t")));
             Assert.True(D2TestSupport.WaitUntil(() => first.Health.EventsWritten >= 1));
+            // ★ D6.3 ★ 第二段会话只在**启动那一刻**扫一次存储根（PublishPreviousSessionUncleanIfAny）；
+            //   若那一刻上一段会话目录还是"空骨架"，DiagnosticSessionStore.cs:242-243 会有意把它判为
+            //   "不是证据" ⇒ 本测试的等待永远等不到（全量套件里表现为等待 5s 后偶发失败）。
+            //   所以先确认盘上真的留下了证据文件，而不只是计数器变了，再启动第二段会话。
+            Assert.NotNull(first.Store);
+            var firstEventsDir = Path.Combine(first.Store!.SessionDir, "events");
+            Assert.True(D2TestSupport.WaitUntil(() =>
+                    Directory.Exists(firstEventsDir) &&
+                    Directory.EnumerateFiles(firstEventsDir, "*.jsonl").Any(f => new FileInfo(f).Length > 0), 10_000),
+                "上一段会话没有在盘上留下任何事件证据，第二段会话无从判断它是否干净关闭");
             // 故意不调用 ShutdownAsync：不写 clean marker。
 
             // 第二段会话：应当报"上次未确认正常关闭"，且**不得**断言崩溃。
             var second = DiagnosticRuntime.Start(D2TestSupport.Options(root), out _);
             try
             {
-                Assert.True(D2TestSupport.WaitUntil(() => second.TryGetViewerSnapshot(out var events)
-                    && events.Any(e => e.Descriptor.Name == DiagnosticsEvents.PreviousSessionUnclean.Name)),
-                    "启动时必须报出「上次未确认正常关闭」");
+                // ★ D6.3 ★ 失败时必须能看出"到底看见了什么"（空快照/没有这条事件是两种不同的病），
+                //   并且给足有界等待：并发的真实 runtime 一多，启动期这条上报会被调度推迟。
+                var seen = Array.Empty<string>();
+                Assert.True(D2TestSupport.WaitUntil(() =>
+                {
+                    if (!second.TryGetViewerSnapshot(out var events)) return false;
+                    seen = events.Select(e => e.Descriptor.Name).ToArray();
+                    return seen.Contains(DiagnosticsEvents.PreviousSessionUnclean.Name);
+                }, 20_000),
+                    $"启动时必须报出「上次未确认正常关闭」；viewer 实际有 {seen.Length} 条：{string.Join(",", seen)}");
             }
             finally
             {

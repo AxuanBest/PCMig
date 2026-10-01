@@ -90,6 +90,8 @@ public sealed class D61ActionCoverageTests
             "Step1.Connect", "Step1.AddShare",
             "Step2.Prepare", "Step2.Start", "Step2.Pause", "Step2.Stop", "Step2.Resume", "Step2.ExistingJobs",
             "Step4.Verify", "Step4.Repair",
+            // ★ 缺口②收口（D6.3 §11）★ Step4 的「恢复任务」原先漏在清单外：实机点击后零 UI-00x。
+            "Step4.Resume",
             "Shell.Transfer.Start", "Shell.Transfer.Pause", "Shell.Transfer.Stop", "Shell.Transfer.Resume",
             "Shell.Tool.MaterialTuning", "Shell.Tool.Diagnostics", "Shell.Panel.Diagnostics",
             "Diagnostics.Refresh", "Diagnostics.DeepTrace", "Diagnostics.WarnOnly", "Diagnostics.Export",
@@ -101,6 +103,92 @@ public sealed class D61ActionCoverageTests
         var duplicated = occurrences.Where(kv => kv.Value.Count > 1)
             .Select(kv => $"{kv.Key} -> {string.Join("/", kv.Value)}").ToArray();
         Assert.True(duplicated.Length == 0, "AutomationId 在 XAML 里重复出现（自动化会选错对象）：" + string.Join("; ", duplicated));
+    }
+
+    // ───────── 缺口②红灯：同一业务动作的**每个**入口都必须留下因果链 ─────────
+
+    /// <summary>
+    /// ★ 缺口②红灯（D6.3 §11）★ 结果页工具条「恢复任务」（`Step4.Resume`）实机点击后**零 UI-00x**：
+    ///   `ToolbarResume_Click` 完全没有 ActionTrace，且 `Step4Resume` 不在 BusinessCritical 清单里 ——
+    ///   于是"用户确实点了恢复"这件事在诊断里**根本不可答**（同一业务动作的 Step2 入口却有完整因果链）。
+    ///
+    /// 修复后必须同时满足（只声明不插桩等于没修）：
+    ///   ① 源码 XAML 里真有稳定 AutomationId `Step4.Resume`（可被自动化定位）；
+    ///   ② `ControlIds.BusinessCritical` 声明它（清单不再漏掉第三个入口）；
+    ///   ③ 处理函数体里**真的**开了动作：Begin + 期望 + 至少一个终点。
+    /// </summary>
+    [Fact]
+    public void Step4ResumeClickMustHaveACausalTraceLikeItsOtherTwoEntryPoints()
+    {
+        var page = File.ReadAllText(Path.Combine(RepoRoot(), "src", "PCMig.WinUI", "Views", "Step4ResultPage.xaml.cs"));
+        // 用**声明**定位（`void Xxx_Click(`），否则会命中 `ToolbarResume.Click += ToolbarResume_Click;` 这类接线行。
+        var body = MethodBody(page, "void ToolbarResume_Click");
+
+        Assert.Contains("ActionTrace.Begin(ActionKinds.Resume, ControlIds.Step4Resume", body, StringComparison.Ordinal);
+        Assert.Contains("trace.Expect(\"resume.v1\"", body, StringComparison.Ordinal);
+        // 终点必须有：只开不落终点 ⇒ Dispose 只能给 Unknown，"用户点了什么"依旧答不上。
+        Assert.True(
+            body.Contains("trace.Finish(", StringComparison.Ordinal)
+            || body.Contains("trace.Complete(", StringComparison.Ordinal)
+            || body.Contains("trace.Reject(", StringComparison.Ordinal),
+            "ToolbarResume_Click 开了动作却没有终点（Finish/Complete/Reject）");
+
+        var xaml = File.ReadAllText(Path.Combine(RepoRoot(), "src", "PCMig.WinUI", "Views", "Step4ResultPage.xaml"));
+        Assert.Contains("AutomationProperties.AutomationId=\"Step4.Resume\"", xaml, StringComparison.Ordinal);
+
+        var registry = File.ReadAllText(Path.Combine(RepoRoot(), "src", "PCMig.WinUI", "Diagnostics", "ControlIds.cs"));
+        Assert.Contains("public const string Step4Resume = \"Step4.Resume\";", registry, StringComparison.Ordinal);
+        Assert.Contains("Step4Resume", MethodBody(registry, "BusinessCritical"), StringComparison.Ordinal);
+    }
+
+    /// <summary>取出某个方法/字段初始化的花括号区块（按配对扫描，跳过字符串、字符与注释里的花括号）。</summary>
+    private static string MethodBody(string text, string memberName)
+    {
+        var at = text.IndexOf(memberName, StringComparison.Ordinal);
+        Assert.True(at >= 0, $"源码里找不到 {memberName}");
+        var open = text.IndexOf('{', at);
+        Assert.True(open > 0, $"{memberName} 之后找不到花括号区块起点");
+
+        var depth = 0;
+        var inString = false;
+        var inChar = false;
+        var inLineComment = false;
+        var inBlockComment = false;
+
+        for (var i = open; i < text.Length; i++)
+        {
+            var c = text[i];
+            var next = i + 1 < text.Length ? text[i + 1] : '\0';
+
+            if (inLineComment) { if (c == '\n') inLineComment = false; continue; }
+            if (inBlockComment) { if (c == '*' && next == '/') { inBlockComment = false; i++; } continue; }
+            if (inString)
+            {
+                if (c == '\\') { i++; continue; }
+                if (c == '"') inString = false;
+                continue;
+            }
+            if (inChar)
+            {
+                if (c == '\\') { i++; continue; }
+                if (c == '\'') inChar = false;
+                continue;
+            }
+
+            if (c == '/' && next == '/') { inLineComment = true; i++; continue; }
+            if (c == '/' && next == '*') { inBlockComment = true; i++; continue; }
+            if (c == '"') { inString = true; continue; }
+            if (c == '\'') { inChar = true; continue; }
+
+            if (c == '{') depth++;
+            else if (c == '}')
+            {
+                depth--;
+                if (depth == 0) return text.Substring(open, i - open + 1);
+            }
+        }
+
+        throw new InvalidOperationException($"{memberName} 的花括号不配对");
     }
 
     /// <summary>ControlId 不得用显示文字/序号/坐标兜底（§9 纪律的可判定部分）。</summary>
