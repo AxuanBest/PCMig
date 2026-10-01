@@ -21,7 +21,7 @@
 | PMML | **v1.0 — FROZEN** |
 | Diagnostics | **D6.1 — COMPLETE** |
 | 发布线 / 开发线 | 发布 **v0.4.9**；开发 **v0.5.0 WinUI**（分支 `feature/winui-v0.5.0`，**未发版**） |
-| 当前 Git | 分支 `feature/winui-v0.5.0`：checkpoint **`2c0183b`** → solution **`7ba2bc1`** → governance **`c5e668c`** → 交接与报告 **`73fcb05`** / **`6f002ac`** / **`beb2902`** → **HEAD `f592d8c`** |
+| 当前 Git | 分支 `feature/winui-v0.5.0`：checkpoint **`2c0183b`** → solution **`7ba2bc1`** → governance **`c5e668c`** → 交接与报告 **`73fcb05`** / **`6f002ac`** / **`beb2902`** → 治理完成时 HEAD **`f592d8c`**（其后另有 AGENTS 对齐提交；**最新 HEAD 一律用 `git log --oneline -1` 实读**，不写死） |
 | 验证基线 | Build `dotnet build PCMig.sln -c Release` → **0 error / 4 warning**（全部既有：xUnit2031 ×1 + WMC1506 ×3）；Tests **Core 290 + Diagnostics 286 = 576 / 0**。证据：`archive\pcmig-governance-20261001\s1-build.log`、`s1-test.log` |
 | 下一步 | **D6.2 Real World Validation**（等用户明确触发语；未获授权前不得开始） |
 | Stage B | **NOT AUTHORIZED / NOT STARTED** |
