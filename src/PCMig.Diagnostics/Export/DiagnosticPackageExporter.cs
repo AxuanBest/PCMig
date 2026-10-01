@@ -6,6 +6,8 @@ using System.IO.Compression;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 using PCMig.Diagnostics.Abstractions;
 using PCMig.Diagnostics.Abstractions.Serialization;
@@ -143,6 +145,9 @@ public sealed class DiagnosticPackageExporter
             using (var zip = new ZipArchive(fileStream, ZipArchiveMode.Create, leaveOpen: false))
             {
                 // ① events / incidents / metrics / flight（只导**已封段**；导出前 runtime 已把活动段封好）
+                //    packagedFacts：源段文件 → 包内那份内容的事实（长度/哈希/条数/跳过数），
+                //    供段清单按**包内**内容重写（★ D6.3 §6.2 ★）。
+                var packagedFacts = new Dictionary<string, PackagedFacts>(StringComparer.OrdinalIgnoreCase);
                 foreach (var dirName in AllowedEventDirs)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -157,8 +162,17 @@ public sealed class DiagnosticPackageExporter
 
                         if (name.EndsWith(".manifest.json", StringComparison.OrdinalIgnoreCase))
                         {
-                            // 段清单：只含长度/哈希/序号范围/时间范围，无个人信息 ⇒ 原样。
-                            AddBytes(zip, $"sessions/{sessionAlias}/{dirName}/{name}", file, entries);
+                            // ★ D6.3 §6.2 ★ 段清单必须描述**包内**那一段。事件/flight/事件卡三类进包时
+                            //   都经过脱敏 + 每包别名重映射 ⇒ 原清单的 length/sha256 描述的是源目录里的
+                            //   另一份文件。照抄就是把别人的指纹挂在包内文件上（独立审计实测 10/10 不一致）。
+                            var segmentFile = file.Substring(0, file.Length - ".manifest.json".Length);
+                            if (packagedFacts.TryGetValue(segmentFile, out var facts))
+                                AddSegmentManifestForPackage(
+                                    zip, $"sessions/{sessionAlias}/{dirName}/{name}", file, facts,
+                                    request.PreserveCrossPackageCorrelation, entries, warnings);
+                            else
+                                // 未重写的段（如 metrics/snapshots）：逐字节原样进包 ⇒ 原清单仍然描述得对。
+                                AddBytes(zip, $"sessions/{sessionAlias}/{dirName}/{name}", file, entries);
                             continue;
                         }
 
@@ -175,9 +189,9 @@ public sealed class DiagnosticPackageExporter
                         if (dirName == "events" || dirName == "flight")
                             // flight 窗口/检查点文件与事件段是**同一种** event JSONL ⇒ 同一套深度脱敏+
                             // 别名 SessionId（旧实现把它们原样拷贝，等于把原始 id 与未清洗 payload 带出包）。
-                            AddRedactedEventLines(zip, $"sessions/{sessionAlias}/{dirName}/{name}", file, entries, warnings, redaction, packageSessionId);
+                            packagedFacts[file] = AddRedactedEventLines(zip, $"sessions/{sessionAlias}/{dirName}/{name}", file, entries, warnings, redaction, packageSessionId, sessionAlias);
                         else if (dirName == "incidents")
-                            AddRedactedIncidentLines(zip, $"sessions/{sessionAlias}/incidents/{name}", file, entries, warnings, redaction, rawSessionId, sessionAlias);
+                            packagedFacts[file] = AddRedactedIncidentLines(zip, $"sessions/{sessionAlias}/incidents/{name}", file, entries, warnings, redaction, rawSessionId, sessionAlias, packageSessionId);
                         else
                             AddBytes(zip, $"sessions/{sessionAlias}/{dirName}/{name}", file, entries);
                     }
@@ -188,13 +202,30 @@ public sealed class DiagnosticPackageExporter
                 {
                     var file = Path.Combine(request.SessionDir, name);
                     if (!File.Exists(file)) continue;
-                    if (name == "session.json") AddRedactedSessionJson(zip, $"sessions/{sessionAlias}/session.json", file, entries, redaction, sessionAlias);
+                    if (name == "session.json") AddRedactedSessionJson(zip, $"sessions/{sessionAlias}/session.json", file, entries, redaction, sessionAlias, packageSessionId);
                     else AddBytes(zip, $"sessions/{sessionAlias}/catalog.json", file, entries);
                 }
 
+                // ★ D6.3 §3 ★ 导出时才知道的事实（损坏行被跳过、未封段被跳过）必须汇入**同一个**截止点。
+                //   否则 manifest 的 packageEvidenceComplete 会和 summary 的判据互相打脸
+                //   （一个说完整、另一个说 Partial）—— 这一条正是独立审计的红灯。
+                var corruptLines = CountWarningNumbers(warnings, "unparsable-lines-skipped:")
+                                 + CountWarningNumbers(warnings, "unparsable-incident-lines-skipped:");
+                var unsealedSkipped = warnings.Count(w => w.StartsWith("active-segment-skipped:", StringComparison.Ordinal));
+                var exportRequest = corruptLines == 0 && unsealedSkipped == 0
+                    ? request
+                    : request with { Cutoff = MergeExportFacts(request.Cutoff, corruptLines, unsealedSkipped) };
+
+                // ★ D6.3 §6.1 ★ 「包含」一律以**实际进包的条目**为准：
+                //   请求了飞行窗口但一条都没进包，就必须留下可见的告警，让 summary 的完整性判据
+                //   与 manifest 的 included 字段说同一句真话（旧实现只抄 request.IncludeFlightWindows）。
+                var flightEntryCount = entries.Count(e => e.Path.Contains("/flight/", StringComparison.OrdinalIgnoreCase));
+                if (request.IncludeFlightWindows && flightEntryCount == 0)
+                    warnings.Add("flight-windows-requested-but-not-included");
+
                 // ③ summary.json
                 AddText(zip, "summary.json",
-                    DiagnosticPackageJson.Summary(request, sessionAlias, warnings, exportId, redaction), entries);
+                    DiagnosticPackageJson.Summary(exportRequest, sessionAlias, warnings, exportId, redaction), entries);
 
                 // ④ metrics 快照（缺失就省略，不编造）
                 var metricsLine = DiagnosticPackageJson.MetricsSnapshotLine(request, redaction);
@@ -203,7 +234,7 @@ public sealed class DiagnosticPackageExporter
 
                 // ⑤ manifest.json（含 cutoff 真实性字段）
                 AddText(zip, "manifest.json",
-                    DiagnosticPackageJson.Manifest(request, sessionAlias, rawSessionId, entries, warnings, exportId, stamp), entries);
+                    DiagnosticPackageJson.Manifest(exportRequest, sessionAlias, rawSessionId, entries, warnings, exportId, stamp), entries);
 
                 // ⑥ checksums.sha256
                 AddText(zip, "checksums.sha256", BuildChecksums(entries), entries);
@@ -273,13 +304,15 @@ public sealed class DiagnosticPackageExporter
     /// 再对整行 JSON 的**每一个字符串值**做深度清洗 → 重新结构化写出。
     /// 解析失败的行**跳过并记警告**（绝不把损坏内容原样塞进包）。
     /// </summary>
-    private static void AddRedactedEventLines(
+    private static PackagedFacts AddRedactedEventLines(
         ZipArchive zip, string entryPath, string sourceFile, List<DiagnosticPackageEntry> entries,
-        List<string> warnings, RedactionPolicy redaction, Guid packageSessionId)
+        List<string> warnings, RedactionPolicy redaction, Guid packageSessionId, string sessionAlias)
     {
         var output = new StringBuilder(64 * 1024);
         var kept = 0;
         var skipped = 0;
+        // ★ D6.3 §6.3 ★ 直接稳定标识符一律每包假名化（同包同值同假名，跨包不可直接关联）。
+        var ids = new DiagnosticPackageJson.TypedIdContext(packageSessionId, sessionAlias);
 
         foreach (var line in ReadLines(sourceFile))
         {
@@ -293,6 +326,11 @@ public sealed class DiagnosticPackageExporter
             var remapped = evt with
             {
                 SessionId = packageSessionId,          // ★ 原始 SessionId 绝不入包
+                // 因果引用本来只指向"同一会话内的某个序号"：本事件属于本包会话时，
+                // 引用也必须指向本包会话，否则包内自相矛盾（引用说它属于另一个会话）。
+                Causation = evt.Causation is { } cause && cause.SessionId == evt.SessionId
+                    ? cause with { SessionId = packageSessionId }
+                    : evt.Causation,
                 Path = evt.Path is null ? null : evt.Path with
                 {
                     PathToken = redaction.Token(evt.Path.PathToken),
@@ -303,7 +341,7 @@ public sealed class DiagnosticPackageExporter
                 Message = redaction.SanitizeText(evt.Message, 256),
             };
 
-            var deepSanitized = DiagnosticPackageJson.SanitizeAllStrings(DiagnosticEventJson.ToJsonLine(remapped), redaction, 256);
+            var deepSanitized = DiagnosticPackageJson.SanitizeAllStrings(DiagnosticEventJson.ToJsonLine(remapped), redaction, 256, ids);
             if (deepSanitized is null)
             {
                 skipped++;
@@ -315,26 +353,30 @@ public sealed class DiagnosticPackageExporter
         }
 
         if (skipped > 0) warnings.Add($"unparsable-lines-skipped:{Path.GetFileName(sourceFile)}={skipped}");
-        AddText(zip, entryPath, output.ToString(), entries);
-        _ = kept;
+        var packaged = Encoding.UTF8.GetBytes(output.ToString());
+        AddBytesAs(zip, entryPath, packaged, entries);
+        return new PackagedFacts(packaged.Length, Sha256Of(packaged), kept, skipped);
     }
 
     /// <summary>
     /// 事件卡行：逐行**按 JSON 结构**清洗（旧实现把整行当文本截断，会把卡片 JSON 弄坏），
     /// 并把证据引用里的**原始 session 短 ID** 换成每包别名（`S1#12`）。
     /// </summary>
-    private static void AddRedactedIncidentLines(
+    private static PackagedFacts AddRedactedIncidentLines(
         ZipArchive zip, string entryPath, string sourceFile, List<DiagnosticPackageEntry> entries,
-        List<string> warnings, RedactionPolicy redaction, string rawSessionId, string sessionAlias)
+        List<string> warnings, RedactionPolicy redaction, string rawSessionId, string sessionAlias, Guid packageSessionId)
     {
         var output = new StringBuilder(16 * 1024);
         var skipped = 0;
+        var kept = 0;
         var rawShort = rawSessionId.Length >= 8 ? rawSessionId.Substring(0, 8) : rawSessionId;
+        // 事件卡与事件必须用**同一个** ids 语境，否则同一原值在两类文件里会得到不同假名（包内不自洽）。
+        var ids = new DiagnosticPackageJson.TypedIdContext(packageSessionId, sessionAlias);
 
         foreach (var line in ReadLines(sourceFile))
         {
             if (line.Length == 0) continue;
-            var sanitized = DiagnosticPackageJson.SanitizeAllStrings(line, redaction, 512);
+            var sanitized = DiagnosticPackageJson.SanitizeAllStrings(line, redaction, 512, ids);
             if (sanitized is null)
             {
                 skipped++;
@@ -345,10 +387,71 @@ public sealed class DiagnosticPackageExporter
             // （盲目替换会误伤哈希等十六进制文本）。
             var rewritten = DiagnosticPackageJson.RewriteEvidenceRefs(sanitized, rawShort, sessionAlias);
             output.Append(rewritten).Append('\n');
+            kept++;
         }
 
         if (skipped > 0) warnings.Add($"unparsable-incident-lines-skipped:{Path.GetFileName(sourceFile)}={skipped}");
-        AddText(zip, entryPath, output.ToString(), entries);
+        var packaged = Encoding.UTF8.GetBytes(output.ToString());
+        AddBytesAs(zip, entryPath, packaged, entries);
+        return new PackagedFacts(packaged.Length, Sha256Of(packaged), kept, skipped);
+    }
+
+    /// <summary>包内一份内容的实际事实（长度/哈希/条数/被跳过的行数）。</summary>
+    private readonly record struct PackagedFacts(long Length, string Sha256, int KeptEvents, int SkippedLines);
+
+    /// <summary>
+    /// ★ D6.3 §6.2 ★ 按**包内**内容重写段清单：源段的 length/sha256 描述的是脱敏前的文件，
+    /// 进了包之后不再成立。做法是保留源清单的全部元数据（序号/时间范围/家族），
+    /// 只把"描述当前这份字节"的字段换成实测值，并显式声明这是脱敏重写后的内容。
+    /// 隐私：默认**不**保留可与源目录/其它包稳定关联的原段哈希（`sourceSha256=null`），
+    /// 只有显式要求跨包关联（PreserveCrossPackageCorrelation）时才保留。
+    /// </summary>
+    private static void AddSegmentManifestForPackage(
+        ZipArchive zip, string entryPath, string sourceManifestFile, PackagedFacts facts,
+        bool preserveSourceFingerprint, List<DiagnosticPackageEntry> entries, List<string> warnings)
+    {
+        string json;
+        try
+        {
+            if (JsonNode.Parse(File.ReadAllText(sourceManifestFile, Encoding.UTF8)) is not JsonObject obj)
+            {
+                warnings.Add($"segment-manifest-unreadable:{Path.GetFileName(sourceManifestFile)}");
+                return;
+            }
+
+            var sourceLength = obj["length"]?.GetValue<long>() ?? 0;
+            var sourceSha = obj["sha256"]?.GetValue<string>();
+            var sourceEventCount = obj["eventCount"]?.GetValue<long>() ?? 0;
+            var sourcePartial = obj["partial"]?.GetValue<bool>() ?? false;
+
+            obj["length"] = facts.Length;
+            obj["sha256"] = facts.Sha256;
+            obj["eventCount"] = facts.KeptEvents;
+            // 包内少了行 ⇒ 相对源段范围就是不完整，不能沿用源段的 partial=false。
+            obj["partial"] = sourcePartial || facts.SkippedLines > 0;
+            obj["contentRef"] = "redacted-and-remapped";
+            obj["sourceLength"] = sourceLength;
+            obj["sourceEventCount"] = sourceEventCount;
+            obj["skippedLines"] = facts.SkippedLines;
+            obj["sourceSha256"] = preserveSourceFingerprint ? sourceSha : null;
+
+            json = obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n";
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // 清单读不出来 ⇒ 不许原样拷贝（那会描述错误内容）⇒ 如实告警，让完整性判据看见。
+            warnings.Add($"segment-manifest-unreadable:{Path.GetFileName(sourceManifestFile)}");
+            return;
+        }
+
+        AddText(zip, entryPath, json, entries);
+    }
+
+    private static void AddBytesAs(ZipArchive zip, string entryPath, byte[] bytes, List<DiagnosticPackageEntry> entries)
+    {
+        var entry = zip.CreateEntry(entryPath, CompressionLevel.Optimal);
+        using (var stream = entry.Open()) stream.Write(bytes, 0, bytes.Length);
+        entries.Add(new DiagnosticPackageEntry(entryPath, bytes.Length, Sha256Of(bytes)));
     }
 
     /// <summary>由"本包 key + 别名"派生包内事件使用的 SessionId：包内一致、跨包不同。</summary>
@@ -359,15 +462,20 @@ public sealed class DiagnosticPackageExporter
         return new Guid(hash.AsSpan(0, 16));
     }
 
-    /// <summary>session.json：结构化重写（StorageRoot 令牌化、sessionId→每包别名、数字字段不再丢失）。</summary>
+    /// <summary>
+    /// session.json：结构化重写（StorageRoot 令牌化、sessionId→每包别名、数字字段不再丢失）。
+    /// ★ D6.3 §6.3 ★ `processIdentity`（`pid:<pid>:<进程启动时刻>`，同机跨包稳定）与 `storageRoot`
+    /// 令牌同样走每包假名 ⇒ 不再是跨包关联锚点。
+    /// </summary>
     private static void AddRedactedSessionJson(
         ZipArchive zip, string entryPath, string sourceFile, List<DiagnosticPackageEntry> entries,
-        RedactionPolicy redaction, string sessionAlias)
+        RedactionPolicy redaction, string sessionAlias, Guid packageSessionId)
     {
         try
         {
             var text = File.ReadAllText(sourceFile, Encoding.UTF8);
-            var json = DiagnosticPackageJson.SessionJson(text, redaction, sessionAlias, out _);
+            var ids = new DiagnosticPackageJson.TypedIdContext(packageSessionId, sessionAlias);
+            var json = DiagnosticPackageJson.SessionJson(text, redaction, sessionAlias, out _, ids);
             AddText(zip, entryPath, json, entries);
         }
         catch (Exception ex)
@@ -397,6 +505,41 @@ public sealed class DiagnosticPackageExporter
             sb.Append(entry.Sha256).Append("  ").Append(entry.Length.ToString(CultureInfo.InvariantCulture))
               .Append("  ").Append(entry.Path).Append('\n');
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// 从形如 `&lt;prefix&gt;&lt;file&gt;=&lt;n&gt;` 的告警里合计出总数（解析不出就按 1 条计，宁可多算不少算）。
+    /// </summary>
+    private static int CountWarningNumbers(IReadOnlyList<string> warnings, string prefix)
+    {
+        var total = 0;
+        foreach (var warning in warnings)
+        {
+            if (!warning.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            var eq = warning.LastIndexOf('=');
+            total += eq >= 0 && int.TryParse(warning.AsSpan(eq + 1), out var n) ? n : 1;
+        }
+        return total;
+    }
+
+    /// <summary>
+    /// ★ D6.3 §3 ★ 把"导出过程中实测到的证据缺口"并进同一个截止点，使 manifest 与 summary
+    /// 对同一份包给出**一致**的完整性结论（不允许一个说完整、另一个说 Partial）。
+    /// </summary>
+    private static DiagnosticExportCutoff? MergeExportFacts(DiagnosticExportCutoff? cutoff, int corruptLines, int unsealedSkipped)
+    {
+        if (cutoff is not { } c) return cutoff;
+        var reasons = new List<string>(3);
+        if (c.EvidenceBlockReason is not null) reasons.Add(c.EvidenceBlockReason);
+        if (corruptLines > 0) reasons.Add($"unparsable-lines-skipped={corruptLines}");
+        if (unsealedSkipped > 0) reasons.Add($"active-segment-skipped={unsealedSkipped}");
+        return c with
+        {
+            CorruptLinesSkipped = c.CorruptLinesSkipped + corruptLines,
+            // 跳过未封段 = 包内缺了最新证据 ⇒ 包尾不完整（不是"顺序问题"，是"东西不在包里"）。
+            AnyTailLoss = c.AnyTailLoss || unsealedSkipped > 0,
+            EvidenceBlockReason = reasons.Count == 0 ? null : string.Join(",", reasons),
+        };
     }
 
     private static DiagnosticPackageEntry Record(string entryPath, string sourceFile)
