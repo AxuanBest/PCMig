@@ -86,3 +86,16 @@ A = 必须在 Stage B 之前；B = Stage B 期间按需 / Stage B 之后；C = �
 3. `TRN.ProgressObserved`（若第 1 步已完成并验证可导出，本项可取消并降级到 B）
 
 **B/C 一律保持 Reserved**：Event Catalog 的数量不是 KPI；`Reserved` 是诚实状态，不是欠账。
+
+---
+
+## 附：D6.3 轮口径更新（2026-10-02）
+
+本节**只追加**，不修改上文任何历史结论（上文是 D6.2 时点的实读口径）。
+
+1. **`UI.NavigationChanged` 已从 Reserved 转为 Produced**（D6.3 WP-I：实现 + 12 条导航红灯夹具 + Step1/2/3/4 页面归属），§四 第 2 项另外要求的"`StepCardButton` 等 x:Name-only 控件的稳定 AutomationId"也已在同一轮绑定（6 条夹具）。
+   ⇒ Event Catalog 当前口径：**140 total / 106 Produced / 12 Deep-only / 22 Reserved**（精确计数一律以机器生成的 `docs\诊断系统实施-事件覆盖矩阵.md` 为准）。因此本文 §二 的 **C 级 5 项**中该项已出口，其余 **A 4 / B 14 / C 4 = 22** 项的分级结论不变。
+2. **§三 第 3 条已被修复**：D6.3 之前导出包"请求了飞行窗口但包内 0 个 flight 文件，manifest 却写 `includedFlightWindows: true`"；D6.3 之后这种情况 manifest 与 summary 都会写 `includedFlightWindows: false` / `packageEvidenceComplete: false` + `evidenceBlockers: "flight-windows-requested-but-not-included"`（实机复验包 `PCMig-Diagnostic-20261002-013026.zip`，8,889 B）。**不再以配置意图冒充"已包含"。**
+3. `DIA.RingTriggered` → `DIA.RingSealed` 真正进包这条链（§四 第 1 项 = G-1/G-3）**仍未做**：D6.3 只做到"诚实地说没包含"，没有实现出口。
+
+*附注由 D6.3 Trust Closure 轮追加（2026-10-02）。*
