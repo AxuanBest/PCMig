@@ -141,6 +141,26 @@ public sealed class D61ActionCoverageTests
         Assert.Contains("Step4Resume", MethodBody(registry, "BusinessCritical"), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// ★ R-3 收口（D6.3 剩余风险关闭轮）★ 预检动作的终点只能来自**本次调用自己的真实结果**。
+    /// 旧判据 `!ok && session.Ctx is null` 把"Ctx 是否为空"当成了"预检是否成功"的替身：
+    /// 只要上一次预检留下过 Ctx，本次真实失败（未勾选 / 目标非法 / 取消 / 预检未通过 /
+    /// 扫描残缺闸门拦下）也会被写成 UI-007 `Succeeded` —— 这正是"点击 → 失败 → Success"。
+    /// </summary>
+    [Fact]
+    public void PrepareClickMustNotTreatAStaleContextAsSuccess()
+    {
+        var page = File.ReadAllText(Path.Combine(RepoRoot(), "src", "PCMig.WinUI", "Views", "Step2SelectDataPage.xaml.cs"));
+        var body = MethodBody(page, "void Prepare_Click");
+
+        Assert.Contains("ActionTrace.Begin(ActionKinds.Prepare, ControlIds.Step2Prepare", body, StringComparison.Ordinal);
+        Assert.Contains("if (!ok)", body, StringComparison.Ordinal);
+        Assert.Contains("trace.Complete(DiagnosticOutcome.Failed, \"prepare-rejected\")", body, StringComparison.Ordinal);
+        Assert.False(
+            body.Contains("session.Ctx is null", StringComparison.Ordinal),
+            "Prepare_Click 不得再用 `session.Ctx is null` 代指「预检失败」：陈旧 Ctx 会把真实失败写成 Succeeded");
+    }
+
     /// <summary>取出某个方法/字段初始化的花括号区块（按配对扫描，跳过字符串、字符与注释里的花括号）。</summary>
     private static string MethodBody(string text, string memberName)
     {

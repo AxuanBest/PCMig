@@ -120,6 +120,16 @@ public sealed class PendingExpectationTracker
         get { lock (_gate) return _pending.Count; }
     }
 
+    /// <summary>
+    /// ★ R-2 收口（第二轮：两处无计数静默吞异常）★ 跟踪器**内部**故障的回声通道。
+    ///
+    /// 为什么必须有：<see cref="Observe"/> 的 catch 原来是一个**空体** —— 事件被 analyzer 消费了
+    /// 却没有被解释："该开的期望"与"该关的期望"一起消失，而健康计数（SinkFaults / MaintenanceFaults /
+    /// RuleFaults）看不出任何异常，会话仍会宣称 Healthy + EvidenceComplete。
+    /// **容错（不许拖垮 analyzer）不等于无痕**：这里把故障交给运行时接进健康通道。
+    /// </summary>
+    public Action<string>? OnFault { get; set; }
+
     /// <summary>观察一个事件（由 analyzer 收件箱调用；**绝不抛**）。</summary>
     public void Observe(in DiagnosticEvent evt)
     {
@@ -127,9 +137,26 @@ public sealed class PendingExpectationTracker
         {
             lock (_gate) ObserveCore(in evt);
         }
+        catch (Exception ex)
+        {
+            // 跟踪失败绝不影响诊断管线与业务 —— 但必须留痕，绝不静默。
+            ReportFault("tracker-observe:" + ex.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    /// 上报一次跟踪器内部故障。**绝不抛**：健康通道自己坏掉时不在这里级联
+    /// （与 <see cref="RuleEngine"/> 同一口径：已被隔离的故障不再制造第二个故障）。
+    /// </summary>
+    private void ReportFault(string reason)
+    {
+        try
+        {
+            OnFault?.Invoke(reason);
+        }
         catch (Exception)
         {
-            // 跟踪失败绝不影响诊断管线与业务。
+            // 健康通道自身异常：不再级联。
         }
     }
 

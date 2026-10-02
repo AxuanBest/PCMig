@@ -341,6 +341,26 @@ public sealed class D4RuleEngineTests
         Assert.Empty(engine.ActiveIncidents);
     }
 
+    /// <summary>
+    /// ★ R-2 收口（D6.3 剩余风险关闭轮）★ 隔离计数**不足以**说明发生过什么：
+    /// 规则故障必须带着"哪条规则 + 什么异常"上报到诊断自身健康通道（runtime 把它接到健康计数器上），
+    /// 否则"规则全炸"这件事永远出不了导出快照的 `rules.faults` 那一格。
+    /// </summary>
+    [Fact]
+    public void RuleFaultIsReportedToTheSelfHealthChannelWithItsRuleId()
+    {
+        var engine = new RuleEngine(new RuleRegistry(new IDiagnosticRule[] { new ThrowingRule() }), _ => null);
+        var reported = new List<string>();
+        engine.OnRuleFault = reported.Add;
+
+        engine.Evaluate(Event(TransferEvents.JobRunStarted, 1, jobId: "JOB-1"), CompleteContext(engine));
+
+        Assert.Equal(1, engine.Stats().RuleFaults);
+        var reason = Assert.Single(reported);
+        Assert.Contains("rule:TEST_THROWING_RULE:", reason, StringComparison.Ordinal);
+        Assert.Contains("InvalidOperationException", reason, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ActiveIncidentsAreCappedInsteadOfGrowingUnbounded()
     {

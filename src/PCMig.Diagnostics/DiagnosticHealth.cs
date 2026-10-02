@@ -101,6 +101,8 @@ public readonly record struct DiagnosticHealthSnapshot(
         MaintenanceFaults = health.MaintenanceFaults,
         LastMaintenanceFaultReason = health.LastMaintenanceFaultReason,
         RetentionEvictions = loss.RetentionEvictionCount,
+        RuleFaults = health.RuleFaults,
+        LastRuleFaultReason = health.LastRuleFaultReason,
     };
 
     /// <summary>
@@ -118,6 +120,24 @@ public readonly record struct DiagnosticHealthSnapshot(
     public string? LastMaintenanceFaultReason { get; init; }
 
     /// <summary>
+    /// ★ R-2 收口（D6.3 剩余风险关闭轮）★ 分析器/规则**内部**故障次数。
+    ///
+    /// 原来这项只存在于导出快照的 <c>rules.faults</c> 与诊断中心计数器里：规则每条都抛异常时，
+    /// 包仍然写 <c>degraded:false</c> + <c>evidenceComplete:true</c> + <c>Complete</c>，
+    /// 与"Complete 只能在没有任何未声明丢失、且判读真的发生过时才允许说"直接冲突。
+    /// 异常被隔离是**不许拖垮 writer**，不是"等于没发生"：规则没跑成 ⇒ 它负责的那类事实没被判读。
+    ///
+    /// ★ R-2 收口（第二轮：两处无计数静默吞异常）★ 覆盖面明确为**整条分析链**，
+    /// 不只是规则本身：期望跟踪器 <c>Observe</c> 的失败（<c>tracker-observe:*</c>）与
+    /// 超时结论生成失败（<c>expectation-timeout:*</c>）也进同一本账 ——
+    /// 它们同样意味着"某一类判定根本没发生"。原因串始终标明确切位置。
+    /// </summary>
+    public long RuleFaults { get; init; }
+
+    /// <summary>最近一次规则内部故障的位置与原因（如 <c>rule:ACCESS_DENIED:NullReferenceException</c>）。</summary>
+    public string? LastRuleFaultReason { get; init; }
+
+    /// <summary>
     /// 不健康 = 有 DurableCritical 丢失、有存储故障、有任何真实丢弃/合并（证据不完整）、
     /// 有 sink 故障（某个消费者把事件吞了）、或维护调度器已经半死/已退出。
     /// <para>
@@ -127,7 +147,8 @@ public readonly record struct DiagnosticHealthSnapshot(
     /// </summary>
     public bool IsDegraded => StickyCriticalLost || StorageDegraded
                               || EventsDropped > 0 || EventsEvicted > 0 || CriticalLost > 0
-                              || SinkFaults > 0 || MaintenanceFaults > 0 || !MaintenanceAlive;
+                              || SinkFaults > 0 || MaintenanceFaults > 0 || !MaintenanceAlive
+                              || RuleFaults > 0;   // ★ R-2 ★ 规则内部故障也是"自己坏掉了"
 
     /// <summary>
     /// 证据完整性：任何丢失都让"缺事件"类规则必须降置信度；
@@ -138,7 +159,8 @@ public readonly record struct DiagnosticHealthSnapshot(
     /// 它是"环只保最近一段"的正常保留策略，不是"系统丢了证据"（与 EvidenceCoverage 同口径）。
     /// </summary>
     public bool EvidenceComplete => LossEpoch == 0 && EventsDropped == 0 && EventsEvicted == 0
-                                    && SinkFaults == 0 && MaintenanceAlive;
+                                    && SinkFaults == 0 && MaintenanceAlive
+                                    && RuleFaults == 0;   // ★ R-2 ★ 规则没判读成功 ⇒ 不许宣称证据完整
 }
 
 /// <summary>
@@ -182,6 +204,10 @@ public sealed class DiagnosticHealth
     private long _lastSuccessfulMaintenanceUnixMs;
     private string? _lastMaintenanceFaultReason;
     private long _maintenanceAlive = 1;
+
+    // ★ R-2 ★ 分析器/规则自身故障（同样是一等事实：被隔离 ≠ 没发生）。
+    private long _ruleFaults;
+    private string? _lastRuleFaultReason;
 
     public long EventsProduced => Interlocked.Read(ref _produced);
     public long EventsAccepted => Interlocked.Read(ref _accepted);
@@ -271,6 +297,24 @@ public sealed class DiagnosticHealth
     }
 
     public void MarkStorageRecovered() => Interlocked.Exchange(ref _storageDegraded, 0);
+
+    // ─────────────── ★ R-2 分析器/规则自身故障 ───────────────
+
+    /// <summary>规则内部故障次数（隔离计数 + 健康可见，两处同源）。</summary>
+    public long RuleFaults => Interlocked.Read(ref _ruleFaults);
+
+    /// <summary>最近一次规则内部故障的位置与原因。</summary>
+    public string? LastRuleFaultReason => Volatile.Read(ref _lastRuleFaultReason);
+
+    /// <summary>
+    /// 记录一次规则内部故障。**不做去重也不做上限**：次数本身就是"这件事发生过多少次"的事实，
+    /// 有界性由 <see cref="Analysis.RuleEngine"/> 的规则数与收件箱容量保证。
+    /// </summary>
+    public void MarkRuleFault(string reason)
+    {
+        Interlocked.Increment(ref _ruleFaults);
+        Volatile.Write(ref _lastRuleFaultReason, reason);
+    }
 
     // ─────────────── ★ D6.3 §7 维护调度器自身 ───────────────
 

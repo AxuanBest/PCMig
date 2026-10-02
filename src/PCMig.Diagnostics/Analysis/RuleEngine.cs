@@ -61,6 +61,17 @@ public sealed class RuleEngine
     /// <summary>事件产生时回调（打开/更新/结案），由 runtime 用来发 DIA.IncidentOpened/Resolved 与触发 Flight。</summary>
     public Action<Incident, IncidentLifecycle>? OnIncident { get; set; }
 
+    /// <summary>
+    /// ★ R-2 收口（D6.3 剩余风险关闭轮）★ 规则内部故障的可见回调（由 runtime 接到诊断自身健康上）。
+    ///
+    /// 为什么必须有：规则抛异常原来只进 <see cref="RuleEngineStats.RuleFaults"/>（只出现在导出快照的
+    /// <c>rules.faults</c> 与诊断中心的计数器里），**不进健康、不进证据完整性判定** ⇒ 规则每条都炸时
+    /// 包仍然写 `degraded:false` + `evidenceComplete:true` + `Complete`。异常被隔离是对的，
+    /// 但"被隔离"不等于"没发生"：规则没跑成 ⇒ 依赖它的事件等于没被判读 ⇒ 不许再宣称证据完整。
+    /// 参数是位置+异常类型（不含事件内容，避免把 payload 带进健康通道）。
+    /// </summary>
+    public Action<string>? OnRuleFault { get; set; }
+
     public RuleEngine(RuleRegistry registry, Func<EventRef, DiagnosticEvent?> evidenceResolver)
     {
         _registry = registry;
@@ -86,12 +97,29 @@ public sealed class RuleEngine
         {
             Evaluate(in evt, context);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             Interlocked.Increment(ref _ruleFaults);
+            ReportFault("evaluate:" + ex.GetType().Name);   // ★ R-2 ★ 隔离 ≠ 没发生：必须让健康看得见
         }
 
         return default;
+    }
+
+    /// <summary>
+    /// ★ R-2 ★ 上报一次规则内部故障。回调自身抛异常也必须吞掉 ——
+    /// 健康通道坏掉不能让 analyzer 收件箱开始抛（那会把"规则故障"升级成"采集故障"）。
+    /// </summary>
+    private void ReportFault(string reason)
+    {
+        try
+        {
+            OnRuleFault?.Invoke(reason);
+        }
+        catch (Exception)
+        {
+            // 健康通道自身异常：已计入 RuleFaults，不再级联。
+        }
     }
 
     /// <summary>求值入口（同步、可测；不依赖任何计时器或线程）。</summary>
@@ -125,10 +153,12 @@ public sealed class RuleEngine
             {
                 outcome = rule.Evaluate(in evt, ruleContext);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // 单规则失败必须被隔离（不能连累其它规则，更不能影响 writer）。
                 Interlocked.Increment(ref _ruleFaults);
+                // ★ R-2 ★ 但必须如实告诉健康：这条规则这条事件没有判读成功。
+                ReportFault("rule:" + rule.RuleId + ":" + ex.GetType().Name);
                 continue;
             }
 

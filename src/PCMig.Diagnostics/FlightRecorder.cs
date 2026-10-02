@@ -154,6 +154,17 @@ public sealed class FlightRecorder
         return total;
     }
 
+    /// <summary>
+    /// ★ R-1 收口（D6.3 剩余风险关闭轮）★ 本会话是否发生过"飞行证据不完整"的事实：
+    /// post 事件被丢（超容量 / 超载荷预算）、窗口未封口就落盘（关停封存）、窗口落盘失败、
+    /// 未就绪窗口被跳过。只增不减的只读聚合 —— 导出侧据此登记 `flightEvidenceIncomplete`
+    /// 与 blocker `flight-evidence-incomplete`，避免"包说 Complete、包内窗口清单却写 partial"。
+    /// </summary>
+    private volatile bool _evidenceIncomplete;
+
+    /// <summary>本次会话的飞行证据是否已确认不完整（一旦为真就永远为真）。</summary>
+    public bool EvidenceIncomplete => _evidenceIncomplete;
+
     public FlightRecorder(DiagnosticSessionStore store, DiagnosticRuntimeOptions options, DiagnosticHealth health, LossLedger loss)
     {
         _options = options;
@@ -205,6 +216,10 @@ public sealed class FlightRecorder
                 {
                     window.DroppedInPost++;
                     _dropped++;
+                    // ★ R-1 收口 ★ post 丢包与环覆盖不是一回事：它让**这次触发的证据**出现空洞，
+                    //   必须进丢失台账（→ LossLedger → Health 降级）并留下"证据不完整"的事实。
+                    _evidenceIncomplete = true;
+                    _loss.RecordDrop(DiagnosticBranches.Flight, evt.Delivery, evt.Sequence, "post-window-capacity", evicted: false);
                     continue;
                 }
 
@@ -213,6 +228,8 @@ public sealed class FlightRecorder
                 {
                     window.DroppedInPost++;
                     _dropped++;
+                    _evidenceIncomplete = true;
+                    _loss.RecordDrop(DiagnosticBranches.Flight, evt.Delivery, evt.Sequence, "post-window-budget", evicted: false);
                     continue;
                 }
 
@@ -442,7 +459,10 @@ public sealed class FlightRecorder
             }
 
             if (notReady > 0)
+            {
+                _evidenceIncomplete = true;
                 _loss.RecordDrop(DiagnosticBranches.Flight, DeliveryClass.Operational, 0, "seal-skipped-pre-copy-in-flight", evicted: false);
+            }
         }
 
         var facts = new List<FlightSealFacts>(toPersist.Count);
@@ -460,6 +480,9 @@ public sealed class FlightRecorder
         // ★ D6.3 §8 ★ `partial` 的真相：到没到截止时刻（PostComplete）与**有没有丢**是两件事。
         //   审计 P1-3：post 超容量/超预算被丢掉的窗口原来仍写 `partial: false` —— 那就是"完整"这个字的谎。
         var complete = window.PostComplete && window.DroppedInPost == 0;
+
+        // ★ R-1 收口 ★ "不完整"必须能传到导出侧：关停封存（未封口）、post 丢包都算缺损。
+        if (!complete) _evidenceIncomplete = true;
 
         try
         {
@@ -491,6 +514,7 @@ public sealed class FlightRecorder
         {
             failure = ex.GetType().Name;
             window.PersistFailure = failure;
+            _evidenceIncomplete = true;
             _loss.RecordDrop(DiagnosticBranches.Flight, DeliveryClass.Operational, 0, "flight-persist-failed", evicted: false);
         }
 

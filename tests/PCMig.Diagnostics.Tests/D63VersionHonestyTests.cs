@@ -77,6 +77,49 @@ public sealed class D63VersionHonestyTests : IDisposable
         Assert.True(again.VersionUnsupported);
     }
 
+    // ─────────────── b) R-5：解不开 ≠ 可以扔掉（payload 体必须原样保存） ───────────────
+
+    /// <summary>
+    /// ★ R-5 收口（D6.3 剩余风险关闭轮）★ "可以保存但不能用当前契约解释"里的**可以保存**是硬要求：
+    /// 旧写出路径只看 typed `Payload`（不受支持版本时为 null）⇒ 重新序列化时 payload **整块消失**，
+    /// 只剩一个 `payload:unsupported-version` 标记 —— 未来版本究竟写了什么，在导出前就没了。
+    /// 本夹具要求：原始 payload 体逐字保留（字段名与值都不改），同时**仍然**不许把它解释成 typed payload。
+    /// </summary>
+    [Fact]
+    public void R5_UnsupportedVersionPayloadBodySurvivesParseAndRewrite()
+    {
+        var original = DiagnosticEventJson.ToJsonLine(D2TestSupport.Event(
+            3, PersistenceEvents.WriteFailed, payload: new PstWritePayload("Receipt", "Move", true, "IOException")));
+        var tampered = Regex.Replace(original, "\"eventVersion\":\\d+", "\"eventVersion\":999");
+
+        var sourcePayload = JsonDocument.Parse(original).RootElement.GetProperty("payload").GetRawText();
+
+        Assert.True(DiagnosticEventJson.TryParse(tampered, out var parsed, out var error), error);
+        Assert.NotNull(parsed);
+        Assert.True(parsed!.VersionUnsupported);
+        // ① 不许解释：typed payload 仍然是 null（未来版本不得冒充当前语义）。
+        Assert.Null(parsed.Payload);
+        // ② 必须保存：原始 payload 体在内存里逐字保留。
+        Assert.NotNull(parsed.RawPayload);
+        Assert.Equal(sourcePayload, parsed.RawPayload!.Value.GetRawText());
+
+        var rewritten = DiagnosticEventJson.ToJsonLine(parsed);
+        // ③ 再写出后 payload 体必须还在，且与源逐字一致（旧实现这里整块消失 ⇒ 红灯）。
+        var rewrittenRoot = JsonDocument.Parse(rewritten).RootElement;
+        Assert.True(rewrittenRoot.TryGetProperty("payload", out var rewrittenPayload),
+            "不受支持版本的事件重新写出后 payload 体不见了（\"可以保存\"没有兑现）");
+        Assert.Equal(sourcePayload, rewrittenPayload.GetRawText());
+        // ④ 诚实标记同时必须还在：保存 ≠ 解释。
+        Assert.Contains("unsupported-version", rewritten, StringComparison.Ordinal);
+        Assert.Contains("\"versionUnsupported\":true", rewritten, StringComparison.Ordinal);
+        Assert.Contains("\"eventVersion\":999", rewritten, StringComparison.Ordinal);
+
+        // ⑤ 幂等：再读一遍，raw 仍在、typed 仍为 null。
+        Assert.True(DiagnosticEventJson.TryParse(rewritten, out var again, out var error2), error2);
+        Assert.Null(again!.Payload);
+        Assert.Equal(sourcePayload, again.RawPayload!.Value.GetRawText());
+    }
+
     // ─────────────── c) 缺版本字段：不许发明版本 ───────────────
 
     [Fact]
@@ -133,6 +176,12 @@ public sealed class D63VersionHonestyTests : IDisposable
             var packaged = versionLines[0];
             Assert.Equal(999, packaged.GetProperty("eventVersion").GetInt32());
             Assert.True(packaged.GetProperty("versionUnsupported").GetBoolean());
+            // ★ R-5 ★ 进了包的行，payload 体也必须在（导出环节不得把"解不开"当成"可以丢"）。
+            Assert.True(packaged.TryGetProperty("payload", out var packagedPayload),
+                "不受支持版本的行进了包，payload 体却不见了");
+            Assert.False(string.IsNullOrWhiteSpace(packagedPayload.GetRawText()));
+            Assert.True(packagedPayload.ValueKind == JsonValueKind.Object,
+                $"包内 payload 必须是对象（原样保留），实际 {packagedPayload.ValueKind}");
 
             // 而且包内任何一行都不许把这条证据说成"当前版本正常证据"。
             Assert.DoesNotContain("\"sequence\":900001,\"eventVersion\":1", ReadAllText(zip), StringComparison.Ordinal);

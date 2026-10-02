@@ -343,7 +343,10 @@ internal static class DiagnosticPackageJson
             writer.WriteEndObject();
 
             writer.WriteString("delivery", DiagnosticPackageExporter.LocalOnlyNotice);
-            writer.WriteBoolean("includedHighSensitivityAttachments", request.IncludeHighSensitivityAttachments);
+            // ★ R-4 收口（D6.3 剩余风险关闭轮）★ 同名键 `includedHighSensitivityAttachments` 曾在本
+            //   文件里写过两次（此处写请求意图、下方写真实 false）⇒ 同一个 manifest.json 出现两个同名键，
+            //   一旦请求为 true 就会出现"同一键两个相反值"，取值取决于解析器策略。现在只保留下方那一处
+            //   真实值（false），请求意图一律由 `requestedHighSensitivityAttachments` 如实记录。
             // ★ D6.3 §6.1 ★ Included 只能由**最终 ZIP 里真实存在的条目**算出：
             //   配置说 include=true、实际没打进包 ⇒ 必须写 false（旧实现直接抄 request，是假包含）。
             var flightEntryCount = entries.Count(e => e.Path.Contains("/flight/", StringComparison.OrdinalIgnoreCase));

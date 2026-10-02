@@ -126,6 +126,15 @@ public static class DiagnosticEventJson
             evt.Payload.WriteJson(writer);
             writer.WriteEndObject();
         }
+        // ★ R-5 ★ 解不开的 payload 必须逐字写回（保存 ≠ 解释）：字段名与值都不改，
+        //   "无法用当前契约解释"这件事由 unknownTokens 的 `payload:unsupported-version` /
+        //   `payload:unknown-event` 承担，二者缺一不可。
+        else if (evt.RawPayload is { } rawPayload)
+        {
+            if (evt.RawPayloadName is not null) writer.WriteString("payloadName", evt.RawPayloadName);
+            writer.WritePropertyName("payload");
+            rawPayload.WriteTo(writer);
+        }
 
         if (evt.UnknownTokens is { Count: > 0 })
         {
@@ -354,6 +363,11 @@ public static class DiagnosticEventJson
 
             IDiagnosticPayload? payload = null;
             var effectivePayloadName = payloadName ?? descriptor.PayloadName;
+            // ★ R-5 收口（D6.3 剩余风险关闭轮）★ 解不开 typed payload 时**必须原样保住 payload 体**：
+            //   "可以保存但不能用当前契约解释" —— 旧实现只记一个 token 就把它扔掉，
+            //   于是未来版本/未知事件写了什么，在重新序列化（尤其导出）后永久消失。
+            JsonElement? rawPayload = null;
+            string? rawPayloadName = null;
             // 只有"已知且版本受支持"的事件才解码 typed payload：
             // 未知事件/未来版本不得冒充成当前 typed event 交给规则。
             if (payloadElement is not null && effectivePayloadName is not null
@@ -365,6 +379,8 @@ public static class DiagnosticEventJson
             else if (payloadElement is not null && (!descriptor.IsKnown || versionUnsupported))
             {
                 AddUnknownToken(ref unknownTokens, versionUnsupported ? "payload:unsupported-version" : "payload:unknown-event");
+                rawPayload = payloadElement.Value.Clone();
+                rawPayloadName = payloadName;
             }
 
             evt = new DiagnosticEvent
@@ -415,6 +431,8 @@ public static class DiagnosticEventJson
                 UnknownTokens = unknownTokens,
                 DeclaredEventVersion = hasEventVersion ? eventVersion : null,
                 VersionUnsupported = versionUnsupported,
+                RawPayload = rawPayload,
+                RawPayloadName = rawPayloadName,
             };
             return true;
         }

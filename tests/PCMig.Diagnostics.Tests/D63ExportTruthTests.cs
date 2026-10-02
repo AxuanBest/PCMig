@@ -335,13 +335,125 @@ public sealed class D63ExportTruthTests : IDisposable
         finally { Stop(runtime); }
     }
 
+    // ───────── R-4（D6.3 剩余风险关闭轮）：同一个 manifest 里不许有同名键 ─────────
+
+    /// <summary>
+    /// ★ R-4 收口 ★ `manifest.json` 曾把 `includedHighSensitivityAttachments` 写两次
+    /// （一处写**请求意图**、一处写**真实 false**）⇒ 请求为 true 时同一个键出现两个相反值，
+    /// 取值完全取决于解析器策略（JsonDocument 保最后一个、部分消费者保第一个）。
+    /// 导出 JSON 结构必须唯一，且"包含声明"只能由真实情况得出，请求意图另字段如实记录。
+    /// </summary>
+    [Fact]
+    public void R4_ManifestNeverWritesTheSameKeyTwice()
+    {
+        var runtime = Start("r4-dupkey", out var sessionDir);
+        try
+        {
+            PublishEvents(runtime, 2);
+            var cutoff = runtime.PrepareExportCutoff(TimeSpan.FromSeconds(3));
+
+            // 危险路径：**请求**包含高敏附件（旧实现会在同一份 manifest 里出现 true 与 false 两个值）。
+            using var zip = Export(runtime, sessionDir, cutoff, includeFlight: false, tag: "r4-dupkey", includeAttachments: true);
+
+            var manifestText = ReadEntry(zip, "manifest.json");
+            var summaryText = ReadEntry(zip, "summary.json");
+
+            // ① 根级不许有同名键（这是缺陷的直接形状）。
+            Assert.Empty(DuplicateRootKeys(manifestText));
+            Assert.Empty(DuplicateRootKeys(summaryText));
+
+            // ② 包含声明只能写真实值 false；请求意图写另一个字段，二者不得混淆。
+            var manifest = ReadJson(manifestText);
+            Assert.False(manifest.GetProperty("includedHighSensitivityAttachments").GetBoolean());
+            Assert.True(manifest.GetProperty("requestedHighSensitivityAttachments").GetBoolean());
+            Assert.Equal(1, CountOccurrences(manifestText, "\"includedHighSensitivityAttachments\""));
+        }
+        finally { Stop(runtime); }
+    }
+
+    // ───────── R-1（D6.3 剩余风险关闭轮）：post 丢包必须一路走到导出 blocker ─────────
+
+    /// <summary>
+    /// ★ R-1 收口 ★ 审计发现：飞行窗口的 **post 丢包**既没进丢失台账，也没有任何路径给
+    /// `FlightEvidenceIncomplete` 赋值 ⇒ blocker `flight-evidence-incomplete` 生产不可达，
+    /// 于是包可以一边写 Complete、包内窗口清单一边写 `partial: true`。
+    /// 本夹具走完整链路：post 超容量丢包 → LossLedger → 窗口 partial → cutoff 事实 → 导出 blocker。
+    /// </summary>
+    [Fact]
+    public void R1_PostWindowLossMustReachTheLedgerAndBlockCompleteEvidence()
+    {
+        var runtime = Start("r1-postloss", out var sessionDir, options =>
+        {
+            options.RingEventCapacity = 2;                  // post 容量 = 环长度 = 2
+            options.RingByteBudget = 64 * 1024;
+            options.FlightPostWindowMs = 400;               // 窗口先开着，才可能把 post 发超容量
+            options.FlightTriggerCooldownMs = 1;
+            options.FlightWindowPayloadByteBudget = 8L * 1024 * 1024;
+        });
+        try
+        {
+            PublishEvents(runtime, 2);
+            Assert.True(runtime.TriggerFlight("rule:D63_R1", "d63").Accepted);
+
+            // 触发后连发 20 条：post 容量只有 2 ⇒ 后面的**必然**被丢（这正是 R-1 要说的事）。
+            var writtenBefore = runtime.Health.EventsWritten;
+            for (var i = 0; i < 20; i++)
+            {
+                runtime.Publisher.TryPublish(new DiagnosticEventDraft(
+                    PersistenceEvents.WriteFailed,
+                    DiagnosticContext.Root(runtime.SessionId, "Test").WithJob("JOB-D63").WithObject($"post-{i}"),
+                    new PstWritePayload("Receipt", "Move", true, "IOException"),
+                    Outcome: DiagnosticOutcome.Failed,
+                    ExceptionType: "IOException",
+                    Message: "R-1 post 丢包样例"));
+            }
+
+            Assert.True(D2TestSupport.WaitUntil(() => runtime.Health.EventsWritten >= writtenBefore + 20));
+            Assert.True(D2TestSupport.WaitUntil(() => runtime.FlightStatistics() is { SealedWindows: >= 1 }),
+                "窗口应在 FlightPostWindowMs 到期后被维护拍封存");
+
+            // ① 丢掉的 post 事件进了丢失台账，并且真的把健康拉下来了。
+            var health = runtime.GetHealthSnapshot();
+            Assert.True(health.EventsDropped >= 1, "post 丢包没有进 LossLedger（诊断自己悄悄少记）");
+            Assert.True(health.IsDegraded, "证据已经缺损，健康仍是 Healthy");
+            Assert.False(health.EvidenceComplete);
+
+            // ② 截止快照里必须带上这个事实（旧实现这一条永远不可达）。
+            var cutoff = runtime.PrepareExportCutoff(TimeSpan.FromSeconds(3));
+            Assert.True(cutoff.FlightEvidenceIncomplete, "飞行证据缺损没有进 cutoff");
+            Assert.False(cutoff.IsPackageEvidenceComplete);
+
+            using var zip = Export(runtime, sessionDir, cutoff, includeFlight: true, tag: "r1-postloss");
+
+            // ③ 包内该窗口清单必须说 partial。
+            var windowManifest = zip.Entries
+                .Select(e => e.FullName)
+                .First(n => n.Contains("/flight/", StringComparison.Ordinal) && n.EndsWith(".jsonl.manifest.json", StringComparison.Ordinal));
+            Assert.True(ReadJson(ReadEntry(zip, windowManifest)).GetProperty("partial").GetBoolean(),
+                "post 丢了事件，包内窗口清单却仍写 partial=false");
+
+            // ④ manifest / summary 同口径：不许说 Complete，并给出同一个 blocker。
+            var manifest = ReadJson(zip, "manifest.json");
+            Assert.True(manifest.GetProperty("cutoff").GetProperty("flightEvidenceIncomplete").GetBoolean());
+            Assert.Contains("flight-evidence-incomplete", ReadEntry(zip, "manifest.json"), StringComparison.Ordinal);
+
+            var summary = ReadJson(zip, "summary.json");
+            Assert.False(summary.GetProperty("packageEvidenceComplete").GetBoolean());
+            Assert.NotEqual("Complete", summary.GetProperty("evidenceCompleteness").GetString());
+            Assert.Contains("flight-evidence-incomplete", Blockers(summary));
+        }
+        finally { Stop(runtime); }
+    }
+
     // ───────────────────────── helpers ─────────────────────────
 
-    private DiagnosticRuntime Start(string tag, out string sessionDir)
+    private DiagnosticRuntime Start(string tag, out string sessionDir, Action<DiagnosticRuntimeOptions>? configure = null)
     {
         var root = Path.Combine(_root, tag);
         Directory.CreateDirectory(root);
-        var runtime = DiagnosticRuntime.Start(D2TestSupport.Options(root), out _);
+        var options = D2TestSupport.Options(root);
+        configure?.Invoke(options);
+        var runtime = DiagnosticRuntime.Start(options, out _);
         sessionDir = runtime.Store!.SessionDir;
         return runtime;
     }
@@ -376,7 +488,7 @@ public sealed class D63ExportTruthTests : IDisposable
             .LastOrDefault();
     }
 
-    private ZipArchive Export(DiagnosticRuntime runtime, string sessionDir, DiagnosticExportCutoff? cutoff, bool includeFlight, string tag, bool preserveCrossPackage = false)
+    private ZipArchive Export(DiagnosticRuntime runtime, string sessionDir, DiagnosticExportCutoff? cutoff, bool includeFlight, string tag, bool preserveCrossPackage = false, bool includeAttachments = false)
     {
         var outcome = new DiagnosticPackageExporter().Export(new DiagnosticExportRequest
         {
@@ -386,6 +498,7 @@ public sealed class D63ExportTruthTests : IDisposable
             Cutoff = cutoff,
             IncludeFlightWindows = includeFlight,
             PreserveCrossPackageCorrelation = preserveCrossPackage,
+            IncludeHighSensitivityAttachments = includeAttachments,
         });
         Assert.True(outcome.Succeeded, outcome.FailureReason);
         return ZipFile.OpenRead(outcome.ZipPath!);
@@ -414,6 +527,43 @@ public sealed class D63ExportTruthTests : IDisposable
 
     private static List<string> Blockers(JsonElement summary)
         => summary.GetProperty("evidenceBlockers").EnumerateArray().Select(e => e.GetString()!).ToList();
+
+    /// <summary>根级同名键（深度 1 的 PropertyName 重复）——JSON 结构唯一的可判定部分。</summary>
+    private static List<string> DuplicateRootKeys(string json)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var duplicates = new List<string>();
+        var reader = new System.Text.Json.Utf8JsonReader(Encoding.UTF8.GetBytes(json));
+        var depth = 0;
+        while (reader.Read())
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.StartObject:
+                case JsonTokenType.StartArray:
+                    depth++;
+                    break;
+                case JsonTokenType.EndObject:
+                case JsonTokenType.EndArray:
+                    depth--;
+                    break;
+                case JsonTokenType.PropertyName when depth == 1:
+                    var name = reader.GetString()!;
+                    if (!seen.Add(name)) duplicates.Add(name);
+                    break;
+            }
+        }
+
+        return duplicates;
+    }
+
+    private static int CountOccurrences(string text, string token)
+    {
+        var count = 0;
+        for (var i = text.IndexOf(token, StringComparison.Ordinal); i >= 0; i = text.IndexOf(token, i + token.Length, StringComparison.Ordinal))
+            count++;
+        return count;
+    }
 
     /// <summary>外层 checksums.sha256 逐条与 ZIP 实际字节核对（证明"只证明字节一致"这一点）。</summary>
     private static void AssertChecksumsMatchPackage(ZipArchive zip)

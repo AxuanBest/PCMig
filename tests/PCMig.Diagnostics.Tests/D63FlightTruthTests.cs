@@ -76,6 +76,9 @@ public sealed class D63FlightTruthTests
 
             // 丢掉的 post 事件也必须进丢失台账（诊断自己不许悄悄少记）。
             Assert.True(recorder.Stats().DroppedEvents >= 1);
+
+            // ★ R-1 收口 ★ 而且"证据不完整"这个事实必须能被导出侧读到（旧实现它没有赋值路径）。
+            Assert.True(recorder.EvidenceIncomplete, "post 丢包没有留下\"证据不完整\"的事实");
         }
         finally
         {
@@ -101,6 +104,9 @@ public sealed class D63FlightTruthTests
             var manifest = ReadManifest(Directory.GetFiles(store.FlightDir, "window-*.jsonl").Single());
             Assert.False(manifest.GetProperty("partial").GetBoolean());
             Assert.Equal(2, manifest.GetProperty("eventCount").GetInt64());
+
+            // ★ R-1 收口 ★ 正对照：一条都没丢的窗口不得污染"证据不完整"这个事实。
+            Assert.False(recorder.EvidenceIncomplete, "干净窗口不得把飞行证据标成缺损");
         }
         finally
         {

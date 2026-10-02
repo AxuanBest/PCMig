@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace PCMig.Diagnostics.Abstractions;
 
 /// <summary>
@@ -130,6 +132,20 @@ public sealed record DiagnosticEvent
     /// 纪律：能保存未知 ≠ 能用当前规则解释未知。
     /// </summary>
     public bool VersionUnsupported { get; init; }
+
+    /// <summary>
+    /// ★ R-5 收口（D6.3 剩余风险关闭轮）★ 无法用当前契约解释、但**必须保存**的原始 payload 体。
+    ///
+    /// 为什么必须有：`VersionUnsupported` 事件的 `<see cref="Payload"/>` 是 null（不解码成 typed payload，
+    /// 否则未来版本会冒充当前语义）。旧写出路径只看 <see cref="Payload"/> ⇒ 重新序列化时 payload **整块消失**，
+    /// 只剩一个 `unknownTokens: payload:unsupported-version` 标记。这跟"可以保存但不能解释"的"可以保存"冲突：
+    /// 现场证据（未来版本写了什么）被导出环节悄悄扔掉。
+    /// 现在原样保留该 JSON 对象（**不做任何解释、不改字段名**），再写出时逐字写回。
+    /// </summary>
+    public JsonElement? RawPayload { get; init; }
+
+    /// <summary>原始 payload 的声明名（`payloadName`），仅在无法解码成 typed payload 时保留。</summary>
+    public string? RawPayloadName { get; init; }
 }
 
 /// <summary>

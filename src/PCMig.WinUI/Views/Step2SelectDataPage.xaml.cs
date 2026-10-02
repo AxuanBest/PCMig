@@ -895,7 +895,11 @@ public sealed partial class Step2SelectDataPage : UserControl
             confirmIncompleteScan: ConfirmIncompleteScanAsync,
             resumeDecision: decision);
 
-        if (!ok && session.Ctx is null)
+        // ★ R-3 收口（D6.3 剩余风险关闭轮）★ 旧判据把「session 的 Ctx 是否为空」当成了"预检是否成功"的替身：
+        //   只要上一次预检留下过 Ctx，本次真实失败（未勾共享 / 目标非法 / 取消 / 预检未通过 /
+        //   扫描残缺闸门拦下）也会写成 UI-007 `Succeeded`。动作的成功必须来自**本次调用自己的真实
+        //   结果**，因此判据只看 `ok`（同名判据由 D61ActionCoverageTests 的 R-3 夹具守住）。
+        if (!ok)
         {
             // 闸门拦下或预检失败：状态句已由会话写清，这里只把界面刷新到真实状态
             trace.Complete(DiagnosticOutcome.Failed, "prepare-rejected");

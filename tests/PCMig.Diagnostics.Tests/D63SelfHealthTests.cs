@@ -6,6 +6,7 @@ using PCMig.Diagnostics;
 using PCMig.Diagnostics.Abstractions;
 using PCMig.Diagnostics.Abstractions.Events;
 using PCMig.Diagnostics.Abstractions.Payloads;
+using PCMig.Diagnostics.Export;
 using Xunit;
 
 namespace PCMig.Diagnostics.Tests;
@@ -233,6 +234,80 @@ public sealed class D63SelfHealthTests : IDisposable
             Assert.False(snapshot.IsDegraded,
                 $"干净会话不得谎报降级：reason={snapshot.LastStorageReason} sink={snapshot.SinkFaults} dropped={snapshot.EventsDropped}");
             Assert.True(snapshot.EvidenceComplete, "干净会话不得谎报证据不完整");
+        }
+        finally
+        {
+            D2TestSupport.Shutdown(runtime);
+            D2TestSupport.Dispose(runtime);
+        }
+    }
+
+    // ───────────────── Fixture 19（R-2）：规则内部故障必须进健康与证据判定 ─────────────────
+
+    /// <summary>
+    /// ★ R-2 收口（D6.3 剩余风险关闭轮）★ 规则抛异常原来只进 `rules.faults`（导出快照 / 诊断中心计数器），
+    /// **不进健康、不进证据完整性判定** ⇒ 规则每条都炸时包仍写 `degraded:false` +
+    /// `evidenceComplete:true` + `Complete`。异常被隔离是"不许拖垮 writer"，不是"等于没发生"：
+    /// 规则没跑成 ⇒ 它负责的那类事实没被判读。
+    ///
+    /// 本夹具同时保留正对照（故障之前必须健康且完整），否则"变红"可能只是把一切都判成坏的假修复。
+    /// </summary>
+    [Fact]
+    public void Fixture19_RuleFaultMustReachSelfHealthAndForbidCompleteEvidence()
+    {
+        var runtime = DiagnosticRuntime.Start(new DiagnosticRuntimeOptions
+        {
+            StorageRoot = Path.Combine(_root, "rulefault", "Diagnostics"),
+            InitialMode = CaptureMode.Operational,
+            AppVersion = "d63-test",
+            ShutdownBudgetMs = 5000,
+            WriterFlushIntervalMs = 1,
+        }, out _);
+        Assert.NotNull(runtime.Store);
+
+        try
+        {
+            Publish(runtime, "rule-fault-baseline");
+            Assert.True(D2TestSupport.WaitUntil(() => runtime.Health.EventsWritten >= 1, 5000));
+
+            // 正对照：故障之前必须"健康 + 证据完整"。
+            var clean = runtime.GetHealthSnapshot();
+            Assert.False(clean.IsDegraded, "干净会话不得谎报降级");
+            Assert.True(clean.EvidenceComplete, "干净会话不得谎报证据不完整");
+            Assert.Equal(0, clean.RuleFaults);
+
+            // ① 规则内部故障必须真的接到健康通道上（未接线时这里是 null ⇒ 红灯）。
+            var hook = runtime.RuleEngine.OnRuleFault;
+            Assert.True(hook is not null,
+                "RuleEngine.OnRuleFault 没有接到诊断自身健康：规则全炸时包仍会写 Complete");
+
+            hook!("rule:ACCESS_DENIED:InvalidOperationException");
+
+            // ② 投影唯一且如实：同一个快照里既不健康、也不完整。
+            var after = runtime.GetHealthSnapshot();
+            Assert.Equal(1, after.RuleFaults);
+            Assert.Equal("rule:ACCESS_DENIED:InvalidOperationException", after.LastRuleFaultReason);
+            Assert.True(after.IsDegraded, "规则内部故障必须让健康降级");
+            Assert.False(after.EvidenceComplete, "规则没判读成功 ⇒ 不许宣称证据完整");
+
+            // ③ 导出包不许 Complete，也不许 packageEvidenceComplete=true。
+            var outcome = new DiagnosticPackageExporter().Export(new DiagnosticExportRequest
+            {
+                SessionDir = runtime.Store!.SessionDir,
+                OutputDirectory = Path.Combine(_root, "rulefault", "out"),
+                Health = after,
+                Cutoff = runtime.PrepareExportCutoff(TimeSpan.FromSeconds(3)),
+                IncludeFlightWindows = false,
+            });
+            Assert.True(outcome.Succeeded, outcome.FailureReason);
+
+            using var zip = System.IO.Compression.ZipFile.OpenRead(outcome.ZipPath!);
+            var entry = zip.GetEntry("summary.json");
+            Assert.NotNull(entry);
+            using var reader = new StreamReader(entry!.Open(), System.Text.Encoding.UTF8);
+            var summary = System.Text.Json.JsonDocument.Parse(reader.ReadToEnd()).RootElement.Clone();
+            Assert.NotEqual("Complete", summary.GetProperty("evidenceCompleteness").GetString());
+            Assert.False(summary.GetProperty("packageEvidenceComplete").GetBoolean());
         }
         finally
         {

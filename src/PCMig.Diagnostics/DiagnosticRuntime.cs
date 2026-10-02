@@ -219,11 +219,17 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
         // （拿不到就老实说拿不到，绝不因此下确定结论）。
         _ruleEngine = new RuleEngine(RuleRegistry.CreateDefault(), ResolveEvidenceFromCache);
         _ruleEngine.OnIncident = HandleIncidentLifecycle;
+        // ★ R-2 收口（D6.3 剩余风险关闭轮）★ 规则内部故障必须进**诊断自身健康**，
+        //   否则"规则全炸"时包仍写 degraded:false + evidenceComplete:true + Complete。
+        _ruleEngine.OnRuleFault = reason => _health.MarkRuleFault(reason);
 
         // 反馈契约 + 待满足期望跟踪器：**单个 scheduler**（本 runtime 的定时器统一 Tick），
         // 绝不为每条期望创建 Timer；超时只产出"没等到"的事实，由规则决定怎么落卡。
         _feedbackContracts = FeedbackContractRegistry.CreateDefault();
         _expectations = new PendingExpectationTracker(_feedbackContracts, HandleExpectationTimeout);
+        // ★ R-2 收口（第二轮：两处无计数静默吞异常）★ 跟踪器内部故障同样进健康通道：
+        //   事件被消费却没被解释 ⇒ 它负责的那类"没等到反馈"的判定根本没发生，与规则没跑成同性质。
+        _expectations.OnFault = reason => _health.MarkRuleFault(reason);
 
         SetAnalyzerSink(evt =>
         {
@@ -262,9 +268,12 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
 
             _ruleEngine.ReportIncident(incident, triggerFlight: false);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // 超时结论生成失败绝不影响管线。
+            // ★ R-2 收口（第二轮：两处无计数静默吞异常）★ 超时结论生成失败 = 那条"没反应"的证据
+            //   根本没被写成事件卡；而且内层 catch 抢在维护隔离之前吞掉异常 ⇒ 原来连
+            //   MaintenanceFaults 都拿不到这条事实。异常可以容错，但不许无痕。
+            _health.MarkRuleFault("expectation-timeout:" + ex.GetType().Name);
         }
     }
 
@@ -287,7 +296,10 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
     private bool HealthSupportsEvidenceComplete =>
         !_health.StorageDegraded
         && _health.SinkFaults == 0
-        && _health.MaintenanceAlive;
+        && _health.MaintenanceAlive
+        // ★ R-2 ★ 规则内部故障（Analyzer/Rule 异常）同样让"证据完整"不成立：
+        //   单点判据，避免规则上下文与导出快照出现两种说法。
+        && _health.RuleFaults == 0;
 
     /// <summary>规则上下文（分档证据覆盖 + 接受水位 + 诊断自身健康）。</summary>
     private RuleContext CreateRuleContext() =>
@@ -1007,6 +1019,12 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
         var serializationFailures = _health.SerializationFailures;
         if (serializationFailures > 0) blockers.Add($"serialization-failures={serializationFailures}");
 
+        // ★ R-1 收口（D6.3 剩余风险关闭轮）★ 飞行证据缺损必须**真的**进这个截止快照：
+        //   旧实现里 `FlightEvidenceIncomplete` 只在类型上声明、没有任何赋值路径 ⇒
+        //   导出侧那条 blocker 永远不可达，于是出现"包说 Complete、包内窗口清单却写 partial: true"。
+        var flightIncomplete = _flight?.EvidenceIncomplete ?? false;
+        if (flightIncomplete) blockers.Add("flight-evidence-incomplete");
+
         return new DiagnosticExportCutoff(
             requested, contiguous, DateTimeOffset.UtcNow, flushStatus, coverageEnd, anyTailLoss, pending,
             _writer?.SealedSegments.Count ?? 0, note)
@@ -1016,6 +1034,7 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
             TrackingOverflowed = overflowed,
             IncidentSealOk = incidentSealOk,
             SerializationFailures = serializationFailures,
+            FlightEvidenceIncomplete = flightIncomplete,
             EvidenceBlockReason = blockers.Count == 0 ? null : string.Join(",", blockers),
         };
     }
