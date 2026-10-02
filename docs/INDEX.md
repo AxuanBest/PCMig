@@ -25,19 +25,20 @@
 | 当前发布版本 | **v0.4.9**（`installer\pcmig.iss`、Cli/Core/Gui 三处 csproj 均为 `0.4.9`） |
 | 当前开发线 | **v0.5.0 WinUI**（分支 `feature/winui-v0.5.0`，**尚未发版**） |
 | PMML | **v1.0 — FROZEN**（UI 冻结） |
-| Diagnostics | **D6.1 — COMPLETE · D6.2 — EXECUTED · D6.3 — 收口完成**（2026-10-02，见 D6.3 收口报告） |
+| Diagnostics | **D6.1 — COMPLETE · D6.2 — EXECUTED · D6.3 — FINAL CLOSED**（2026-10-02；**Independent Verification = COMPLETED / PASSED**；收口报告 + **最终 Closure Report（已登记，见 §四）**：R-1…R-7 全部 CLOSED，Known Trust-Critical Risk = 0；**真机运行 = 2 轮**；改动已按 **2 个本地 Commit** 落库，**未 push / 未 release**） |
 | D6.2 Real World Validation | **EXECUTED**（结论：Deep Trace E2E FAIL 限定 / Secret PASS / 2-9 Action 全链路 / 跨包隐私 FAIL 限定 / Stage B NOT READY） |
-| D6.3 Trust Closure | **COMPLETE**（2026-10-02；五个词 Complete/Succeeded/Clean/Included/Healthy 收口；16 个工作包 + 缺口①②③；红灯夹具 18 组 + O2 6 条；真机复验①② PASS；**等独立复验**；Stage B 未进入） |
+| D6.3 Trust Closure | **COMPLETE**（2026-10-02；五个词 Complete/Succeeded/Clean/Included/Healthy 收口；16 个工作包 + 缺口①②③；红灯夹具 18 组 + O2 6 条；真机复验①② PASS；**独立复验已 COMPLETED / PASSED** —— 结论 Conditional GO，发现 R-1…R-5，见下一行；Stage B 未进入） |
+| D6.3 Remaining Risk Closure | **COMPLETE ⇒ D6.3 = FINAL CLOSED**（2026-10-02；独立复验发现 R-1…R-5 + 报告登记 R-6/R-7 全部 CLOSED；红灯探针 5 + 3 条已移除、残留 0；Diagnostics 363 → **371 / 0**；**真机运行 = 2 轮**（Run 1 PID 82212 / Run 2 PID 54632；第三个包按「增量 / 最终收口交付包」定义，**不是**第三轮真机运行）；**改动已按 2 个本地 Commit 提交（D6.3 Final Repository Closure），未 push / 未 tag / 未 release**；Stage B 未进入） |
 | Stage B | **NOT AUTHORIZED** |
-| 测试基线 | `PCMig.Core.Tests` **296** + `PCMig.Diagnostics.Tests` **363** = **659 / 0**（D6.3 后） |
+| 测试基线 | `PCMig.Core.Tests` **296** + `PCMig.Diagnostics.Tests` **371** = **667 / 0**（D6.3 剩余风险关闭后；原 363） |
 | Solution | `PCMig.sln` **8 个工程**（2026-10-01 补齐 WinUI 与 Diagnostics；见下文 §十） |
 | 构建基线 | `dotnet build PCMig.sln -c Release` → **0 error / 4 warning**（既有：xUnit2031 ×1 + WMC1506 ×3，无新增） |
-| Git 分支 / Commits | `feature/winui-v0.5.0` · checkpoint **`2c0183b`**（治理前真实产品状态）→ solution **`7ba2bc1`** → governance **`c5e668c`** → 最终交接·报告 **`73fcb05`** → D6.2 收口 **`8513c25`** · **D6.3 全部改动尚未提交（在工作树上）** |
+| Git 分支 / Commits | `feature/winui-v0.5.0` · checkpoint **`2c0183b`**（治理前真实产品状态）→ solution **`7ba2bc1`** → governance **`c5e668c`** → 最终交接·报告 **`73fcb05`** → D6.2 收口 **`8513c25`** → D6.3 可信度收口 **`f5a4f69`**（7 笔逻辑提交） · **D6.3 剩余风险关闭（R-1…R-7）+ 最终仓库收尾 = 2 个本地 Commit**（`fix(diagnostics): close D6.3 trust-critical risks` + `docs(diagnostics): finalize D6.3 closure handover`；**未 push / 未 tag / 未 release**；**最新 HEAD 一律用 `git log --oneline -1` 实读，不写死**） |
 | Workspace 治理 | **COMPLETE**（2026-10-01 第二轮：docs 顶层 `.md` 83 → 29；清出 ≈1.09 GiB 可重建产物） |
-| 当前工作交接 | `docs\工作交接-20261002-D6.3可信度收口完成.md` |
+| 当前工作交接 | `docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md` |
 | 文档入口 | 本文件（`docs\INDEX.md`） |
 
-**一句话**：产品功能仍处于冻结状态（PMML v1.0 FROZEN / D6.1 COMPLETE）；D6.2 真实验证与 **D6.3 可信度收口**均已完成（2026-10-02）；**下一步是等独立复验，Stage B 未获授权前不得开始**。
+**一句话**：产品功能仍处于冻结状态（PMML v1.0 FROZEN / D6.1 COMPLETE）；D6.2 真实验证、**D6.3 可信度收口**、**D6.3 剩余风险关闭（R-1…R-7）**与 **D6.3 最终仓库收尾**均已完成（2026-10-02），**D6.3 = FINAL CLOSED，Independent Verification = PASSED，Known Trust-Critical Risk = 0**；改动已按 **2 个本地 Commit** 落库（**未 push / 未 tag / 未 release**）；**Stage B 未获授权前不得开始**；**下一步 = 等人工下一条指令（Next Task = WAITING FOR HUMAN INSTRUCTION）**。
 
 ---
 
@@ -100,11 +101,18 @@
 
 **D6.3 产物（2026-10-02，可信度收口 Trust Closure）**：
 
-- `docs\诊断系统实施-D6.3可信度收口报告.md` —— **D6.3 最终报告**（§二十四 逐项 PASS/FAIL 终报；含缺口①②③ 红灯证明与真机复验）
+- `docs\诊断系统实施-D6.3可信度收口报告.md` —— **D6.3 可信度收口报告（Trust Closure 阶段报告）**（§二十四 逐项 PASS/FAIL 终报；含缺口①②③ 红灯证明与真机复验）；其后的最终口径见 §四 末「D6.3 剩余风险关闭 ⇒ 最终收尾」
 - `docs\诊断系统实施-Reserved事件分级.md` —— 口径更新：Reserved **23 → 22**（`UI.NavigationChanged` 已转 Produced，见该文末「附：D6.3 轮口径更新」）
 - 机器证据（**工作区根目录，不在 Git 仓库内**）—— **禁止删除**：
   - `E:\Project\deepseek work\archive\evidence\diagnostics-d63-20261001\`（D6.2→D6.3 真机证据；含 `tools\{ui,d63-tree,d63-dump}.ps1`、`d63-synthetic-source-manifest.tsv`(20,306 行)、`chains\`、`chain9-export-010341\`、`defect18-feedback-correlation\`）
   - `E:\Project\deepseek work\archive\evidence\d63-o2-gap-fixes\`（`red-proof.md` 三处红灯逐字证明；`real-export-013026\` 缺口①修复后的实机导出包解包）
+
+**D6.3 剩余风险关闭 ⇒ 最终收尾（2026-10-02，Remaining Risk Closure · D6.3 = FINAL CLOSED）**：
+
+- `docs\诊断系统实施-D6.3-Final-Closure-Report.md` —— **D6.3 最终 Closure Report（正式登记进本 INDEX，2026-10-02）**。定义：**D6.3 最终可信度收口报告**（§〇 一页速览 / §一 范围与约束 / §二 逐条 R-1…R-5 / §二（续）R-6/R-7 / §三 修改文件清单 / §四 测试结果 / §五 真机复验 / §六 风险状态与证据索引 / §七 结论与下一步）。**旧有 D6.3 Trust Closure、Independent Verification、Remaining Risk 相关报告全部保留，不删除。**
+- `docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md` —— 本轮 Current Handover（见 §七）
+- **变更范围权威口径**：D6.3 最终变更文件范围与行数，**以 Final Closure Commit 的 `git show --name-status` / `git show --stat` 为权威**；文档中出现的 `17 files changed, 520 insertions(+), 15 deletions(-)`、`18 项改动`、`工作树 17 M + 3 ??` 等数字一律为**当时阶段快照**（取自更新指针之前的工作树），**不得当作当前最终工作树描述**。
+- 机器证据（**工作区根目录，不在 Git 仓库内**）—— **禁止删除**：`E:\Project\deepseek work\archive\evidence\d63-remaining-risk-closure\`（`red-proof.md`、`red-proof-r2-silent.md`、`tests\`、`build\`、`real-export-030312\`、`real-export-r2-113637\`、`git\`）
 
 **机器生成，禁止手工编辑**（由 Contract Test 重算覆盖）：
 
@@ -148,12 +156,12 @@
 **实验室 / 工具链**
 
 - `tools\l3-*.ps1`、`tools\pcmiglab-vm.ps1`、`tools\l3\*` —— L3 实验室部署与场景工具
-- `archive\scripts\diagnostics-audit-20261001\` —— 独立诊断探针工程（`AuditProbe.csproj` / `Program.cs` / `ComponentAudit.cs` / `PackageAudit.cs`）
+- `E:\Project\deepseek work\PCMig\archive\scripts\diagnostics-audit-20261001\`（**仓库内** archive）—— 独立诊断探针工程（`AuditProbe.csproj` / `Program.cs` / `ComponentAudit.cs` / `PackageAudit.cs`）
 - `tools\stability-test.ps1`、`tools\uishot.ps1` —— 稳定性台与 UI 截图
 
 **故障注入 / 证据**
 
-- `archive\evidence\diagnostics-audit-20261001\*`、`archive\evidence\diagnostics-d61-20261001\*`（events / incidents / metrics / snapshots / flight）—— **原始机器证据，禁止删除；其中的空目录是证据结构，不是垃圾**
+- `E:\Project\deepseek work\PCMig\archive\evidence\diagnostics-audit-20261001\*`、`E:\Project\deepseek work\PCMig\archive\evidence\diagnostics-d61-20261001\*`（**仓库内** archive；events / incidents / metrics / snapshots / flight）—— **原始机器证据，禁止删除；其中的空目录是证据结构，不是垃圾**
 
 **未来三 VM / Stage B**：未开始，等授权。
 
@@ -163,8 +171,8 @@
 
 ## 七、【Current Handover】当前工作交接
 
-**当前**：`docs\工作交接-20261002-D6.3可信度收口完成.md`
-（上一份 Current `工作交接-20261001-D6.2真实验证完成.md` 已于 2026-10-02 按本节规则移入 `docs\handover\history\`，只作历史追溯；更早的 `工作交接-20261001-Workspace治理完成与D6.2起点.md` 亦已在历史目录。）
+**当前**：`docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md`
+（上一份 Current `工作交接-20261002-D6.3可信度收口完成.md` 已于 2026-10-02 按本节规则移入 `docs\handover\history\`，只作历史追溯；更早的 `工作交接-20261001-D6.2真实验证完成.md`、`工作交接-20261001-Workspace治理完成与D6.2起点.md` 亦已在历史目录。）
 
 规则（与 `AGENTS.md` 铁律 10 一致）：
 
@@ -177,7 +185,7 @@
 
 ## 八、【History】历史与归档（仅追溯，不覆盖当前规则）
 
-- `docs\handover\history\` —— 全部历史工作交接（`工作交接-*.md`、`工作交接说明_v0.4.*.md`）。这些文档**互相引用多为同目录相对名**，整体归档后互引自动保持有效。当前共 **44 篇**（2026-10-02 归档：`工作交接-20261001-D6.2真实验证完成.md`；2026-10-01 归档：`工作交接-20261001-D6.1诊断收口与全量验收.md`、`工作交接-20261001-Workspace治理完成与D6.2起点.md`）。
+- `docs\handover\history\` —— 全部历史工作交接（`工作交接-*.md`、`工作交接说明_v0.4.*.md`）。这些文档**互相引用多为同目录相对名**，整体归档后互引自动保持有效。当前共 **45 篇**（2026-10-02 归档：`工作交接-20261002-D6.3可信度收口完成.md` 与同一批更早归档的 `工作交接-20261001-D6.2真实验证完成.md`；2026-10-01 归档：`工作交接-20261001-D6.1诊断收口与全量验收.md`、`工作交接-20261001-Workspace治理完成与D6.2起点.md`）。
 - `docs\archive\` —— 已被取代 / 已交付的历史文档（Superseded / Historical）：
   - `公司域环境验证清单.md` —— 已被 `First-Day-Company-Test-Checklist.md` 取代（两块独有内容已合并保留）
   - `FinalPolish-用户指令原文-20260927.md` —— 用户 67 节指令原文归档（文件带只读属性，**不可删**）
@@ -186,7 +194,10 @@
   - `阶段A-交付说明-20260929.md` —— 阶段 A 业务接线交付说明
   - `现场验证清单-v0.3.8.txt` —— v0.3.8 期现场清单（已被首日 / 公司清单取代）
 - `docs\工作区治理\` —— Workspace Cleanup & Governance 过程报告（含第一轮盘点报告，其路径口径为**治理前快照**，属历史事实，不再更新）。
-- `PCMig\archive\` —— 备份、证据、截图、历史安装包（`PCMigSetup-*.exe`）、审计材料。**绝对保护区**：`archive\backup-*`、`archive\evidence\*`、`archive\screenshots\*`、`archive\pmm-l-audit\*`、`archive\baseline-*`、`archive\packages\*` —— 一律不得删除。
+- **证据 / 归档有三个不同的根，不得混用**（2026-10-02 定案）：
+  - **工作区权威证据根（当前 D6.x 本地原始证据的权威归档根，在 Git 仓库之外）**：`E:\Project\deepseek work\archive\` —— 其下 `E:\Project\deepseek work\archive\evidence\*`、`E:\Project\deepseek work\archive\screenshots\*`、`E:\Project\deepseek work\archive\packages\*` 等**一律不得删除**（**绝对保护区**：`E:\Project\deepseek work\archive\backup-*`、`...\archive\evidence\*`、`...\archive\screenshots\*`、`...\archive\pmm-l-audit\*`、`...\archive\baseline-*`、`...\archive\packages\*`）。
+  - **仓库内历史 / 本地遗留证据目录（非当前权威证据根，不纳入 Git，已被 `.gitignore` 的 `/archive/` 规则保护）**：`E:\Project\deepseek work\PCMig\archive\` —— 仓库内备份、证据、截图、历史安装包（`PCMigSetup-*.exe`）、审计材料（`backup-*`、`baseline-A5-*`、`packages\*.nupkg`、`evidence\`、`screenshots\`、`pmm-l-audit\`、`scripts\`、`a5-rollback\`）。**同样不得删除、不得移动、不得与工作区根那棵合并。**
+  - **桌面交付根**：`D:\Users\User\Desktop\新建文件夹 (4)\` —— 每大轮复验包的落点，**只复制、不改源文件**。
 
 ---
 
@@ -217,19 +228,39 @@
 - 第一轮（Workspace Inventory，只读）：`docs\工作区治理\第一轮-Workspace-Inventory-20261001.md`
 - 第二轮（Workspace Cleanup & Governance，执行）：`docs\工作区治理\第二轮-Workspace-Cleanup-Report-20261001.md`
 - 治理证据与脚本：`E:\Project\deepseek work\archive\pcmig-governance-20261001\`
-- 治理前增量备份：`PCMig\archive\backup-pre-governance-20261001-133659\`（341 文件 = 336 项目文件 + 5 份证据，SHA256 336/336 MATCH）
+- 治理前增量备份：`E:\Project\deepseek work\PCMig\archive\backup-pre-governance-20261001-133659\`（**仓库内** archive；341 文件 = 336 项目文件 + 5 份证据，SHA256 336/336 MATCH）
 
 ---
 
 ## 十一、【Roadmap】下一步
 
-1. **等独立复验（当前状态）**：D6.3 可信度收口已 COMPLETE（2026-10-02），改动**尚未提交**；**Stage B 未获授权前不得开始**；详见 `docs\诊断系统实施-D6.3可信度收口报告.md` §二十四
+**D6.3 最终状态（2026-10-02 人工拍板，唯一权威口径 —— 与 Final Closure Report / Current Handover / `AGENTS.md` 四处必须一致）**：
+
+| 项 | 最终值 |
+| --- | --- |
+| D6.3 Diagnostics Trust Closure | **FINAL CLOSED** |
+| Independent Verification | **COMPLETED / PASSED**（结论 Conditional GO；发现 R-1…R-5） |
+| Remaining Risk Closure | **R-1 ～ R-7 = CLOSED** |
+| Known Trust-Critical Risk | **0** |
+| Diagnostics Tests | **371 / 0 / 0** |
+| Core Tests | **296 / 0 / 0** |
+| WinUI Release Build | **0 Error / 3 Known Warnings**（WMC1506 ×3，既有基线） |
+| Real-machine Verification Runs | **2**（Run 1 PID 82212 / Run 2 PID 54632） |
+| Delivery / Evidence Package Count | **≥ 3**（**与真机运行次数是两个概念，不得混为一谈**） |
+| PMML Visual Impact | **None**（PMML v1.0 仍 FROZEN） |
+| Stage B | **NOT ENTERED** |
+| Release | **NOT STARTED** |
+| Next Task | **WAITING FOR HUMAN INSTRUCTION** |
+
+> 不自行推断下一阶段是什么。上述状态由人工拍板确认，未经新的明确指令不得改变。
+
+1. **【已完成 · 2026-10-02】D6.3 Final Repository Closure（提交 + 文档收口）**：按人工拍板采用 **2 个本地 Commit**（`fix(diagnostics): close D6.3 trust-critical risks` + `docs(diagnostics): finalize D6.3 closure handover`；**逐文件白名单 staging，禁止 `git add .` / `git add -A`**）；最终 Closure Report 已登记进本 INDEX（§四）；`PCMig\archive\` 已由 `.gitignore` 的 `/archive/` 规则保护；**未 push / 未 tag / 未 release**。D6.3 权威变更范围以 Final Closure Commit 的 `git show --name-status` / `git show --stat` 为准。
 2. **D6.2 遗留修复项**：G-1/G-3 Deep Trace 出口（`DIA.RingTriggered`/`DIA.RingSealed` → 真正写进包）**仍未做**（D6.3 只做到"诚实地说 `included=false`"）；**G-2 跨包隐私令牌化 / G-4 显式 AutomationId 绑定 / G-9 `UI.NavigationChanged` 已在 D6.3 完成**
-3. **Stage B**（未授权；D6.2 结论为 **NOT READY**，D6.3 后需**独立复验**；前置清单见 D6.2 报告 §十五）
+3. **Stage B**（未授权；D6.2 结论为 **NOT READY**；D6.3 的**独立复验已完成 / PASSED**；前置清单见 D6.2 报告 §十五）
 4. **三 VM 企业模拟实验室**（未开始）—— 6/9 Action 真实链路与 10 项故障场景需在此执行
 5. **Release Governance**（登记未改）：`tools\release.ps1` 交付清单、`首日实测检查表.md` 陈旧口径、`AGENTS.md` 版本号与 INDEX 指针
 6. **Harness / DSH Workspace Cleanup**（工作区根 174 散落文件 + 12 重复目录，明确不碰）
 
 ---
 
-*本文件由 Workspace Cleanup & Governance 轮建立（2026-10-01）；最近一次更新：**D6.3 Trust Closure 轮（2026-10-02）**更新 Current State / Diagnostics 产物 / Roadmap。文档治理规则：机器生成文档禁手改；历史文档只追溯；移动前先查硬引用。*
+*本文件由 Workspace Cleanup & Governance 轮建立（2026-10-01）；最近一次更新：**D6.3 Final Closure / Remaining Risk Closure 轮（2026-10-02）**更新 Current State / Diagnostics 产物 / Roadmap / 最终状态块。文档治理规则：机器生成文档禁手改；历史文档只追溯；移动前先查硬引用。*

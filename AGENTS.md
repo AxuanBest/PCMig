@@ -7,26 +7,26 @@
 
 **PCMig** —— 企业内网 Windows 换机数据迁移工具（C#/.NET 8，WPF GUI + CLI，Robocopy 双通道引擎）。
 在新电脑运行，输入旧电脑 IP/电脑名 + 凭据，经 SMB 把旧机共享盘数据"直拉"过来。
-**当前状态（2026-10-02 D6.3 可信度收口完成后）**。开工前以 `docs\INDEX.md` 与当前工作交接为准；下表哈希与数字均为治理当时从工作区实读，不凭记忆。旧状态（如「当前版本 v0.4.8（2026-09-19）」「PMML 仍是 Freeze Candidate」「Diagnostics 未获实施授权」「docs 顶层历史交接才是入口」「Solution 不完整」）**一律作废**。
+**当前状态（2026-10-02 D6.3 剩余风险关闭 R-1…R-7 完成后 ⇒ D6.3 = FINAL CLOSED；Independent Verification = COMPLETED / PASSED；改动已按 2 个本地 Commit 落库，未 push / 未 tag / 未 release）**。开工前以 `docs\INDEX.md` 与当前工作交接为准；下表哈希与数字均为治理当时从工作区实读，不凭记忆。旧状态（如「当前版本 v0.4.8（2026-09-19）」「PMML 仍是 Freeze Candidate」「Diagnostics 未获实施授权」「docs 顶层历史交接才是入口」「Solution 不完整」）**一律作废**。
 
 | 项 | 当前值 |
 |---|---|
 | 权威工作区（唯一事实来源） | `E:\Project\deepseek work\PCMig`（交付区 `E:\Project\PCMig`；`I:\K\deepseek work` 永不作为事实依据或代码来源） |
 | 文档入口 | `docs\INDEX.md`（**唯一导航入口**） |
-| 当前工作交接（Current Handover） | `docs\工作交接-20261002-D6.3可信度收口完成.md`（D6.2 交接已于 2026-10-02 归档到 `docs\handover\history\`，**只作历史追溯，不再是 Current**） |
+| 当前工作交接（Current Handover） | `docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md`（D6.3 可信度收口交接已于 2026-10-02 归档到 `docs\handover\history\`，**只作历史追溯，不再是 Current**） |
 | Workspace Governance Phase 2 | **COMPLETE** |
 | Git Recovery Baseline | **ESTABLISHED** |
 | Solution Governance | **COMPLETE** —— `PCMig.sln` 覆盖当前 **8 个工程**（含 `src\PCMig.WinUI` 与 `src\PCMig.Diagnostics`；治理前只有 6 个） |
-| Docs Governance | **COMPLETE** —— docs 顶层 `.md` 83 → **32**（D6.3 后实读：D6.2 增报告/分级/交接 3 篇，D6.3 增收口报告与交接 2 篇，D6.2 交接移入历史；见 INDEX §四/§六）；历史交接在 `docs\handover\history\`（**44 篇**），只作追溯 |
+| Docs Governance | **COMPLETE** —— docs 顶层 `.md` 83 → **33**（D6.3 剩余风险关闭后实读，2026-10-02：D6.2 增报告/分级/交接 3 篇，D6.3 增收口报告/最终收口报告/交接 2 篇，交替换代净增；见 INDEX §四/§六）；历史交接在 `docs\handover\history\`（**45 篇**），只作追溯 |
 | PMML | **v1.0 — FROZEN** |
-| Diagnostics | **D6.1 — COMPLETE · D6.2 — EXECUTED · D6.3 — 收口完成**（2026-10-02；报告 `docs\诊断系统实施-D6.3可信度收口报告.md`，D6.2 报告仍在；D6.3 只修审计已证缺陷，五个词 Complete/Succeeded/Clean/Included/Healthy 必须说真话） |
+| Diagnostics | **D6.1 — COMPLETE · D6.2 — EXECUTED · D6.3 — FINAL CLOSED**（2026-10-02；**Independent Verification = COMPLETED / PASSED**（Conditional GO，发现 R-1…R-5）；最终 Closure Report `docs\诊断系统实施-D6.3-Final-Closure-Report.md`（**已登记进 `docs\INDEX.md` §四**）、可信度收口报告 `docs\诊断系统实施-D6.3可信度收口报告.md`、D6.2 报告仍在；**R-1…R-7 全部 CLOSED，Known Trust-Critical Risk = 0**；**真机运行 = 2 轮**；五个词 Complete/Succeeded/Clean/Included/Healthy 必须说真话） |
 | 发布线 / 开发线 | 发布 **v0.4.9**；开发 **v0.5.0 WinUI**（分支 `feature/winui-v0.5.0`，**未发版**） |
-| 当前 Git | 分支 `feature/winui-v0.5.0`：checkpoint **`2c0183b`** → solution **`7ba2bc1`** → governance **`c5e668c`** → 交接与报告 **`73fcb05`** / **`6f002ac`** / **`beb2902`** → 治理完成时 HEAD **`f592d8c`**（其后另有 AGENTS 对齐提交；**最新 HEAD 一律用 `git log --oneline -1` 实读**，不写死） |
-| 验证基线 | Build `dotnet build PCMig.sln -c Release --no-incremental` → **0 error / 4 warning**（全部既有：xUnit2031 ×1 + WMC1506 ×3；D6.3 后无新增）；Tests **Core 296 + Diagnostics 363 = 659 / 0**（D6.3 后，基线原为 290 + 286 = 576）。证据：`archive\pcmig-governance-20261001\s1-build.log`（治理时）、`archive\evidence\d63-o2-build.log`、`d63-o2-diag-full.log`、`d63-o2-core-full.log` |
-| 下一步 | **等独立复验**（D6.3 可信度收口已完成 2026-10-02，改动尚未提交）；**未获授权不得进入 Stage B**。D6.2 遗留项：G-1/G-3（Deep Trace 真正进包）仍未做；G-2/G-4/G-9 已在 D6.3 完成 |
+| 当前 Git | 分支 `feature/winui-v0.5.0`：checkpoint **`2c0183b`** → solution **`7ba2bc1`** → governance **`c5e668c`** → D6.2/D6.3 收口提交 **`8513c25`** → D6.3 可信度收口 **`f5a4f69`**（7 笔逻辑提交）→ **D6.3 剩余风险关闭（R-1…R-7）+ 最终仓库收尾 = 2 个本地 Commit**（`fix(diagnostics): close D6.3 trust-critical risks` + `docs(diagnostics): finalize D6.3 closure handover`；**未 push / 未 tag / 未 release**；D6.3 变更范围的权威来源是 Final Closure Commit 的 `git show --name-status` / `git show --stat`；**最新 HEAD 一律用 `git log --oneline -1` 实读**，不写死） |
+| 验证基线 | Build `dotnet build PCMig.sln -c Release --no-incremental` → **0 error / 4 warning**（全部既有：xUnit2031 ×1 + WMC1506 ×3；D6.3 R-1…R-7 后无新增）；Tests **Core 296 + Diagnostics 371 = 667 / 0**（D6.3 剩余风险关闭后；原基线 290 + 286 = 576，D6.3 可信度收口后 296 + 363 = 659）。证据：`E:\Project\deepseek work\archive\pcmig-governance-20261001\s1-build.log`（治理时）、`E:\Project\deepseek work\archive\evidence\d63-remaining-risk-closure\`（`tests\r1-*.{log,trx}`、`r2-silent-affected.*`、`r2-silent-full.*`、`build\*.log`）—— 两者均在**工作区权威证据根** `E:\Project\deepseek work\archive\` 之下 |
+| 下一步 | **WAITING FOR HUMAN INSTRUCTION（等人工下一条指令）** —— D6.3 = FINAL CLOSED 已于 2026-10-02 完成；原两项待拍板**已由人工决定并执行**：① 采用 **2 个本地 Commit** 提交（`fix(diagnostics): close D6.3 trust-critical risks` + `docs(diagnostics): finalize D6.3 closure handover`，**逐文件白名单 staging，禁止 `git add .` / `git add -A`**）；② 最终 Closure Report **已登记**进 `docs\INDEX.md` §四。**未 push / 未 tag / 未 release**；**未获授权不得进入 Stage B**，不得自行推断下一阶段。D6.2 遗留项：G-1/G-3（Deep Trace 真正进包）仍未做；G-2/G-4/G-9 已在 D6.3 完成 |
 | Stage B | **NOT AUTHORIZED / NOT STARTED** |
 | 三 VM / 210 万文件 / 大规模故障注入 | **NOT STARTED** |
-| Mnemon memory sync | **PARTIAL / Provider path available** —— 当前状态摘要已写入 Mnemon Documents（Document `57fe2a88-20ee-4c6b-ac7a-6cacf95cb4d1`）；CLI 直写路径在本机不可用（缺 `mnemon.exe`，Memory Space 写入被拒）。**这不代表治理未完成**，待 Provider 可用后再补同步 |
+| Mnemon memory sync | **AVAILABLE / WORKING**（2026-10-02 实读修正）—— 官方 Mnemon CLI **已安装且可用**：`mnemon --version` ⇒ **`mnemon version 0.2.9`**（npm 全局 shim `C:\Users\User\AppData\Roaming\npm\mnemon.cmd`；**不是**独立 `mnemon.exe`，故按「找 `mnemon.exe`」判断会误报缺失）；数据目录 `C:\Users\User\.mnemon`，Memory Space = **`default`**（`mnemon store list` ⇒ `* default`；`mnemon status` ⇒ 16 insights / 167 edges / oplog 22，DB `data\default\mnemon.db` 208,896 B）；DSH provider `mnemon-native` 的 `capabilities.remember = true`、`writeMode = "exact"`。**旧描述「本机缺 `mnemon.exe`、Memory Space 写入被拒」自 2026-10-02 起作废。** 当前状态摘要另存 Mnemon Documents（Document `57fe2a88-20ee-4c6b-ac7a-6cacf95cb4d1`） |
 
 ## 一点五、新会话必读链（开工顺序，强制）
 
