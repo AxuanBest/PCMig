@@ -166,7 +166,7 @@ public sealed partial class DiagnosticCenterPanel : UserControl
         using var trace = ActionTrace.Begin(ActionKinds.Export, ControlIds.DiagnosticsExport, "click", "DiagnosticCenterPanel");
         trace.Eligibility(true, "allowed");
         trace.Started();
-        trace.Expect("export.v1", "export-completed");
+        trace.Expect("export.v1", "export.external");
         try
         {
             StatusText.Text = "正在导出诊断包（本地文件，不会上传）…再次点击「导出诊断包」可取消。";
@@ -182,7 +182,7 @@ public sealed partial class DiagnosticCenterPanel : UserControl
 
             if (result.Succeeded)
             {
-                trace.Confirm("export.v1", "export-completed");
+                trace.Confirm("export.v1", "export.external");
                 trace.Complete(DiagnosticOutcome.Succeeded, "export-completed");
             }
             else

@@ -114,5 +114,7 @@ public sealed class RuleRegistry
         new Rules.RobocopyUnexpectedExitRule(),
         new Rules.FileLockedRule(),
         new Rules.PreviousSessionUncleanRule(),
+        // ★ FIX BATCH 3 / §6 ★ 信任关键：用户动作被受理，但业务效果从未达成（如暂停停不住）。
+        new Rules.ActionFulfillmentFailedRule(),
     });
 }

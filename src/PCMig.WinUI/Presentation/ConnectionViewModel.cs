@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using PCMig.Core.Logging;
+using PCMig.Core.Models;
 using PCMig.Core.Native;
 using PCMig.Core.Preflight;
 using Serilog;
@@ -24,6 +25,8 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     private string _username = string.Empty;
     private string _manualShareName = string.Empty;
     private string _status = "输入旧电脑信息后开始连接。凭据只用于当前会话，不会写入任务文件。";
+    private string _flowStatus = string.Empty;
+    private string _inlineNote = string.Empty;
     private bool _benchmarkOnConnect = true;
     private bool _isConnecting;
     private bool _isConnected;
@@ -41,6 +44,30 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     public bool IsConnecting { get => _isConnecting; private set { if (Set(ref _isConnecting, value)) Raise(nameof(CanConnect)); } }
     public bool IsConnected { get => _isConnected; private set => Set(ref _isConnected, value); }
     public string Status { get => _status; private set => Set(ref _status, value); }
+
+    /// <summary>
+    /// ★ UI Closure 2026-10-05（用户指令 UI-10：状态消息路由）★
+    /// 流程级状态（正在连接…／发现共享结论／正在探测…／已添加并勾选…）的**专用通道**，
+    /// 只由 <see cref="SetFlowStatus"/> 写入，由 Shell 左侧提示卡（OperationalStatus 通道）显示。
+    /// <para>
+    /// 为什么要与 <see cref="Status"/> 分开：<c>Status</c> 同时承载字段级校验（"请先输入 IP"）与流程播报，
+    /// 而契约要求"表单内只留字段校验错误／必须依附字段的即时提示／极短局部说明，流程状态走提示卡通道"。
+    /// 两者混用会让同一句流程播报既挤在表单里、又说不清该看哪里。
+    /// </para>
+    /// </summary>
+    public string FlowStatus { get => _flowStatus; private set => Set(ref _flowStatus, value); }
+
+    /// <summary>
+    /// 表单内局部说明（字段校验错误／必须依附字段的即时提示／极短结论），只由 <see cref="SetInlineNote"/> 写入，
+    /// 显示在 Step 1 表单的 <c>StatusLineText</c>（AutomationId <c>Step1.StatusText</c>）。
+    /// </summary>
+    public string InlineNote { get => _inlineNote; private set => Set(ref _inlineNote, value); }
+
+    /// <summary>流程级播报：同时写兼容字段 <see cref="Status"/>（顶栏 ToolTip 等既有消费点），并进提示卡通道。</summary>
+    private void SetFlowStatus(string text) { Status = text; FlowStatus = text; }
+
+    /// <summary>字段级／错误级说明：同时写兼容字段 <see cref="Status"/>，但**不进**提示卡。</summary>
+    private void SetInlineNote(string text) { Status = text; InlineNote = text; }
     public bool CanConnect => !IsConnecting && !string.IsNullOrWhiteSpace(Host);
     public string DeviceSummary => IsConnected ? $"已连接 {Host.Trim()}" : "尚未连接旧电脑";
 
@@ -66,7 +93,7 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         var original = Host?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(original))
         {
-            Status = "请先输入旧电脑的 IP 或电脑名。";
+            SetInlineNote("请先输入旧电脑的 IP 或电脑名。");
             // 观察：动作被**合法拒绝**（原判据不变；仅记录既有结果）。
             ReportUiAction(PCMig.Diagnostics.Abstractions.Events.UiEvents.ActionRejected,
                 new PCMig.Diagnostics.Abstractions.Payloads.UiEligibilityPayload(false, "empty-host"),
@@ -79,7 +106,7 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         SplitHostAndShare(original, out var host, out var directShare);
         if (string.IsNullOrWhiteSpace(host))
         {
-            Status = "路径格式不正确，应为 \\IP\\共享名 或 IP。";
+            SetInlineNote("路径格式不正确，应为 \\IP\\共享名 或 IP。");
             ReportUiAction(PCMig.Diagnostics.Abstractions.Events.UiEvents.ActionRejected,
                 new PCMig.Diagnostics.Abstractions.Payloads.UiEligibilityPayload(false, "invalid-host-path"),
                 PCMig.Diagnostics.Abstractions.DiagnosticOutcome.Rejected,
@@ -87,6 +114,19 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
             return;
         }
         if (!host.Equals(original, StringComparison.Ordinal)) Host = host; // 回填规范化主机名
+
+        // ★ 缺陷 A-04（同族第二处入口）：粘贴 `\\主机\D:` / `\\主机\D$\` 时也要规范化 + 校验 ★
+        // 否则畸形共享名会被当作 sourcePaths 提示传给预检（预检判"可访问"），最终在计划扫描阶段抛异常。
+        if (directShare is not null)
+        {
+            var normalized = ExtractShareName(directShare);
+            if (IsValidShareName(normalized)) directShare = normalized;
+            else
+            {
+                _log.Warning("忽略非法粘贴共享名: raw={Raw} host={Host}", directShare, host);
+                directShare = null;
+            }
+        }
 
         // 会话语义：只有连到“不同主机”时才清理旧会话；同一主机重连保持现有 SMB 会话（凭据/连接可复用）。
         if (_shareSession is not null && !_shareSessionHost.Trim().Equals(host, StringComparison.OrdinalIgnoreCase))
@@ -97,7 +137,7 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         }
 
         IsConnecting = true;
-        Status = $"正在连接 {host} 并发现共享…";
+        SetFlowStatus($"正在连接 {host} 并发现共享…");
         try
         {
             var checker = new PreflightChecker(_log);
@@ -113,23 +153,43 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
                 benchmark: BenchmarkOnConnect));
 
             Shares.Clear();
+            // ★ 缺陷 A-01：管理共享默认勾选前必须先确认"当前凭据真的读得到" ★
+            // 旧行为是"管理共享且名为 D$/E$ ⇒ 默认勾选"。在没有开放该管理共享的普通用户环境下，
+            // 用户什么都不改直接点下一步 ⇒ 预检必然出现 `源路径 \\主机\D$` Error ⇒ 阻断，
+            // 而失败文案还不指名是哪条路径（A-01a）——等于"默认状态走不通、且用户不知道要改什么"。
+            // 现在：非管理共享保持原有默认勾选语义；管理共享先做一次可访问性探测，
+            // 只有确实可读才默认勾选，不可读的改为默认不勾 + 备注写明原因（用户仍可手动勾选）。
             foreach (var share in report.Shares)
             {
                 var kind = share.IsAdminShare ? "管理共享" : "共享";
                 var aliases = share.Aliases.Count > 0 ? $" · 已合并 {string.Join("、", share.Aliases)}" : string.Empty;
+                var remark = share.Remark + aliases;
+                var defaultSelected = !share.IsAdminShare;
+
+                if (share.IsAdminShare && share.Name is "D$" or "E$")
+                {
+                    var reachable = false;
+                    try { reachable = await Task.Run(() => Directory.Exists(share.UncPath)); } catch { /* 视为不可达 */ }
+                    defaultSelected = reachable;
+                    remark += reachable
+                        ? " · 当前凭据可访问，已默认勾选"
+                        : " · 当前凭据不可访问，故默认未勾选；要迁移请用对方开放的共享（或让管理员授权）";
+                    _log.Information("管理共享默认勾选判定: {Unc} reachable={Reachable}", share.UncPath, reachable);
+                }
+
                 Shares.Add(new ShareItem
                 {
                     Name = share.Name,
                     UncPath = share.UncPath,
                     Kind = kind,
-                    Remark = share.Remark + aliases,
-                    IsSelected = !share.IsAdminShare || share.Name is "D$" or "E$"
+                    Remark = remark,
+                    IsSelected = defaultSelected
                 });
             }
 
-            Status = report.OverallPass || Shares.Count > 0
-                ? $"已连接 {host}，发现 {Shares.Count} 个共享。选择共享后可进入下一步。"
-                : report.Checks.FirstOrDefault(c => !c.Pass && c.Severity == "Error")?.Detail ?? "连接未通过预检，请检查网络、共享与凭据。";
+            // ★ 缺陷 O-B22c-1 ★ 一句「已连接 X，发现 0 个共享」曾把三种完全不同的结果混成一种。
+            // 结论文案统一由 BuildConnectStatus 产出（纯函数，三种分支均有单测）。
+            SetFlowStatus(BuildConnectStatus(host, report, Shares.Count));
 
             // 直接粘贴 \\IP\共享名（对齐 WPF MainViewModel 507-543 语义）：
             // 命中枚举结果就勾选；枚举里没有（对方无 IPC$/枚举被拦）就直接探测该共享是否可访问。
@@ -139,7 +199,7 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
                 if (match is not null)
                 {
                     match.IsSelected = true;
-                    Status = $"已定位到共享 {match.UncPath}，已勾选，可进入下一步。";
+                    SetFlowStatus($"已定位到共享 {match.UncPath}，已勾选，可进入下一步。");
                 }
                 else
                 {
@@ -156,12 +216,12 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
                             Remark = "对方未开放枚举，直连探测成功",
                             IsSelected = true
                         });
-                        Status = $"自动列出共享失败，但已直接定位并勾选 {unc}。这正是无 IPC$ 环境的推荐用法。";
+                        SetFlowStatus($"自动列出共享失败，但已直接定位并勾选 {unc}。这正是无 IPC$ 环境的推荐用法。");
                         _log.Information("手动指定共享直连成功: {Unc}", unc);
                     }
                     else
                     {
-                        Status += $"（注意：未发现名为 {directShare} 的共享，且直接访问 {unc} 失败——请确认共享名拼写、对方权限，以及是否已在资源管理器里用凭据连过该机；也可在“手动共享名”框输入 {directShare} 点“添加共享”）";
+                        SetFlowStatus(Status + $"（注意：未发现名为 {directShare} 的共享，且直接访问 {unc} 失败——请确认共享名拼写、对方权限，以及是否已在资源管理器里用凭据连过该机；也可在“手动共享名”框输入 {directShare} 点“添加共享”）");
                         _log.Warning("粘贴共享 {Unc} 既未出现在枚举结果中，直连探测也失败", unc);
                     }
                 }
@@ -177,7 +237,7 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             IsConnected = false;
-            Status = $"连接失败：{ex.Message}";
+            SetInlineNote($"连接失败：{ex.Message}");
             _log.Error(ex, "WinUI Step 1 connection failed: {Host}", host);
             // 观察：域层动作失败（只记类型/错误码，不落异常原文）。
             ReportUiAction(PCMig.Diagnostics.Abstractions.Events.UiEvents.ActionFaulted,
@@ -211,16 +271,27 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     {
         // 主机框可能粘着 \\IP\共享：先拆出主机（与 WPF AddManualShareAsync 596-603 一致）。
         SplitHostAndShare(Host?.Trim() ?? string.Empty, out var host, out _);
-        if (string.IsNullOrWhiteSpace(host)) { Status = "请先输入旧电脑的 IP 或电脑名。"; return; }
+        if (string.IsNullOrWhiteSpace(host)) { SetInlineNote("请先输入旧电脑的 IP 或电脑名。"); return; }
 
         // 共享名框也允许直接粘 \\IP\共享名：只取共享名，避免拼出 \\IP\IP\d。
         var name = ExtractShareName(ManualShareName);
-        if (string.IsNullOrEmpty(name)) { Status = "请输入共享名，例如 d、D$ 或 Users。"; return; }
+        if (string.IsNullOrEmpty(name)) { SetInlineNote("请输入共享名，例如 d、D$ 或 Users。"); return; }
+
+        // ★ 缺陷 A-04：非法共享名必须在拼 UNC / 探测网络之前拦下 ★
+        // 走过这里的残留字符（如 `D:`）会被拼成 `\\主机\D:`：预检把它判成"路径存在且可访问"，
+        // 而「预检并生成计划」的扫描阶段直接抛 IOException（DirStat.TopLevelDirs），用户看到的是
+        // "准备失败：文件名、目录名或卷标语法不正确"。所以这里必须给出可执行的纠正文案并终止。
+        if (!IsValidShareName(name))
+        {
+            SetInlineNote($"共享名 “{name}” 不合法：不能包含 \\ / : * ? \" < > | 这些字符。请填资源管理器地址栏 \\\\{host}\\ 后面的那一段，例如 d、D$、Users。");
+            _log.Warning("拒绝非法共享名: input={Input} normalized={Name} host={Host}", ManualShareName, name, host);
+            return;
+        }
 
         var unc = $@"\\{host}\{name}";
-        if (Shares.Any(s => s.UncPath.Equals(unc, StringComparison.OrdinalIgnoreCase))) { Status = $"{unc} 已在共享列表中。"; return; }
+        if (Shares.Any(s => s.UncPath.Equals(unc, StringComparison.OrdinalIgnoreCase))) { SetInlineNote($"{unc} 已在共享列表中。"); return; }
 
-        Status = $"正在探测 {unc}…";
+        SetFlowStatus($"正在探测 {unc}…");
         var reachable = false;
         string? probeError = null;
         var user = string.IsNullOrWhiteSpace(Username) ? null : Username.Trim();
@@ -245,23 +316,23 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
 
         if (!reachable)
         {
-            Status = probeError is not null
-                ? $"连接 {unc} 失败：{probeError}（请核对共享名：就是资源管理器地址栏 \\{host}\\ 后面的那个名字；若需要凭据，请填好用户名密码再点“添加共享”）"
-                : $"访问 {unc} 失败。请确认共享名、网络和凭据（就是资源管理器地址栏 \\{host}\\ 后面的那个名字）。";
+            SetInlineNote(probeError is not null
+                ? $"连接 {unc} 失败：{probeError}（请核对共享名：就是资源管理器地址栏 \\\\{host}\\ 后面的那个名字；若需要凭据，请填好用户名密码再点“添加共享”）"
+                : $"访问 {unc} 失败。请确认共享名、网络和凭据（就是资源管理器地址栏 \\\\{host}\\ 后面的那个名字）。");
             return;
         }
 
         Shares.Add(new ShareItem { Name = name, UncPath = unc, Kind = "手动指定", IsSelected = true });
         ManualShareName = string.Empty;
         IsConnected = true;
-        Status = $"已添加并勾选 {unc}。";
+        SetFlowStatus($"已添加并勾选 {unc}。");
         _log.Information("手动添加共享成功: {Unc}", unc);
     }
 
     public void NotifyNextStepUnavailable() =>
-        Status = IsConnected
+        SetInlineNote(IsConnected
             ? "Step 1 已完成连接与共享发现；“选择数据与目标”将在下一阶段接入同一 Core 计划能力。"
-            : "请先连接旧电脑并发现共享，再进入下一步。";
+            : "请先连接旧电脑并发现共享，再进入下一步。");
 
     /// <summary>拆分“主机 + 可选共享名”；主机框里粘贴 \\IP\共享名 时兼容。</summary>
     private static void SplitHostAndShare(string raw, out string host, out string? share)
@@ -283,9 +354,61 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         if (text.StartsWith(@"\\", StringComparison.Ordinal))
         {
             var parts = text.TrimStart('\\').Split('\\', StringSplitOptions.RemoveEmptyEntries);
-            return parts.Length >= 2 ? parts[1] : (parts.Length == 1 ? parts[0] : string.Empty);
+            return parts.Length >= 2 ? NormalizeShareName(parts[1]) : (parts.Length == 1 ? NormalizeShareName(parts[0]) : string.Empty);
         }
-        return text.Trim('\\');
+        return NormalizeShareName(text);
+    }
+
+    /// <summary>
+    /// 共享名规范化（缺陷 A-04）：用户常把「盘符写法」直接填进来（`D:` / `D:\`）。
+    /// 旧实现只 <c>Trim('\\')</c>，于是 `D:` 拼成畸形 UNC `\\主机\D:`——它能骗过预检"源路径 pass"，
+    /// 却在「预检并生成计划」的扫描阶段抛 `IOException: 文件名、目录名或卷标语法不正确`（DirStat.TopLevelDirs）。
+    /// 现在统一去掉首尾分隔符与尾部冒号，得到真正的共享名（`D:`/`D:\`/`\\主机\D` → `D`）。
+    /// </summary>
+    private static string NormalizeShareName(string? raw) =>
+        (raw ?? string.Empty).Trim().Trim('\\').TrimEnd(':').Trim('\\').Trim();
+
+    /// <summary>
+    /// 共享名合法性校验（缺陷 A-04）：Windows 共享名不允许 `\ / : * ? " &lt; &gt; |`。
+    /// 非法输入必须**在拼 UNC / 探测网络之前**被拒绝，并给出可执行文案，绝不能进到计划生成阶段再炸。
+    /// </summary>
+    private static bool IsValidShareName(string name) =>
+        name.Length > 0 && name.IndexOfAny(new[] { '\\', '/', ':', '*', '?', '"', '<', '>', '|' }) < 0;
+
+    /// <summary>
+    /// Step 1 连接结论文案（缺陷 O-B22c-1）。**必须区分三种看起来一样的结果**：
+    ///   ① 用输入凭据建立了会话并列出共享 —— 正常的「已连接，发现 N 个共享」；
+    ///   ② 复用了本机已有连接（Windows 1219：同一服务器只允许一套凭据）—— 用户输入的账号
+    ///      **根本没有被使用**，界面必须明说，且不得把它呈现成"凭据正确"；
+    ///   ③ 凭据根本没被证实（域控不可达 / 认证失败 / 对方不导出 IPC$ 且无旁证）—— 报
+    ///      「无法确认这套账号密码」，**不允许**再说「已连接」。
+    ///
+    /// 抽成纯静态函数是为了让三种分支都能被单元测试直接覆盖（不依赖网络、不依赖 UI）。
+    /// </summary>
+    internal static string BuildConnectStatus(string host, PreflightReport report, int shareCount)
+    {
+        var reuseAdvice =
+            $"若要改用你输入的账号：先在命令提示符执行 net use \\\\{host}\\ /delete" +
+            "（或关掉所有访问该机的资源管理器窗口），再点「连接并列出共享」。";
+
+        if (report.CredentialReused)
+            return shareCount > 0
+                ? $"已连上 {host}，发现 {shareCount} 个共享——注意：本次**复用了本机已有的连接，你输入的账号没有被使用**" +
+                  $"（Windows 错误 1219：同一台服务器同时只允许一套凭据）。{reuseAdvice}"
+                : $"已连上 {host}，但**你输入的账号没有被使用**：本机已有到该机的连接，Windows 拒绝再用第二套凭据" +
+                  $"（错误 1219），产品复用的是那条现有连接，而它没有列出任何共享。{reuseAdvice}" +
+                  "也可以先在②区「共享名」手动输入一个共享名（如 d）点「＋添加共享」试试。";
+
+        if (shareCount > 0)
+            return $"已连接 {host}，发现 {shareCount} 个共享。选择共享后可进入下一步。";
+
+        if (report.OverallPass && report.CredentialVerified)
+            return $"已连接 {host}（凭据已验证），但对方没有列出任何共享：可能是对方不开放共享枚举，或这个账号没有可读共享。" +
+                   "请在②区「共享名」手动输入对方开放的共享名（例如 d、Users）再点「＋添加共享」，或在①粘贴完整共享路径。";
+
+        var err = report.Checks.FirstOrDefault(c => !c.Pass && c.Severity == "Error")?.Detail;
+        return err ?? $"未能确认与 {host} 的连接与凭据：请检查网络、共享名与账号密码后重试" +
+                      "（可在②区手动输入共享名，那一步会真的建立数据共享会话并验证凭据）。";
     }
 
     public void Dispose()

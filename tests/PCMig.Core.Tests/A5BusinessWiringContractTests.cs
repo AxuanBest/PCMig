@@ -122,7 +122,16 @@ public sealed class A5BusinessWiringContractTests
 
         // 三条强制 100% 的路径都必须以"真 Completed"为唯一条件。
         Assert.Contains("if (completed) Percent = 100.0;", vm, StringComparison.Ordinal);
-        Assert.Contains("Percent = s.Phase == JobPhase.Completed ? 100.0 : s.Percent;", vm, StringComparison.Ordinal);
+        // ★ FIX BATCH 4（进度真值）★ 同一句现在优先取引擎真值（ProgressTruthSnapshot.Percent），
+        //   但"强制 100% 只认真 Completed"这一条语义**不变**：Truth 为 null 时依旧
+        //   `s.Phase == JobPhase.Completed ? 100.0 : s.Percent`，Truth 有值时 100% 也只在
+        //   收尾（settled）路径由 Core 判出（运行中真值上限 99.9）。这是口径升级，不是放宽。
+        // ★ UI Closure 2026-10-05（§2 P0）★ 显示的 percent/bytes 唯一来源从 `s.Truth` 改为
+        //   `displayTruth`（= ResumeDisplayFloor.Apply(rawTruth) 的结果）：它只是引擎 raw 真值的
+        //   **包装**，仅在"暂停 → 恢复"的正常 catch-up 期把**显示分子**抬回用户已看到的水平
+        //   （raw 追上即自动解除），CommittedBytes / 判定 / 收尾语义全部原样透传 ⇒ 本条语义不变。
+        Assert.Contains("Percent = displayTruth?.Percent ?? (s.Phase == JobPhase.Completed ? 100.0 : s.Percent);", vm, StringComparison.Ordinal);
+        Assert.Contains("var displayTruth = continuity.Effective;", vm, StringComparison.Ordinal);
         Assert.Contains("Percent = completed\n                ? 100.0", vm.Replace("\r\n", "\n"), StringComparison.Ordinal);
     }
 

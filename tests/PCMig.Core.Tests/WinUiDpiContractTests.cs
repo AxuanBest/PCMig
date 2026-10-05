@@ -150,15 +150,26 @@ public sealed class WinUiDpiContractTests
     /// <summary>
     /// Step 1 底栏的疏密节奏是**实测对齐参考**后的结果；这些数字一旦被改动，
     /// 底栏会退回"两组速率挤成一团、网络组贴住按钮组"的旧观感。
+    ///
+    /// FIX BATCH 5（§8）由用户明确授权重做底栏几何（这正是本战役要修的真机缺陷 P1/P2-A/B/F、
+    /// OPEN-RISK R-010）：列距从 44 收紧到 18、中段隔离列 80 归零（弹性全部交给唯一的 `*` 列）、
+    /// 进度轨道 320 → 保留宽 232、四块数字区与动作区改为"保留宽 + CharacterEllipsis"。
+    /// 因此本用例的口径更新为**新结构的不变量**（原意不变，且更强 —— 旧观感与"按钮被文本宽度推走"
+    /// 这两种回退都会被这条测试挡住）：
+    ///   · 必须有明确列距、唯一弹性列（弹性列不许再放元素）；
+    ///   · 进度宿主与四个动作按钮都必须占**保留宽**；
+    ///   · 网络组有独立 x:Name 与保留宽（窄档位允许整块隐藏，但动作按钮绝不允许）。
     /// </summary>
     [Fact]
     public void FooterRhythm_KeepsMeasuredValues()
     {
         var xaml = ReadWinUi("MainWindow.xaml");
-        Assert.Contains(@"ColumnSpacing=""44""", xaml);              // 底栏列间距（两组速率之间）
-        Assert.Contains(@"<Grid Grid.Column=""2"" Width=""320""", xaml); // 进度轨道宽度（DIP）
-        // 网格中间保留一个固定间隔列，防止网络组贴住按钮组
-        Assert.Matches(new Regex(@"<ColumnDefinition Width=""80""/>"), xaml);
+        Assert.Contains(@"ColumnSpacing=""18""", xaml);                    // 底栏列间距
+        Assert.Contains(@"<Grid Grid.Column=""2"" MinWidth=""160""", xaml);  // 进度轨道最小宽（弹性列会拉得更宽）
+        Assert.Contains(@"<ColumnDefinition Width=""0""/>", xaml);         // 中段隔离列已归零
+        Assert.Contains(@"<ColumnDefinition Width=""*""/>", xaml);         // 唯一的弹性列
+        Assert.Contains(@"x:Name=""FooterNetPanel"" Grid.Column=""7"" Width=""54""", xaml); // 网络组独立保留宽
+        Assert.Equal(4, Regex.Matches(xaml, @"Width=""124""").Count);      // 四个动作按钮各自定宽
     }
 
     /// <summary>

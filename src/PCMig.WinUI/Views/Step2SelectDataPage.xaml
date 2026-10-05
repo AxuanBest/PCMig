@@ -55,7 +55,7 @@
                             <Border x:Name="Root" Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="{ThemeResource ControlCornerRadius}"/>
+                                    CornerRadius="{StaticResource PCMigRadiusInput}"/>
                             <ContentPresenter x:Name="Presenter" Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
                             <VisualStateManager.VisualStateGroups>
@@ -89,10 +89,12 @@
             <Setter Property="Background" Value="{ThemeResource ComboBoxDropDownBackground}"/>
             <Setter Property="BorderBrush" Value="{ThemeResource ComboBoxDropDownBorderBrush}"/>
             <Setter Property="BorderThickness" Value="{ThemeResource ComboBoxDropdownBorderThickness}"/>
-            <Setter Property="CornerRadius" Value="{ThemeResource OverlayCornerRadius}"/>
+            <Setter Property="CornerRadius" Value="{StaticResource PCMigRadiusOverlay}"/>
             <Setter Property="Padding" Value="2"/>
             <Setter Property="MinWidth" Value="0"/>
-            <Setter Property="MaxWidth" Value="380"/>
+            <!-- UI Closure（2026-10-05）：浮层宽度不再固定上限，改由锚点控件实际宽度驱动
+                 （见 Step2SelectDataPage.xaml.cs::AlignExistingJobsFlyoutWidth）。 -->
+            <Setter Property="MaxWidth" Value="1200"/>
         </Style>
 
         <!-- ③ 条目：两行（JobId / 状态 + 百分比），选中与悬停沿用 ComboBox 条目同款底色 -->
@@ -103,7 +105,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListViewItem">
-                        <Grid x:Name="Root" Background="Transparent" CornerRadius="{ThemeResource ControlCornerRadius}">
+                        <Grid x:Name="Root" Background="Transparent" CornerRadius="{StaticResource PCMigRadiusListItem}">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
@@ -433,7 +435,7 @@
                                                 <ListView x:Name="ExistingJobsList" SelectionMode="None"
                                                           IsItemClickEnabled="True"
                                                           ItemClick="ExistingJobsList_ItemClick"
-                                                          MaxHeight="320" MinWidth="220" MaxWidth="360"
+                                                          MaxHeight="320"
                                                           ItemContainerStyle="{StaticResource PCMigTaskPickerItemStyle}">
                                                     <ListView.ItemTemplate>
                                                         <DataTemplate>
@@ -503,8 +505,11 @@
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
-                            <!-- 冻结文案默认显示；接线后在同一位置显示会话的真实状态句（StatusMessage）。 -->
+                            <!-- ★ FIX BATCH 6（§9）★ 右侧执行卡只承载**短句**：MaxLines=2 + 字符省略，
+                                 长状态句归左侧提示面板；完整文本在 ToolTip 上。
+                                 底栏与页面的其它几何保持 BATCH 5 已收口的状态，本批不再动。 -->
                             <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" TextWrapping="Wrap"
+                                       MaxLines="2" TextTrimming="CharacterEllipsis"
                                        x:Name="StateMessageText"
                                        Text="开始迁移前会先做预检（目标空间 / 权限 / 同名冲突），任一项不通过会给出可执行的修复建议。"/>
                         </StackPanel>
@@ -518,7 +523,10 @@
                                           VerticalAlignment="Center"/>
                                 <TextBlock Style="{StaticResource PCMigTextHintTitle}" Text="连接与安全提示" VerticalAlignment="Center"/>
                             </StackPanel>
+                            <!-- ★ FIX BATCH 6（§9）★ 安全提示通道（SecurityHint）唯一落点：
+                                 凭据/账号/共享可用性相关的状态句在这里显示，不与业务运行状态混在一起。 -->
                             <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap"
+                                       x:Name="SecurityHintText"
                                        Text="凭据只在建立连接时使用，不写入任务存档；迁移走 SMB 直拉，不经过中转服务器。"/>
                         </StackPanel>
                     </Border>

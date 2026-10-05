@@ -150,6 +150,40 @@
        修法：给它一个**四态全部显式锁定**的模板 —— 背景只由传入的渐变决定、文字恒为白色，
        悬停仅做极轻的透明度变化，不做任何颜色替换。徽章保留（它是更新日志入口），
        只是不再有"看不清的悬停态"。 -->
+  <!-- FIX BATCH 5（§8）：进度条填充必须真实占满轨道设计高度，顶栏与底栏共用同一对样式。
+       旧实现用 WinUI 默认模板：12 DIP 轨道里实测强调色填充只有 3–4 px（看起来像一条没填满的细线），
+       上下两条进度条视觉也不一致。
+
+       ★ 为什么不是自定义 ProgressBar 模板（2026-10-04 两次实测结论）★
+       1) 首版把轨道根命名为 `ProgressBarTrack`、填充条命名为 `ProgressBarIndicator`：框架既不报错、
+          也从不设置填充宽度 ⇒ 47.29% 与 0% 两张同位置截图在进度条区域**零像素差异**（UIA
+          RangeValue=47.2902584274583、几何 w=170 h=12 —— 控件值是对的，只是没有任何像素被画出来）。
+       2) 第二版把轨道根改名成文档里的 `DeterminateRoot`、填充条改成 Shape（`Rectangle`）：仍然 w=0。
+          运行时 visual tree 探针显示 `Border#DeterminateRoot w=170 h=12` / `Rectangle#ProgressBarIndicator
+          w=0 h=12` ⇒ **WinUI 3 的 ProgressBar 并不按这两个部件名驱动填充**（默认模板里的部件名只对
+          系统自带模板成立，对自定义模板不构成契约）。静态取证也不可行：Microsoft.UI.Xaml.dll 与
+          .pri 里搜不到任何部件名字符串。
+       3) 因此改成**由唯一写入者按真值直接设置填充宽度**：`MainWindow.xaml.cs::UpdateFooterProgressFill`
+          与 `Step3ProgressPage.xaml.cs::UpdateTotalProgressFill`，宽度 = 百分比 × 轨道实际宽度。
+          轨道/填充是普通元素，视觉完全确定、可像素验证。
+       · 轨道 = 既有 ProgressTrackBrush，圆角 6（复用既有资源，PMML-R14）；
+       · 填充 = 既有 AccentGradientBrush（与全局 45° 光源一致），VerticalAlignment=Stretch
+         ⇒ 填充高度 = 轨道高度，不再被框架压成细线；
+       · **没有任何动画**推进宽度或 Value —— 宽度只由真值驱动，动画只能装饰（§8 / PMML-R8）；
+       · 未做「前沿高光 / subtle glow」：当前没有可用的裁剪原语（Grid/Border 默认不裁剪子元素），
+         强行加高光会在 0% 时漏出一小段亮条；如需该装饰请在授权下另行引入 Composition 裁剪。
+       PMML 归属：LMDS L3 内的进度指示；材质/光源/圆角全部复用既有 token，未引入新 token。 -->
+  <Style x:Key="PCMigProgressTrack" TargetType="Border">
+    <Setter Property="CornerRadius" Value="6"/>
+    <Setter Property="Background" Value="{StaticResource ProgressTrackBrush}"/>
+  </Style>
+  <Style x:Key="PCMigProgressFill" TargetType="Grid">
+    <Setter Property="HorizontalAlignment" Value="Left"/>
+    <Setter Property="VerticalAlignment" Value="Stretch"/>
+    <Setter Property="Width" Value="0"/>
+    <Setter Property="IsHitTestVisible" Value="False"/>
+  </Style>
+
   <Style x:Key="PCMigVersionBadgeButton" TargetType="Button">
     <Setter Property="Foreground" Value="White"/>
     <Setter Property="Padding" Value="8,3"/>

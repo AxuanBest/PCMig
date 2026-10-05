@@ -155,7 +155,19 @@ public sealed class PreflightChecker
         {
             using var s = NetworkShare.Connect(host, user, password, _log);
             sessionOk = true;
-            Add(report, "IPC$ 凭据会话", true, "Info", $"已连接（user={user ?? "<当前用户>"}）");
+            // ★ 缺陷 O-B22c-1 ★ 1219/85 冲突时 Connect 会"复用本机现有连接、本次不使用输入的凭据"。
+            // 过去这条事实只进日志，界面照旧显示「已连接」⇒ 用户以为凭据被验证过了。
+            // 现在把它变成预检事实 + 一条可见检查项，并明确"凭据未被使用"。
+            var reused = NetworkShare.LastConnectReusedExistingConnection;
+            report.CredentialReused = reused;
+            if (reused)
+                Add(report, "IPC$ 凭据会话", false, "Warning",
+                    $"本机已有到 {host} 的连接，本次**复用了那条现有连接，你输入的账号没有被使用**" +
+                    "（Windows 错误 1219：同一台服务器同时只允许一套凭据）。" +
+                    $"若要改用你输入的账号：先在命令提示符执行 net use \\\\{host}\\ /delete（或关掉所有访问该机的资源管理器窗口）再点「连接并列出共享」。" +
+                    "在此之前，下面列出的共享/失败信息反映的是**现有连接那套身份**的可访问范围，不能证明你输入的账号可用。");
+            else
+                Add(report, "IPC$ 凭据会话", true, "Info", $"已连接（user={user ?? "<当前用户>"}）");
 
             // 3. 共享枚举（需要远程管理员权限，且依赖 IPC$）
             enumTried = true;
@@ -177,11 +189,13 @@ public sealed class PreflightChecker
         }
 
         // 2.5 IPC$ 失败但给了显式凭据且有可参考的源路径 → 直连源共享验证凭据并建立会话
+        var directProbeOk = false;
         if (!sessionOk && !string.IsNullOrEmpty(user) && sourcePaths.Count > 0)
         {
             try
             {
                 NetworkShare.ConnectForTransfer(host, user, password, sourcePaths, _log)?.Dispose();
+                directProbeOk = true;
                 Add(report, "直连共享凭据会话", true, "Info",
                     "IPC$ 不可用，已改为直连源共享建立/验证会话（凭据可用）");
             }
@@ -245,20 +259,58 @@ public sealed class PreflightChecker
         // 关键协议事实（公司域环境实测发现）：SMB 先 SESSION_SETUP（认证）后 TREE_CONNECT（找共享）。
         // 显式凭据 + 错误 67（找不到网络名）= 认证已通过、仅对方不导出 IPC$——凭据本身是有效的！
         // 若不区分这一点，域账号用户会被错误地挡在门外，被迫"先去资源管理器连一次"（真实踩坑）。
-        var ipcAuthProven = !sessionOk && !string.IsNullOrEmpty(user) && ExtractWin32Error(sessionErr) == 67;
+        //
+        // ★ 缺陷 A-05（假成功）：错误 67 只是"半条证据"，必须另有**独立旁证**才允许据此放行 ★
+        // 旧实现只要「给了显式凭据 + 错误 67」就判 ipcAuthProven ⇒ IPC$ 检查降级为 Warning+pass=true ⇒
+        // overallPass=true ⇒ 界面直接显示「已连接 <主机>」，而共享列表为空、该主机其实根本不存在。
+        // 实测触发：同一不可达主机的首次尝试拿到 64、重试（负缓存后）拿到 67 ⇒ 第一次失败、第二次"成功"。
+        //
+        // ★ 缺陷 O-B22c-1 修正（本批）★：旁证集合里**必须去掉「TCP 445 端口可达」**——
+        //   端口可通只证明"有 SMB 服务在监听"，完全不证明"认证成功"。
+        //   B22c 场景正是如此：源机 445 通、域控 10.77.0.10 不可达、凭据无法完成域校验，
+        //   旧口径把 smbOk 当旁证 ⇒ 照样放行 ⇒ 界面宣「已连接」+「发现 0 个共享」（假连接）。
+        //   真正能证明认证的只有三种结果：直连数据共享成功 / 共享枚举或管理共享探测成功 /
+        //   源路径**真的读得到**（读得到即认证与授权都过了）。TCP 端口不在其列。
+        var authProofs = new List<string>();
+        if (directProbeOk) authProofs.Add("直连源共享成功");
+        if (report.Shares.Count > 0) authProofs.Add("共享枚举或管理共享探测成功");
+        if (allSourceOk) authProofs.Add("源路径可读");
+        var ipcAuthProven = !sessionOk && !string.IsNullOrEmpty(user)
+                            && ExtractWin32Error(sessionErr) == 67
+                            && authProofs.Count > 0;
+        if (!sessionOk && ExtractWin32Error(sessionErr) == 67 && authProofs.Count == 0)
+            _log.Warning("IPC$ 错误 67 缺少认证旁证（TCP 端口可达不算证据；直连共享/枚举/源路径均未成功），不放行: host={Host}", host);
+
+        // ★ 缺陷 O-B22c-1 ★ 用户输入的那套凭据是否已被独立证实（界面据此区分
+        //   「对方确实没有共享」与「凭据根本没验证过」；复用现有连接不算证实）。
+        report.CredentialVerified = (sessionOk && !report.CredentialReused)
+                                    || directProbeOk || report.Shares.Count > 0 || allSourceOk;
 
         // IPC$ 失败的最终定性（此刻源路径与共享探测结果都已在手，判断才准确）
         if (!sessionOk)
         {
             if (ipcAuthProven)
                 Add(report, "IPC$ 凭据会话", true, "Warning",
-                    "凭据验证通过（SMB 会话已建立），但对方不导出 IPC$，无法自动列出共享。请在②区「共享名」手动输入（如 d）再点「＋添加共享」，或在①直接粘贴完整共享路径。");
+                    $"对方不导出 IPC$ 管理共享（错误 67），无法自动列出共享；但已有独立证据表明凭据与链路可用（{string.Join("、", authProofs)}）。请在②区「共享名」手动输入（如 d）再点「＋添加共享」，或在①直接粘贴完整共享路径。");
             else if (allSourceOk || report.Shares.Count > 0)
                 Add(report, "IPC$ 凭据会话", false, "Warning",
-                    sessionErr!.Message + "；但源路径/共享可直接访问（本机现有连接可用，或对方 SMB 不导出 IPC$），不影响迁移。");
+                    sessionErr!.Message + "；但源路径/共享可直接访问，不影响迁移。");
             else
+            {
+                // ★ 缺陷 O-B22c-1 ★ 这里必须说清"凭据没有被证实"——不能让用户把
+                //   「发现 0 个共享」读成「密码对了只是没共享」。文案给出可执行的下一步。
+                var why = ExtractWin32Error(sessionErr) == 67
+                    ? "对方不导出 IPC$ 管理共享，而且没有任何其他证据能证明认证成功" +
+                      "（TCP 端口可通只说明有 SMB 服务在监听，不等于这套账号密码是对的）。"
+                    : "IPC$ 会话没有建立起来。";
                 Add(report, "IPC$ 凭据会话", false, "Error",
-                    sessionErr!.Message + "。提示：若你知道共享名，可直接给出完整共享路径（如 \\\\IP\\D 或 \\\\IP\\D$）——无需对方开放枚举。");
+                    sessionErr!.Message.TrimEnd('。') + "。" +
+                    "目前**无法确认这套账号密码是否可用**：" + why +
+                    "如果该账号需要域控校验，域控不可达时同样会失败，请先确认域控在线；" +
+                    "也可以先在②区「共享名」手动输入一个你确定存在的共享（如 d）再点「＋添加共享」——" +
+                    "那一步会真的建立数据共享会话，成功即证明凭据可用；" +
+                    "或直接在①粘贴完整共享路径（如 \\\\IP\\D 或 \\\\IP\\D$）绕过共享枚举。");
+            }
         }
 
         // 4b. 可选链路吞吐基准：向第一个可访问源写读测试文件（IPC$ 不可用时只要有可访问共享也照常测）。
@@ -403,7 +455,25 @@ public sealed class PreflightChecker
                 }
                 else
                 {
-                    Add(report, "目标盘检查", false, "Error", ex.Message);
+                    // ★ 缺陷 A-06：这里曾直接透传 .NET 原文（实测 `Could not find the drive 'Z:\'.
+                    // The drive might not be ready or might not be mapped.`）——非中文、不给下一步，
+                    // 属 §八「UI 也是一等被测对象」里的不合格提示。现在先独立判定"该盘符在本机是否存在"，
+                    // 再给中文可执行文案，原始技术细节降级到括号内保留（排障仍可用）。
+                    var exists = false;
+                    try
+                    {
+                        var root = Path.GetPathRoot(raw);
+                        exists = !string.IsNullOrEmpty(root) && Directory.Exists(root);
+                    }
+                    catch { /* 探测失败按"不存在"处理 */ }
+
+                    var reason = exists
+                        ? "目标路径不可用（磁盘存在，但该路径不能作为迁移目标）"
+                        : "本机找不到这个盘符或路径";
+                    Add(report, "目标盘检查", false, "Error",
+                        $"{reason}：{raw}。" +
+                        "请点「浏览」选择本机上真实存在的磁盘路径（例如 D:\\迁移目标），或先在「此电脑」里确认该盘已插入/已联机。" +
+                        $"（技术细节：{ex.Message}）");
                 }
             }
         }

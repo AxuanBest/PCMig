@@ -131,7 +131,10 @@ public sealed class MainViewModel : ViewModelBase
         BrowseTargetCommand = new RelayCommand(_ => BrowseTarget());
         PrepareCommand = new RelayCommand(p => PrepareAsync(p as PasswordBox));
         StartCommand = new RelayCommand(_ => RunTransferAsync(), _ => CanStart);
-            PauseCommand = new RelayCommand(_ => { _ctx?.RequestPause(false); StatusMessage = "已请求协作式暂停（当前对象传完后停止）"; });
+            // ★ FIX BATCH 6（R-003 关闭）★ 旧文案"已请求协作式暂停（当前对象传完后停止）"在新语义下是**假话**：
+            //   引擎已改为"请求即立即打断当前对象（kill 当前 robocopy 进程树），恢复时重传该对象"。
+            //   这里只改文案，不动任何业务逻辑（旧 WPF GUI 仍在冻结范围内，仅消除与真值冲突的表述）。
+            PauseCommand = new RelayCommand(_ => { _ctx?.RequestPause(false); StatusMessage = "正在暂停…（会立即打断当前对象的传输，已传部分保留，恢复时重传该对象）"; });
             StopCommand = new RelayCommand(_ => { _ctx?.RequestPause(true); StatusMessage = "已请求立即停止（终止当前 robocopy，已传部分保留）"; });
         ResumeCommand = new RelayCommand(_ => ResumeAsync(), _ => CanResume);
         VerifyCommand = new RelayCommand(_ => VerifyAsync(), _ => HasJob);

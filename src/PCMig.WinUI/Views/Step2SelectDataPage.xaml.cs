@@ -421,8 +421,20 @@ public sealed partial class Step2SelectDataPage : UserControl
         UpdateExistingJobsPicker(session);
         QaShowJobsPickerIfRequested();   // ★ A7.1 取证（环境变量门控；生产路径不执行）
 
-        // ---- 状态句：真实状态（有状态句就显示它，否则保留冻结文案）----
-        if (!string.IsNullOrWhiteSpace(session.StatusMessage)) StateMessageText.Text = session.StatusMessage;
+        // ---- 状态句：★ FIX BATCH 6（§9）★ 右侧执行卡只显示**短句**（ExecutionStatus：
+        //      第一句 + 限长 + 单行截断），完整状态句归左侧提示面板；
+        //      长文本从此不再把执行卡无限撑高（真机 P2-G）。
+        //      完整文本另挂在 ToolTip 上，用户悬停仍能看到全部内容。----
+        if (!string.IsNullOrWhiteSpace(session.ExecutionStatus))
+        {
+            StateMessageText.Text = session.ExecutionStatus;
+            ToolTipService.SetToolTip(StateMessageText, string.IsNullOrWhiteSpace(session.StatusMessage)
+                ? session.ExecutionStatus
+                : session.StatusMessage);
+        }
+
+        // ---- 连接与安全提示卡：只有 SecurityHint 通道的内容进这里（§9 映射）----
+        if (!string.IsNullOrWhiteSpace(session.SecurityHint)) SecurityHintText.Text = session.SecurityHint;
     }
 
     // ────────────────────────── 目标路径 ──────────────────────────
@@ -584,7 +596,32 @@ public sealed partial class Step2SelectDataPage : UserControl
     /// （框架正常锚定，**没有**魔法 VerticalOffset / 负 Margin / TranslateY / 运行后校正坐标）。
     /// </summary>
     private void ExistingJobsPickerButton_Click(object sender, RoutedEventArgs e)
-        => PickerQaTrace($"picker opened (listItems={ExistingJobsList.Items.Count})");
+    {
+        AlignExistingJobsFlyoutWidth();
+        PickerQaTrace($"picker opened (listItems={ExistingJobsList.Items.Count})");
+    }
+
+    /// <summary>
+    /// ★ UI Closure（2026-10-05，用户人工标注项）★ 浮层几何对齐：
+    /// 「已有任务」下拉展开后，面板**内容边界**必须与锚点控件（收起态 Presenter）
+    /// 的左右几何边界一致；阴影允许视觉外溢，但不计入内容边界。
+    /// <para>
+    /// 实现口径：FlyoutPresenter 自带 <c>Padding=2</c> + <c>BorderThickness=1</c>
+    /// ⇒ 水平方向比内容多 6 DIP，故 <c>ListView.Width = 锚点 ActualWidth - 6</c>，
+    /// 使浮层外边界 == 锚点边界。宽度每次展开时按真实布局重算（DPI / 窗口宽度变化自适应），
+    /// **不使用**固定宽度、负 Margin 或 XAML 魔法偏移（PMML-R10 / R12）。
+    /// </para>
+    /// </summary>
+    private void AlignExistingJobsFlyoutWidth()
+    {
+        var anchorWidth = ExistingJobsPickerButton.ActualWidth;
+        if (anchorWidth <= 0) return;
+
+        const double flyoutChrome = 6d; // FlyoutPresenter Padding 2×2 + BorderThickness 1×2
+        var listWidth = Math.Max(180d, anchorWidth - flyoutChrome);
+        ExistingJobsList.Width = listWidth;
+        PickerQaTrace($"picker width aligned: anchor={anchorWidth:F1} list={listWidth:F1}");
+    }
 
     /// <summary>
     /// ★ A7.1 关键收口 ★ 点击项**直接携带 JobSummary 对象**：
@@ -1051,9 +1088,9 @@ public sealed partial class Step2SelectDataPage : UserControl
             return;
         }
         trace.Started();
-        trace.Expect("transfer.v1", "job-run-started");
+        trace.Expect("transfer.v1", "start.external");
         await _session.RunAsync(_passwordProvider?.Invoke(), new Progress<string>(m => StateMessageText.Text = m));
-        trace.Confirm("transfer.v1", "job-run-started");
+        trace.Confirm("transfer.v1", "start.external");
         // D6.3 §11：真实业务结果 = 既有 JobPhase，不是"RunAsync 返回了"（审计 P1-4）。
         trace.Finish(_session.LastRunOutcome, "Step2SelectDataPage");
         PushState();
@@ -1065,11 +1102,26 @@ public sealed partial class Step2SelectDataPage : UserControl
         using var trace = ActionTrace.Begin(ActionKinds.Pause, ControlIds.Step2Pause, "click", "Step2SelectDataPage");
         trace.Eligibility(true, "allowed");
         trace.Started();
-        trace.Expect("pause.v1", "pause-request-write-result");
+        // ★ FIX BATCH 3 / §6 ★ 旧写法是 `Expect("pause.v1","pause-request-write-result")` + await 之后立刻
+        //   Confirm —— 契约里根本没有这个步骤名，而且"请求写下"被当成了"暂停成功"（自证式期望）。
+        //   现在：期望 = 契约里的兑现步骤（pause.v2 / pause.external），且**等引擎真值落定**才收口。
+        trace.Expect("pause.v2", "pause.external");
         await _session.PauseAsync();
-        trace.Confirm("pause.v1", "pause-request-write-result");
-        // 暂停 = 请求语义 ⇒ Accepted / Rejected，永不 Succeeded。
-        trace.Finish(_session.LastPauseOutcome, "Step2SelectDataPage");
+        var paused = await _session.WaitForPauseSettledAsync();
+        if (paused)
+        {
+            trace.Confirm("pause.v2", "pause.external");
+            trace.Complete(DiagnosticOutcome.Succeeded, "paused");
+        }
+        else if (_session.EnginePauseState == PauseState.PauseFailed)
+        {
+            // 暂停失败：绝不 Confirm；引擎还会发 TRN-023，诊断侧据此开卡 + 降级健康。
+            trace.Complete(DiagnosticOutcome.Failed, "pause-failed");
+        }
+        else
+        {
+            trace.Complete(DiagnosticOutcome.Unknown, "pause-unsettled");
+        }
         PushState();
     }
 
@@ -1079,11 +1131,18 @@ public sealed partial class Step2SelectDataPage : UserControl
         using var trace = ActionTrace.Begin(ActionKinds.Stop, ControlIds.Step2Stop, "click", "Step2SelectDataPage");
         trace.Eligibility(true, "allowed");
         trace.Started();
-        trace.Expect("stop.v1", "stop-observed");
+        trace.Expect("stop.v1", "stop.external");
         await _session.StopAsync();
-        trace.Confirm("stop.v1", "stop-observed");
-        // 停止 = 请求语义；没有在跑的运行 ⇒ Skipped。
-        trace.Finish(_session.LastStopOutcome, "Step2SelectDataPage");
+        // ★ FIX BATCH 3 / §6.4 ★ 等运行真的收尾再收口（StopAsync 只发取消令牌就返回）。
+        if (await _session.WaitForStopSettledAsync())
+        {
+            trace.Confirm("stop.v1", "stop.external");
+            trace.Complete(DiagnosticOutcome.Succeeded, "stop-settled");
+        }
+        else
+        {
+            trace.Complete(DiagnosticOutcome.Unknown, "stop-unsettled");
+        }
         PushState();
     }
 
@@ -1093,11 +1152,18 @@ public sealed partial class Step2SelectDataPage : UserControl
         using var trace = ActionTrace.Begin(ActionKinds.Resume, ControlIds.Step2Resume, "click", "Step2SelectDataPage");
         trace.Eligibility(true, "allowed");
         trace.Started();
-        trace.Expect("resume.v1", "run-resumed");
+        trace.Expect("resume.v1", "resume.external");
         await _session.ResumeAsync(_passwordProvider?.Invoke(), new Progress<string>(m => StateMessageText.Text = m));
-        trace.Confirm("resume.v1", "run-resumed");
-        // 恢复 = 又一次真实运行 ⇒ 同样以 JobPhase 为准。
-        trace.Finish(_session.LastRunOutcome, "Step2SelectDataPage");
+        // ★ FIX BATCH 3 / §6.4 ★ 等引擎真的离开暂停再收口。
+        if (await _session.WaitForResumeSettledAsync())
+        {
+            trace.Confirm("resume.v1", "resume.external");
+            trace.Complete(DiagnosticOutcome.Succeeded, "resume-settled");
+        }
+        else
+        {
+            trace.Complete(DiagnosticOutcome.Unknown, "resume-unsettled");
+        }
         PushState();
     }
 

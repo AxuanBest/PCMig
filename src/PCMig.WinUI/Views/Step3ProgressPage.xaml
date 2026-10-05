@@ -26,6 +26,8 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
+            <!-- ★ PHASE C-1 探针（PCMIG_PROGRESS_DEBUG=1）★ 见本页 Grid 末尾的 Canvas 覆盖层。 -->
+
             <!-- 页标题区 -->
             <StackPanel Orientation="Horizontal" Spacing="12">
                 <Border Width="34" Height="34" CornerRadius="17" Background="{StaticResource AccentGradientBrush}" BorderBrush="#B8FFFFFF" BorderThickness="1" Translation="0,0,24" Shadow="{StaticResource ElevationHigh}">
@@ -64,13 +66,16 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" x:Name="TotalPercentText" Style="{StaticResource PCMigTextTotalPercent}" Text=""/>
-                        <TextBlock Grid.Column="1" x:Name="TotalBytesText" Style="{StaticResource PCMigTextFooterValue}" Text="" VerticalAlignment="Bottom"/>
+                        <TextBlock Grid.Column="1" x:Name="TotalBytesText" Style="{StaticResource PCMigTextFooterValue}" Text="" VerticalAlignment="Bottom" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
                         <TextBlock Grid.Column="2" Style="{StaticResource PCMigTextStepSubtitle}" x:Name="StateLineText" TextWrapping="Wrap" VerticalAlignment="Bottom"/>
                     </Grid>
-                    <Grid Height="12">
-                        <Border Background="{StaticResource ProgressTrackBrush}" CornerRadius="6"/>
-                        <ProgressBar x:Name="TotalProgressBar" Minimum="0" Maximum="100" Height="12" VerticalAlignment="Center"
-                                     Foreground="{StaticResource AccentBrush}" Background="Transparent" BorderThickness="0"/>
+                    <!-- FIX BATCH 5（§8）：与底栏共用 PCMigProgressTrack / PCMigProgressFill（填充真实占满 12 DIP 轨道，顶/底视觉一致）。
+                         填充宽度由唯一写入者 PushState → UpdateTotalProgressFill 按真值设置（见 Themes\Controls.xaml 的说明）。 -->
+                    <Grid x:Name="TotalProgressHost" Height="12">
+                        <Border Style="{StaticResource PCMigProgressTrack}"/>
+                        <Grid x:Name="TotalProgressFill" Style="{StaticResource PCMigProgressFill}" Width="Auto" HorizontalAlignment="Stretch">
+                            <Rectangle RadiusX="6" RadiusY="6" Fill="{StaticResource AccentGradientBrush}"/>
+                        </Grid>
                     </Grid>
                 </StackPanel>
             </Border>
@@ -90,25 +95,36 @@
                 <Border x:Name="StatCard0" Grid.Row="0" Grid.Column="0" Translation="0,0,8" Style="{StaticResource SecondarySurface}" Padding="14">
                     <StackPanel Spacing="4">
                         <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Text="传输速度"/>
-                        <TextBlock x:Name="SpeedValueText" Style="{StaticResource PCMigTextStatValue}" Text=""/>
+                        <!-- PHASE D（§4 Metric Typography）：数值外面套专用 host，用 MinHeight + 上下 3 DIP
+                             Padding 保证几何高度稳定，不再依赖 TextBlock 的魔法 LineHeight；host 不设 Clip，
+                             TextBlock 由样式给 VerticalAlignment=Center 在 host 内垂直居中。 -->
+                        <Grid x:Name="SpeedValueHost" MinHeight="34" Padding="0,3,0,3">
+                            <TextBlock x:Name="SpeedValueText" Style="{StaticResource PCMigTextStatValue}" Text="" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                        </Grid>
                     </StackPanel>
                 </Border>
                 <Border x:Name="StatCard1" Grid.Row="0" Grid.Column="1" Translation="0,0,8" Style="{StaticResource SecondarySurface}" Padding="14">
                     <StackPanel Spacing="4">
                         <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Text="预计剩余"/>
-                        <TextBlock x:Name="EtaValueText" Style="{StaticResource PCMigTextStatValue}" Text=""/>
+                        <Grid x:Name="EtaValueHost" MinHeight="34" Padding="0,3,0,3">
+                            <TextBlock x:Name="EtaValueText" Style="{StaticResource PCMigTextStatValue}" Text="" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                        </Grid>
                     </StackPanel>
                 </Border>
                 <Border x:Name="StatCard2" Grid.Row="0" Grid.Column="2" Translation="0,0,8" Style="{StaticResource SecondarySurface}" Padding="14">
                     <StackPanel Spacing="4">
                         <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Text="对象进度"/>
-                        <TextBlock x:Name="ObjectValueText" Style="{StaticResource PCMigTextStatValue}" Text=""/>
+                        <Grid x:Name="ObjectValueHost" MinHeight="34" Padding="0,3,0,3">
+                            <TextBlock x:Name="ObjectValueText" Style="{StaticResource PCMigTextStatValue}" Text="" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                        </Grid>
                     </StackPanel>
                 </Border>
                 <Border x:Name="StatCard3" Grid.Row="0" Grid.Column="3" Translation="0,0,8" Style="{StaticResource SecondarySurface}" Padding="14">
                     <StackPanel Spacing="4">
                         <TextBlock x:Name="BytesCardLabel" Style="{StaticResource PCMigTextStepSubtitle}" Text="已传 / 计划"/>
-                        <TextBlock x:Name="BytesValueText" Style="{StaticResource PCMigTextStatValue}" Text=""/>
+                        <Grid x:Name="BytesValueHost" MinHeight="34" Padding="0,3,0,3">
+                            <TextBlock x:Name="BytesValueText" Style="{StaticResource PCMigTextStatValue}" Text="" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                        </Grid>
                     </StackPanel>
                 </Border>
             </Grid>
@@ -134,16 +150,30 @@
                                  星号行才能把剩余高度给内框（改前这里是 Auto，内框只能靠 MinHeight 撑着）。 -->
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
-                        <StackPanel Orientation="Horizontal" Spacing="10">
+                        <!-- FIX BATCH 5（§8 对象明细标题区）：原来是横向 StackPanel —— 图标、标题、灰色说明
+                             各按自身墨迹排布（像素实测图标墨迹中心比标题中心低 8.0 px），且灰色说明在无限宽度里
+                             被句中截断。改为三列 Grid：图标列固定 24（图标在行内垂直居中 ⇒ 与标题共用同一条中心轴）、
+                             标题列 Auto、说明列 *（可换行、最多 2 行、超出省略），因此说明换行与否都不影响图标与标题的对齐，
+                             行高也不再随文案长度抖动。 -->
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="24"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
                             <!-- U63（用户人工标注，紧急修复）：这个图标原本是强调蓝 AccentBrush(#1677F2)，
                                  但"对象明细"只是面板标题、既没有被选中也不是当前步骤 —— 用户判词：
                                  「这个我没有点击没有选中，所以应该是灰色」。像素实测该图标 winner = #1677F2。
                                  改为与空状态图标同族的 StepIconBrush(#7C93B3) 中性色。 -->
-                            <FontIcon Glyph="&#xE8FD;" FontSize="20" Foreground="{StaticResource StepIconBrush}"/>
-                            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="对象明细" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="ObjectPaneHintText" Style="{StaticResource PCMigTextStepSubtitle}" Text=""
+                            <FontIcon Grid.Column="0" Width="24" Height="24" Glyph="&#xE8FD;" FontSize="20"
+                                      Foreground="{StaticResource StepIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                      UseLayoutRounding="True"/>
+                            <TextBlock Grid.Column="1" Style="{StaticResource PCMigTextActionButton}" Text="对象明细"
+                                       LineHeight="22" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="2" x:Name="ObjectPaneHintText" Style="{StaticResource PCMigTextStepSubtitle}" Text=""
+                                       TextWrapping="Wrap" MaxLines="2" LineHeight="18" TextTrimming="CharacterEllipsis"
                                        VerticalAlignment="Center"/>
-                        </StackPanel>
+                        </Grid>
                         <Border Grid.Row="1" Style="{StaticResource InsetSurface}" MinHeight="120" Padding="16" VerticalAlignment="Stretch">
                             <!-- 空状态与真实对象清单二选一（互斥由代码后置的 PushState 切换 Visibility）。
                                  Grid 只是让两者叠在同一格内：Border 只能有一个子元素，且不改任何既有几何。 -->
@@ -222,5 +252,19 @@
                     </Grid>
                 </Border>
             </Grid>
+
+            <!-- ★ PHASE C-1 探针（PCMIG_PROGRESS_DEBUG=1）★ 进度条渲染链路的实时诊断覆盖层：
+                 显示驱动内部的 Active/轨道宽/真值像素/视觉像素/RightInset/装饰物可见性/真值到达间隔 EMA，
+                 以及 raw(引擎真值) 与 display(显示真值) 两层数据，用于帧序列采集时现场对照。
+                 ★ 必须放在 Canvas 里：Canvas 的子元素不参与 Grid 行的测量，面板高度不会撑高
+                 任何一行、不会把总进度卡下推（否则"探针会改变被观测的布局"本身就是伪证据）。
+                 默认 Collapsed ⇒ 正常使用与任何验收截图里都不存在这个元素。 -->
+            <Canvas x:Name="ProgressDebugLayer" Grid.RowSpan="3" IsHitTestVisible="False">
+                <Border x:Name="ProgressDebugPanel" Canvas.Left="8" Canvas.Top="8" Visibility="Collapsed"
+                        Padding="8,6" CornerRadius="6" Background="#E6000000">
+                    <TextBlock x:Name="ProgressDebugText" FontFamily="Consolas" FontSize="11" Foreground="#FF7CFF9B"
+                               TextWrapping="Wrap" MaxWidth="640" Text=""/>
+                </Border>
+            </Canvas>
     </Grid>
 </UserControl>

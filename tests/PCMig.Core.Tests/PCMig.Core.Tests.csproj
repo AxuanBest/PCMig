@@ -49,6 +49,9 @@
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\ConnectionViewModel.cs" Link="LinkedPresentation\ConnectionViewModel.cs" />
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\PageReadiness.cs" Link="LinkedPresentation\PageReadiness.cs" />
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\MigrationSessionViewModel.cs" Link="LinkedPresentation\MigrationSessionViewModel.cs" />
+    <!-- ★ FIX BATCH 6（§9）★ 状态消息的语义通道枚举：纯枚举、零 WinUI 依赖 ⇒ 与 VM 一并链入
+         （VM 的 SetXxx 通道写入者用到它；不链入会 CS0246）。 -->
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\StatusChannel.cs" Link="LinkedPresentation\StatusChannel.cs" />
     <!-- A.5（P1-5 / D1 / D2）：UI 节流的**纯逻辑**缓冲（只 using System.*）。
          ★ 不得把持 DispatcherQueueTimer 的 UiFlushPump.cs 加进来 ★ —— 本测试项目没有
          DispatcherQueueTimer 替身，链入它会编译失败；那正是"薄泵与纯逻辑分层"的原因。 -->

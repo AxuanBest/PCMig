@@ -1,4 +1,4 @@
-﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <FontFamily x:Key="PCMigBodyFontFamily">Microsoft YaHei UI</FontFamily>
   <Style x:Key="PCMigTextBase" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource PCMigBodyFontFamily}"/></Style>
   <Style x:Key="DisplayTitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="30"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
@@ -34,8 +34,20 @@
   <!-- 动作按钮文字（主按钮内容与次级按钮内容） -->
   <Style x:Key="PCMigTextActionButton" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="15"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
   <!-- 底栏 -->
-  <Style x:Key="PCMigTextFooterPercent" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="17"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></Style>
-  <Style x:Key="PCMigTextFooterValue" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></Style>
+  <!-- FIX BATCH 5（§8 Typography / item F）：数字块显式给行高 + UseLayoutRounding。
+       改前全工程除 PcmigComboBoxRoll.xaml 外没有任何 LineHeight，行高由字体度量推导：
+       大号数字（17 Bold / 40 Bold）在高 DPI 下会出现墨迹被裁顶/裁底、基线随重排抖动的情况。
+       行高 = 字号 ×1.4 左右的整数（17→24、13→18、20→28、40→52），字号与字重一律不动。
+
+       ★ UI Closure 2026-10-05（用户指令 UI-03：Critical Numeric Label 不得被裁切）★
+       ×1.4 的口径**不足以留出余量**：Pillow/FreeType 实测「微软雅黑 UI」在 20 px 下的自然行高
+       （ascent 22 + descent 6）恰好等于 28 —— 与配置值**完全相等，零余量**。行盒与墨迹等高时，
+       任何亚像素舍入 / 125%·150% DPI 缩放 / 字重合成（SemiBold 回退到 Bold 面）都会啃掉顶部一小条，
+       用户判词是「显示的最顶部像是被一刀切了一样，被遮掩了一小部分不明显，但是一打眼就能看得出来」。
+       新口径：**行高 = 自然行高 + 余量**（20→32、40→60、17→26、13→20），字号/字重仍然不动。
+       度量依据：Evidence\Trust-Critical-Recovery\UI-CLOSURE-20261005\font-metrics.json。 -->
+  <Style x:Key="PCMigTextFooterPercent" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="17"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/><Setter Property="LineHeight" Value="26"/><Setter Property="UseLayoutRounding" Value="True"/></Style>
+  <Style x:Key="PCMigTextFooterValue" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/><Setter Property="LineHeight" Value="20"/><Setter Property="UseLayoutRounding" Value="True"/></Style>
   <Style x:Key="PCMigTextFooterLabel" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/></Style>
   <Style x:Key="PCMigTextFooterAction" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="15"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
   <!-- 共享列表项 -->
@@ -52,8 +64,17 @@
   <Style x:Key="PCMigTextStatusChipLabel" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></Style>
   <Style x:Key="PCMigTextStatusChipValue" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
   <!-- Step 3 进度页 -->
-  <Style x:Key="PCMigTextTotalPercent" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="40"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></Style>
-  <Style x:Key="PCMigTextStatValue" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="20"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+  <!-- FIX BATCH 5（§8 Typography）：大号百分比（40 Bold）与统计值（20 SemiBold）给显式行高，
+       保证墨迹不裁顶/不裁底；UseLayoutRounding 让亚像素对齐稳定（大数字换位时不抖）。 -->
+  <Style x:Key="PCMigTextTotalPercent" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="40"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/><Setter Property="LineHeight" Value="60"/><Setter Property="UseLayoutRounding" Value="True"/></Style>
+  <!-- PHASE D（§4 Metric Typography）：四张统计卡的大号数值不再堆显式 LineHeight。
+       理由：TextBlock.LineHeight 默认 0＝按字体度量自动算行盒；写死的 32（FontSize 20）是魔法数字，
+       既可能与真实字体度量不符（把墨迹顶到行盒上沿，视觉上"顶部被削一条"），又在 DPI 缩放变化时失效。
+       改为 LineStackingStrategy=MaxHeight（行盒 = 字体行高，未设 LineHeight 即纯字体度量）
+       + VerticalAlignment=Center，并由外层 MetricValueHost 的 MinHeight/Padding 保证几何高度稳定
+       （见 Step3ProgressPage.xaml 的 *ValueHost）。
+       UseLayoutRounding 保持 True：本轮在 100% DPI 真机未观察到裁切，无证据证明它有害，不擅自移除。 -->
+  <Style x:Key="PCMigTextStatValue" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="20"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/><Setter Property="LineStackingStrategy" Value="MaxHeight"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
   <!-- Step 4 结果页（深色日志面板：固定浅色字，不跟随主题） -->
   <Style x:Key="PCMigTextLogHeader" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#E6ECFF"/></Style>
   <Style x:Key="PCMigTextLogTagInfo" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#7BD88F"/><Setter Property="VerticalAlignment" Value="Center"/></Style>

@@ -435,9 +435,16 @@ public async System.Threading.Tasks.Task A12c_ThrottleOn_PauseTakesEffectImmedia
 
     Assert.True(vm.CanPause, "运行中 CanPause 必须为 true");
     await vm.PauseAsync();                       // 用户动作：必须立即生效
-    Assert.True(vm.IsPaused, "暂停必须在下一帧即变（不得等到 50ms 节拍）");
+    // ★ FIX BATCH 2（P0-2 去乐观谎报）★ 本行原为 `Assert.True(vm.IsPaused, ...)`：
+    //   它断言的正是真机上被证伪的**乐观谎报**（点击即声称"已暂停"，而引擎从未确认停住，
+    //   JOB-20261004-171522-b785：8/8 次点击、0 次引擎确认、传输从未停止）。
+    //   去谎报之后本用例的**原意更强**地保留下来：即时性（不得等 50ms 节拍）由"点击当刻
+    //   状态机必须已经从 Idle 推进到 Pausing、按钮态必须已经变化"来证明 —— 真值推进到
+    //   「已暂停」只能由引擎给（见 PauseUiStateMachineTests.PU02）。
+    Assert.False(vm.IsPaused, "点击暂停不得声称已暂停（真值只能来自引擎）");
+    Assert.True(vm.IsPausing, "暂停请求必须在下一帧即变（不得等到 50ms 节拍）");
     Assert.False(vm.CanPause, "暂停后 CanPause 必须立即变 false");
-    Assert.Contains("已请求暂停", vm.StatusMessage, StringComparison.Ordinal);
+    Assert.Contains("正在暂停", vm.StatusMessage, StringComparison.Ordinal);
 
     // 即时通道必须已经把它之前的批量文件行排空（顺序 + 不丢尾边）。
     Assert.Contains(vm.LiveFiles, x => x.Contains("during.bin", StringComparison.Ordinal));
@@ -793,6 +800,161 @@ public void A12d_StopUiRefresh_StopsPumpAndPreventsRestart()
             try { if (Directory.Exists(_sandbox)) Directory.Delete(_sandbox, recursive: true); }
             catch { /* 同上 */ }
             return ValueTask.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// ★ C-C08-1 回归（真机实证，2026-10-04）★ 同一会话内「停止 → 立即恢复」之后，
+    /// UI 节拍泵必须**重新活起来**。
+    ///
+    /// 真机事实（C08 reg2 与 C08DIAG diag2，目标盘已清空的干净复现）：Stop 后立刻点「恢复任务」，
+    /// 独立证据显示引擎确实恢复写盘（job-state running，已传 19.59 GB = 40.1%、按钮回到
+    /// 暂停✓停止✓），但底栏在 ≥54 s 内一直显示「0.0% / 0 B / 48.89 GB」，直到下一次点「停止」
+    /// 触发一次显式 FlushPendingNow 才跳到真实值 —— UI 与真实引擎真值分裂（用户会以为恢复没生效）。
+    ///
+    /// 根因（本用例锁死）：生产泵 <c>DispatcherQueueUiFlushPump.Stop()</c> 是**终态**
+    /// （UiFlushPump.cs:75-108：`_stopped=true` 之后 `Start()` 直接 return），而 VM 侧的
+    /// `_flushPump` 是 `??=` 复用的。旧版 StopFlushTimer 只调 `pump.Stop()` 却把死泵留在字段里
+    /// ⇒ run-2 的 StartFlushTimer 复用同一个死泵 ⇒ 快照只进批处理最新值槽位、**再没有节拍来排空**。
+    ///
+    /// 为什么必须用 <see cref="TerminalStopPump"/> 而不是既有的 RecordingPump：RecordingPump 的
+    /// Start 可以无限复活，用它写这条用例**在修复前也会通过**（假通过）。这里严格照抄生产泵语义。
+    /// </summary>
+    [Fact]
+    public async System.Threading.Tasks.Task C08_StopThenImmediateResume_MustRearmThrottledPump()
+    {
+        var sandbox = Path.Combine(Path.GetTempPath(), "pcmig-c08-fix", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(sandbox);
+        var previousJobs = Environment.GetEnvironmentVariable("PCMIG_JOBS");
+        Environment.SetEnvironmentVariable("PCMIG_JOBS", Path.Combine(sandbox, "Jobs"));
+
+        var log = new LoggerConfiguration().CreateLogger();
+        var vm = new MigrationSessionViewModel(null, null, log);
+        vm.EnableUiThrottleForTest();
+        var factory = new TerminalStopPumpFactory();
+        vm.UiFlushPumpFactoryForTest = factory.Create;
+
+        var gate1 = new System.Threading.Tasks.TaskCompletionSource<bool>(
+            System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate2 = new System.Threading.Tasks.TaskCompletionSource<bool>(
+            System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var previous = SynchronizationContext.Current;
+        try
+        {
+            var manager = new JobManager(log);
+            var ctx = manager.Create(new JobDefinition
+            {
+                JobId = "JOB-C08-FIX",
+                SourceHost = "P15-PROBE",
+                TargetRoot = Path.Combine(sandbox, "target"),
+                Sources = { new SourceSpec { Path = @"\\P15-PROBE\C$", Kind = ObjectKind.DataVolume } },
+                Options = new MigrationOptions { Threads = 4 },
+            });
+            ctx.SavePlan(PlanWithOneObject(@"\\P15-PROBE\C$"));
+
+            SynchronizationContext.SetSynchronizationContext(null);
+            try
+            {
+                Assert.True(await vm.AdoptExistingJobAsync(ctx.JobDir), "必须先载入任务");
+            }
+            finally { SynchronizationContext.SetSynchronizationContext(previous); }
+
+            // ── run-1：跑起来（此时必须有一个活着的节拍泵），用户点「停止」 ──
+            vm.TransferRunner = async (c, hooks, _, ct, _, _) =>
+            {
+                hooks.OutputLine?.Invoke("引擎：第一段运行");
+                await gate1.Task;
+                ct.ThrowIfCancellationRequested();   // 与真机同口径：停止 ⇒ 取消 ⇒ Interrupted 收尾
+                return JobPhase.Completed;
+            };
+
+            SynchronizationContext.SetSynchronizationContext(new InlineSyncContext());
+            var run1 = vm.RunAsync(password: null);
+
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (!vm.IsRunning && DateTime.UtcNow < deadline) Thread.Sleep(10);
+            Assert.True(vm.IsRunning, "run-1 未在 10 秒内进入运行态");
+            Assert.True(vm.IsUiThrottleActive, "run-1 运行中必须有活着的节拍泵");
+            var pump1 = Assert.IsType<TerminalStopPump>(factory.Last);
+
+            await vm.StopAsync();
+            gate1.TrySetResult(true);
+            await run1;
+
+            Assert.Equal(JobPhase.Interrupted, vm.Phase);
+            Assert.False(pump1.IsRunning, "收尾后 run-1 的泵必须已经停");
+
+            // ── run-2：同一会话内立即「恢复任务」（C08 的真实用户序列） ──
+            vm.TransferRunner = async (c, hooks, _, _, _, _) =>
+            {
+                hooks.OutputLine?.Invoke("引擎：第二段运行");
+                await gate2.Task;
+                return JobPhase.Completed;
+            };
+
+            var run2 = vm.ResumeAsync(password: null);
+            deadline = DateTime.UtcNow.AddSeconds(10);
+            while (!vm.IsRunning && DateTime.UtcNow < deadline) Thread.Sleep(10);
+            Assert.True(vm.IsRunning, $"run-2（恢复）未在 10 秒内进入运行态；StatusMessage=[{vm.StatusMessage}]");
+
+            // ★★ 本用例的核心断言 ★★ 恢复后的运行必须重新拥有一个**在跑的**节拍泵；
+            //    否则进度快照只进批处理槽位，底栏永远停在旧值（真机：0.0% / 0 B 冻结 54 s）。
+            Assert.True(vm.IsUiThrottleActive,
+                "同会话恢复之后节拍泵必须重新启动（否则底栏进度冻结 = 真值分裂）");
+            Assert.NotSame(pump1, factory.Last);
+            Assert.True(factory.Last!.IsRunning, "恢复运行必须使用重新建立的、正在跑的泵");
+
+            gate2.TrySetResult(true);
+            await run2;
+            Assert.Equal(JobPhase.Completed, vm.Phase);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+            try { vm.StopUiRefresh(); } catch { /* 清理失败不影响结论 */ }
+            Environment.SetEnvironmentVariable("PCMIG_JOBS", previousJobs);
+            try { if (Directory.Exists(sandbox)) Directory.Delete(sandbox, recursive: true); }
+            catch { /* 同上 */ }
+        }
+    }
+
+    /// <summary>
+    /// 严格照抄生产泵终态语义的替身：<c>Stop()</c> 之后 <c>Start()</c> 是空操作、IsRunning 保持 false
+    /// （依据 <c>Presentation\UiFlushPump.cs:75-108</c> 的 `_stopped` 终态闸门）。
+    /// </summary>
+    private sealed class TerminalStopPump : IUiFlushPump
+    {
+        private bool _stopped;
+
+        public bool IsRunning { get; private set; }
+        public TimeSpan Interval => TimeSpan.FromMilliseconds(50);
+
+        public void Start()
+        {
+            if (_stopped) return;   // ★ 生产语义：停过就再也不复活（这正是 C-C08-1 的引信）★
+            IsRunning = true;
+        }
+
+        public void Stop()
+        {
+            _stopped = true;
+            IsRunning = false;
+        }
+    }
+
+    /// <summary>每次 Create 都建**新**泵并记录全部实例（用于证明"恢复运行确实换了一个新泵"）。</summary>
+    private sealed class TerminalStopPumpFactory
+    {
+        public List<TerminalStopPump> Created { get; } = new();
+
+        public TerminalStopPump? Last => Created.Count == 0 ? null : Created[^1];
+
+        public IUiFlushPump Create(Func<bool> onTick)
+        {
+            var pump = new TerminalStopPump();
+            Created.Add(pump);
+            return pump;
         }
     }
 

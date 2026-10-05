@@ -154,7 +154,7 @@
 
        声明式圆角层级（Large Surface > Card > Input/Button）：
          ShellMaterial 22 / PrimarySurface 20 / ElevatedSurface 18 /
-         SecondarySurface 16 / StepCard 16 / InsetSurface 13 / Input 14 / Button 12 / Badge 9
+         SecondarySurface 16 / StepCard 16 / Overlay(Flyout/Popup/Dropdown 面板) 16 / InsetSurface 13 / Input 14 / Button 12 / ListItem 10 / Badge 9
        输入类控件（Standard / Search / Password / Path）**统一使用 PCMigRadiusInput**，
        不允许按页面或按控件类型各写一套；需要不同半径只能通过明确的语义变体定义。
        ══════════════════════════════════════════════════════════════════════════════ -->
@@ -162,6 +162,13 @@
   <CornerRadius x:Key="PCMigRadiusStepCard">16</CornerRadius>
   <CornerRadius x:Key="PCMigRadiusButton">12</CornerRadius>
   <CornerRadius x:Key="PCMigRadiusInset">13</CornerRadius>
+  <!-- UI Closure（2026-10-05）：补齐两个此前缺失的语义圆角 Token。
+       · PCMigRadiusOverlay：L4 浮层容器（Flyout / Popup / Dropdown 面板）——与 Card 同档 16。
+       · PCMigRadiusListItem：列表条目 / 行内 chip——与既有 ListItemSurfaceBrushBorder(10) 同值。
+       此前 ComboBox 收起态与 Task Picker 直接继承系统默认 ControlCornerRadius(4)、浮层继承
+       系统默认 OverlayCornerRadius(8)，与 PMML 输入族 14 不统一（用户人工标注项）。 -->
+  <CornerRadius x:Key="PCMigRadiusOverlay">16</CornerRadius>
+  <CornerRadius x:Key="PCMigRadiusListItem">10</CornerRadius>
   <!-- V5 Elevation：**ThemeShadow 必须配 Translation Z 才真的投影**（Z 不动 = 截图里看不到景深）。
        V4：面板/卡片描边改用高光渐变；**V4b（本轮）**：卡片/面板顶部再叠一条 2 DIP 的横向白色亮线
        （`TopSheenLip`），因为实测"整圈描边渐变"在卡片顶边**没有产生亮度尖峰**，而参考图顶边有 +16 亮度尖线。 -->

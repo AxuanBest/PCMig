@@ -103,6 +103,8 @@ public readonly record struct DiagnosticHealthSnapshot(
         RetentionEvictions = loss.RetentionEvictionCount,
         RuleFaults = health.RuleFaults,
         LastRuleFaultReason = health.LastRuleFaultReason,
+        ActionUnfulfilled = health.ActionUnfulfilled,
+        LastActionUnfulfilledReason = health.LastActionUnfulfilledReason,
     };
 
     /// <summary>
@@ -138,6 +140,22 @@ public readonly record struct DiagnosticHealthSnapshot(
     public string? LastRuleFaultReason { get; init; }
 
     /// <summary>
+    /// ★ FIX BATCH 3 / §6 ★ **用户动作未兑现**次数（信任关键）。
+    ///
+    /// 它回答的是"诊断系统坏了吗"之外的另一个问题："**产品**兑现了用户的动作吗"。
+    /// 真机事故形态：8/8 次暂停点击、8/8 次请求文件写入成功、0 次引擎确认、传输从未停止，
+    /// 而事件卡 = 0、健康 = healthy —— 因为 <see cref="IsDegraded"/> 里根本没有这一维。
+    ///
+    /// 判定来源（两者都是"业务效果从未达成"的实证）：
+    ///   · 引擎自报失败（TRN-023 PauseFailed）⇒ 期望被关闭为失败；
+    ///   · 承诺的兑现期限已过（信任关键步骤的 DeadlineBreachIsFailure 超时）。
+    /// </summary>
+    public long ActionUnfulfilled { get; init; }
+
+    /// <summary>最近一次"动作未兑现"的原因（如 <c>expectation-failed:pause.external:TRN-023</c>）。</summary>
+    public string? LastActionUnfulfilledReason { get; init; }
+
+    /// <summary>
     /// 不健康 = 有 DurableCritical 丢失、有存储故障、有任何真实丢弃/合并（证据不完整）、
     /// 有 sink 故障（某个消费者把事件吞了）、或维护调度器已经半死/已退出。
     /// <para>
@@ -148,7 +166,10 @@ public readonly record struct DiagnosticHealthSnapshot(
     public bool IsDegraded => StickyCriticalLost || StorageDegraded
                               || EventsDropped > 0 || EventsEvicted > 0 || CriticalLost > 0
                               || SinkFaults > 0 || MaintenanceFaults > 0 || !MaintenanceAlive
-                              || RuleFaults > 0;   // ★ R-2 ★ 规则内部故障也是"自己坏掉了"
+                              || RuleFaults > 0      // ★ R-2 ★ 规则内部故障也是"自己坏掉了"
+                              // ★ FIX BATCH 3 ★ 用户动作未兑现：请求受理了、业务效果从未达成。
+                              //   "我们没有观察到问题"绝不能在这种情况下说出口。
+                              || ActionUnfulfilled > 0;
 
     /// <summary>
     /// 证据完整性：任何丢失都让"缺事件"类规则必须降置信度；
@@ -157,6 +178,10 @@ public readonly record struct DiagnosticHealthSnapshot(
     ///
     /// ★ D6.3 §9 ★ 保留性淘汰（<see cref="RetentionEvictions"/>）**不在**判据里：
     /// 它是"环只保最近一段"的正常保留策略，不是"系统丢了证据"（与 EvidenceCoverage 同口径）。
+    ///
+    /// ★ FIX BATCH 3 ★ <see cref="ActionUnfulfilled"/> **也不在**判据里：动作未兑现是一条
+    /// **完整、无丢失的观测**（我们知道发生了什么），它让 verdict 降级，但不代表证据缺失。
+    /// 混在一起会让"缺事件类规则"无故降置信度，反而制造第二种假话。
     /// </summary>
     public bool EvidenceComplete => LossEpoch == 0 && EventsDropped == 0 && EventsEvicted == 0
                                     && SinkFaults == 0 && MaintenanceAlive
@@ -208,6 +233,10 @@ public sealed class DiagnosticHealth
     // ★ R-2 ★ 分析器/规则自身故障（同样是一等事实：被隔离 ≠ 没发生）。
     private long _ruleFaults;
     private string? _lastRuleFaultReason;
+
+    // ★ FIX BATCH 3 / §6 ★ 动作未兑现（信任关键）：请求受理了，业务效果从未达成。
+    private long _actionUnfulfilled;
+    private string? _lastActionUnfulfilledReason;
 
     public long EventsProduced => Interlocked.Read(ref _produced);
     public long EventsAccepted => Interlocked.Read(ref _accepted);
@@ -320,6 +349,25 @@ public sealed class DiagnosticHealth
 
     /// <summary>维护调度器是否仍在跑（false = 已整体退出，后续判定不会再发生）。</summary>
     public bool MaintenanceAlive => Interlocked.Read(ref _maintenanceAlive) != 0;
+
+    /// <summary>★ FIX BATCH 3 ★ 用户动作未被兑现（请求受理了，业务效果从未达成）的次数。</summary>
+    public long ActionUnfulfilled => Interlocked.Read(ref _actionUnfulfilled);
+
+    /// <summary>最近一次"动作未兑现"的原因串（供 verdict 解释"是哪一个动作、卡在哪一步"）。</summary>
+    public string? LastActionUnfulfilledReason => Volatile.Read(ref _lastActionUnfulfilledReason);
+
+    /// <summary>
+    /// ★ FIX BATCH 3 / §6 ★ 记一笔**动作未兑现**：用户要的业务动作被受理了，但目标业务状态
+    /// 从未达成（引擎自报停不住 / 兑现期限已过）。
+    ///
+    /// 它与 <see cref="MarkRuleFault"/> 是两本账：前者是**产品**没兑现承诺，后者是**诊断本身**坏了。
+    /// 两者都让 verdict 降级，但原因串必须能区分，否则用户看到"存在降级"却不知道为什么。
+    /// </summary>
+    public void MarkActionUnfulfilled(string reason)
+    {
+        Interlocked.Increment(ref _actionUnfulfilled);
+        Volatile.Write(ref _lastActionUnfulfilledReason, reason);
+    }
 
     /// <summary>被隔离的维护子任务失败次数。</summary>
     public long MaintenanceFaults => Interlocked.Read(ref _maintenanceFaults);

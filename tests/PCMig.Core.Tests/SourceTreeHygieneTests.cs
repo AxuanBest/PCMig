@@ -98,9 +98,17 @@ public class SourceTreeHygieneTests
         Assert.Contains("磁盘已满", text);
         Assert.Contains("insufficient disk space", text);
 
-        // 熔断正则必须仍要求"正在复制文件" + 八位十六进制（形态收窄是有意设计）
-        Assert.Contains(@"正在复制文件", text);
-        Assert.Contains(@"[0-9A-Fa-f]{8}", text);
+        // 熔断正则必须仍要求"正在复制文件" + 八位十六进制（形态收窄是有意设计）。
+        // F12：文件级错误行解析（承载这两个字面量的正则）已从本文件迁到 RobocopyRunner.cs，成为
+        //   TryParseFileErrorLine 的唯一实现，入账与回冲共用同一处解析。口径不放宽——这两个字面量
+        //   必须仍存在于两个落点之一，且 Core 里不许两处各写一份。
+        var runnerPath = Path.Combine(root, "src", "PCMig.Core", "Transfer", "RobocopyRunner.cs");
+        Assert.True(File.Exists(runnerPath), "找不到被测源文件: " + runnerPath);
+        var runnerText = File.ReadAllText(runnerPath);
+        Assert.True(text.Contains(@"正在复制文件") || runnerText.Contains(@"正在复制文件"),
+            @"文件级错误行正则必须仍要求 ""正在复制文件""（TransferOrchestrator.cs 或 RobocopyRunner.cs）");
+        Assert.True(text.Contains(@"[0-9A-Fa-f]{8}") || runnerText.Contains(@"[0-9A-Fa-f]{8}"),
+            @"文件级错误行正则必须仍要求八位十六进制错误码（TransferOrchestrator.cs 或 RobocopyRunner.cs）");
     }
 
     [Fact]
@@ -183,7 +191,10 @@ public class SourceTreeHygieneTests
         //  · Large(/J) 与 RootFiles 通道的目标文件都可能被预分配最终长度，
         //    枚举长度 ≠ 已确认落盘字节 → 会虚报进度（真实任务里因此跳到约 99%）。
         Assert.Contains("var enumFallbackAllowed = _currentPass == PassKind.Bulk;", text);
-        Assert.Contains("if (enumFallbackAllowed &&", text);
+        // PHASE C-3（§3）起，目录枚举回退还必须挂在"重活档"节拍上（5 Hz 轻量档只读内存计数，
+        // 不做任何目录枚举），所以条件前缀多了 heavyDue。语义没有放宽，反而更严：
+        // 仍然是"只在 Bulk 通道 + 每 2 秒最多一次"。
+        Assert.Contains("if (heavyDue && enumFallbackAllowed &&", text);
         Assert.DoesNotContain("_currentPass != PassKind.Large &&", text);
         Assert.Contains("预分配文件长度", text);
         // 跳过原因必须写进日志（否则日志里看不到任何线索，会被当成进度逻辑坏了）

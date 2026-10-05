@@ -491,3 +491,89 @@ public sealed class RobocopyUnexpectedExitRule : IDiagnosticRule
         return new RuleOutcome(incident, IsNew: true, ShouldTriggerFlight: false);
     }
 }
+
+/// <summary>
+/// ★ FIX BATCH 3 / §6（信任关键）★ ACTION_FULFILLMENT_FAILED：**用户动作被受理了，但业务效果
+/// 从未达成**（引擎自报在硬失败 SLA 内停不住，如 TRN-023 PauseFailed）。
+///
+/// 为什么必须有这条规则：旧实现里，"暂停请求写入成功"就是这条动作在诊断里的全部故事
+/// —— 请求文件确实写下（TRN-010 succeeded）、方向也对，于是事件卡 0 张、健康 healthy，
+/// 而传输**从未停止**。真机证据：8/8 次点击、8/8 次请求写入成功、0 次引擎确认。
+///
+/// 纪律：这条规则判的是**业务兑现**，不是"某条事件丢了"。因此：
+///   · 它不要求完整证据（RequiresCompleteEvidence=false）—— 引擎亲口承认的事实本身就成立；
+///   · 它必须是 Error 级并触发飞行窗口（信任缺口的证据要冻结下来，便于事后归因）。
+/// </summary>
+public sealed class ActionFulfillmentFailedRule : IDiagnosticRule
+{
+    private static readonly string[] Codes =
+    {
+        TransferEvents.PauseFailed.Name,
+    };
+
+    /// <summary>症状名（与 RuleId 同名：事件卡列表按它聚合）。</summary>
+    public const string Symptom = "ACTION_FULFILLMENT_FAILED";
+
+    public string RuleId => Symptom;
+    public int Version => 1;
+
+    /// <summary>引擎亲口承认"停不住"是**直接观测**，不依赖证据链完整性。</summary>
+    public bool RequiresCompleteEvidence => false;
+
+    public IReadOnlyCollection<string> WatchedEventCodes => Codes;
+
+    public RuleOutcome? Evaluate(in DiagnosticEvent evt, RuleContext context)
+    {
+        // 被取消（用户自己收手）不算"产品没兑现承诺"。
+        if (evt.Outcome is DiagnosticOutcome.Canceled) return null;
+
+        var payload = evt.Payload as TrnPauseObservedPayload;
+        var waitedMs = payload?.WaitedMs ?? 0;
+        var mode = payload?.Mode ?? "Unknown";
+
+        var incidentId = Symptom + "|" + (evt.JobId ?? "-") + "|" + (evt.ObjectId ?? "-") + "|" + mode;
+        var incident = new Incident(
+            incidentId, RuleId, Version, Symptom, DiagnosticLevel.Error,
+            evt.TimestampUtc, evt.TimestampUtc,
+            jobId: evt.JobId, objectId: evt.ObjectId, operationId: evt.OperationId, runGeneration: evt.RunGeneration);
+
+        var update = new IncidentUpdate
+        {
+            AtUtc = evt.TimestampUtc,
+            Fact = new IncidentEvidence(evt.Ref, evt.Descriptor.Name, IncidentEvidence.Fact),
+            Severity = DiagnosticLevel.Error,
+            Confidence = ConfidenceBand.ConfirmedObservation,
+            ConfidenceRationale = "直接观测：引擎在 " + waitedMs + " ms 后仍未停止 worker，并自报暂停失败",
+            BreakPoint = "Core.Pause",
+            EvidenceIncomplete = !context.EvidenceComplete,
+            LossEpoch = context.LossEpoch == 0 ? null : context.LossEpoch,
+            UserFacingSummary =
+                "你按了暂停、请求也已受理，但引擎在硬失败 SLA（10 秒）内没能真正停住 —— 迁移仍在进行。" +
+                "「请求写入成功」不等于「迁移已暂停」，这条事件卡就是那道防线的记录。",
+            TechnicalSummary = "mode=" + mode + " waitedMs=" + waitedMs +
+                               " object=" + (evt.ObjectId ?? "-") + " pass=" + (evt.Pass ?? "-"),
+            Candidates = new[]
+            {
+                new IncidentCandidate("worker-wedged",
+                    "复制进程卡在不可中断的重试/IO 上（/R /W 退避、远端无响应）",
+                    ConfidenceBand.Medium, Refuted: false),
+                new IncidentCandidate("worker-kill-ineffective",
+                    "终止进程树没能生效（子进程仍持句柄/句柄泄漏）",
+                    ConfidenceBand.Medium, Refuted: false),
+                new IncidentCandidate("sla-too-tight",
+                    "10 秒对当前介质/负载过紧（可用同一对象的历史停顿分布反驳或证实）",
+                    ConfidenceBand.Low, Refuted: false),
+            },
+            SuggestedChecks = new[]
+            {
+                "看同一时段 RBC 事件里当前对象是否仍在推进（TRN.ProgressObserved）",
+                "看目标目录里那一份文件的大小是否仍在变化（真的还在传 ⇒ 未暂停）",
+                "确认引擎进程/robocopy 子进程是否仍然存活（任务管理器）",
+            },
+        };
+
+        incident.Merge(update);
+        // 信任缺口必须触发飞行窗口：把前后的证据冻结下来，否则"事后查不出为什么"。
+        return new RuleOutcome(incident, IsNew: true, ShouldTriggerFlight: true);
+    }
+}

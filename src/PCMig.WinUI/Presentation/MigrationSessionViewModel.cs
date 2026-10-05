@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
 using Microsoft.UI.Dispatching;
 using PCMig.Core.Jobs;
 using PCMig.Core.Logging;
@@ -279,6 +280,17 @@ public sealed class MigrationSessionViewModel : ObservableObject
                     Raise(nameof(SourceSummary));
                     Raise(nameof(CanStart));
                 }
+
+                // ★ UI Closure 2026-10-05（用户指令 UI-10：状态消息路由）★
+                //   连接流程的播报（正在连接…／发现共享结论／正在探测…／已添加并勾选…）统一路由到
+                //   Shell 左侧提示卡（OperationalStatus 通道），表单内只留字段级／错误级文字。
+                //   为什么不直接路由 ConnectionViewModel.Status：Status 里混着"请先输入 IP"这类字段校验，
+                //   进提示卡会与"流程状态"语义混淆；连接侧另有专用 FlowStatus 通道。
+                if (e.PropertyName is nameof(ConnectionViewModel.FlowStatus))
+                {
+                    var flow = _connection.FlowStatus;
+                    if (!string.IsNullOrWhiteSpace(flow)) SetOperational(flow);
+                }
             };
             _connection.Shares.CollectionChanged += (_, _) => Raise(nameof(SourceShareCount));
         }
@@ -473,7 +485,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         ActualBytesText = "0 B";
         DataLabel = "已传 / 计划";
         BalanceText = "计划 0 B　·　实际落盘 0 B";
-        StatusMessage = "已切换为「新建任务」：填好目标路径、在目录树勾选内容后点「预检并生成计划」。";
+        SetOperational("已切换为「新建任务」：填好目标路径、在目录树勾选内容后点「预检并生成计划」。");
         HasPlanReset();
         Raise(nameof(CanRepair));
         RaiseDerived();
@@ -550,12 +562,144 @@ public sealed class MigrationSessionViewModel : ObservableObject
         private set { if (Set(ref _isRunning, value)) RaiseDerived(); }
     }
 
-    private bool _isPaused;
-    public bool IsPaused
+    // ─────────────── 暂停真值（FIX BATCH 2：Single Source of Truth = 引擎）───────────────
+    //
+    // 旧实现（真机证伪）：footer Pause 点击后**立刻**写 IsPaused = true、LastPauseOutcome = Accepted，
+    // 然后下一次快照 `IsPaused = s.Phase == JobPhase.Paused` 再把它覆盖回去 —— 用户因此可以反复点击，
+    // 界面一会儿"已暂停"一会儿"进行中"，而传输从来没有停过。
+    // 现在：UI 只允许**映射**引擎真值（PauseState / PauseRequestedAt / PauseAchievedAt / PauseOutcome /
+    // PauseFailureReason，随每个 ProgressSnapshot 送达），本地只补"请求已写入、引擎尚未表态"这一小段，
+    // 且必须显示为「正在暂停…」——绝不允许再出现乐观的"已暂停"。
+
+    private PauseUiState _pauseUiState = PauseUiState.Idle;
+    /// <summary>UI 侧暂停状态机（派生自引擎真值；唯一转换入口见 <see cref="ApplyPauseTruth"/>）。</summary>
+    public PauseUiState PauseUiState
     {
-        get => _isPaused;
-        private set { if (Set(ref _isPaused, value)) RaiseDerived(); }
+        get => _pauseUiState;
+        private set { if (Set(ref _pauseUiState, value)) RaiseDerived(); }
     }
+
+    private PauseState _enginePauseState = PauseState.None;
+    private PauseOutcomeKind _enginePauseOutcome = PauseOutcomeKind.None;
+    private DateTime? _enginePauseRequestedAt;
+    private DateTime? _enginePauseAchievedAt;
+    private string? _enginePauseFailureReason;
+    /// <summary>本地事实：暂停请求文件已写入成功、引擎尚未表态（"正在暂停…"的唯一合法来源）。</summary>
+    private bool _pauseRequestWritten;
+    /// <summary>本地事实：用户重新点击暂停的时点（用于识别引擎上一轮的旧失败结论，不重复显示）。</summary>
+    private DateTime? _pauseRetryAfterUtc;
+
+    /// <summary>引擎真值：暂停状态机（None / Pausing / Paused / PauseFailed）。</summary>
+    public PauseState EnginePauseState => _enginePauseState;
+    /// <summary>引擎真值：暂停的最终业务结果（None / Achieved / Failed）。</summary>
+    public PauseOutcomeKind EnginePauseOutcome => _enginePauseOutcome;
+    /// <summary>引擎真值：本次暂停请求被引擎处理的时刻（UTC）。</summary>
+    public DateTime? PauseRequestedAt => _enginePauseRequestedAt;
+    /// <summary>引擎真值：worker 真的停住、暂停达成的时刻（UTC）。未达成为 null。</summary>
+    public DateTime? PauseAchievedAt => _enginePauseAchievedAt;
+    /// <summary>引擎真值：暂停失败原因（仅 Failed 时有值）。</summary>
+    public string? PauseFailureReason => _enginePauseFailureReason;
+
+    /// <summary>
+    /// ★ FIX BATCH 3 / §6（信任关键）★ 等**引擎真值**落定后再让 UI 发出动作终点事件。
+    ///
+    /// 为什么必须有：诊断的动作兑现判定要求"请求受理"与"业务效果"分开。如果 UI 在点击瞬间
+    /// （或只在请求写入之后）就关掉动作，跟踪器会立刻以 "completed" 收口 —— 「请求写入成功」
+    /// 就冒充了「迁移已暂停」，这正是真机上"事件卡 0 / 健康 healthy / 传输从未停止"的成因。
+    ///
+    /// 预算 = 引擎硬失败 SLA（10 s）+ 诊断宽限（2 s）+ 3 s 传输往返余量；超时即如实返回
+    /// false（调用方记 Unknown，不假装成功）。**不改变任何迁移行为**，只延迟 UI 的终点事件。
+    ///
+    /// ★ FIX BATCH 7（RECOVERY GATE case02 现场发现）★ 旧实现写的是
+    ///   `while (_enginePauseState == PauseState.Pausing && …)`：**要求"暂停中"这个中间态已经到达**才会等待。
+    ///   而引擎真值（PauseState）只在每 2 s 的快照里送一次，点击瞬间它还是 None/上一轮的状态 ⇒ 循环一次都不进，
+    ///   方法立刻返回 false ⇒ footer 把一次**真实达成**的暂停记成 `Unknown / pause-unsettled`，
+    ///   pause.v2 期望永远没有 FeedbackConfirmed（实测 case02：引擎 0.36 s 就 TRN-011 停住了，UI 却在 17 ms 后收口 Unknown）。
+    ///   现在改成"等它**落定**"：Paused（成功）/ PauseFailed（失败）任一到达即收口；运行已收尾且引擎侧没有任何暂停态
+    ///   ⇒ 暂停不可能达成，提前如实返回 false。
+    /// </summary>
+    public async Task<bool> WaitForPauseSettledAsync(CancellationToken ct = default)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(ActionSla.PauseFulfillmentDeadlineMs + 3_000);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (_enginePauseState is PauseState.Paused or PauseState.PauseFailed) break;
+            // 引擎侧没有任何暂停态、而这一次运行已经收尾 ⇒ 暂停不会达成了（例如它自己先跑完了），
+            // 如实返回 false，不去凑满预算。
+            if (!IsRunning && _enginePauseState == PauseState.None) break;
+            try { await Task.Delay(50, ct); }
+            catch (OperationCanceledException) { break; }
+        }
+        return _enginePauseState == PauseState.Paused;
+    }
+
+    /// <summary>
+    /// ★ FIX BATCH 3 / §6.4（同类审计）★ 恢复的达标真值 = 引擎**离开 Paused**并回到运行。
+    /// 与暂停同理：若在 ResumeAsync 返回处就发终点事件，"暂停请求文件被清除成功"就冒充了
+    /// "迁移已恢复"。就地恢复时 Phase 会从 Paused 变回 Running；从已中断状态恢复则是一次新运行。
+    /// 超时如实返回 false（调用方记 Unknown），**不改变迁移行为**。
+    ///
+    /// ★ FIX BATCH 7（RECOVERY GATE case03 现场发现）★ 旧实现把"起点是不是已暂停"写成
+    ///   `var wasPaused = Phase == JobPhase.Paused;` —— 在**进入本方法的那一刻**判断。
+    ///   而 ResumeAsync 从"已暂停且这一次运行已收尾"恢复时走的是一次**新运行**并且会 await 整轮运行，
+    ///   于是本方法被调用时 Phase 早已跑过 Running 变成 Completed/Failed ⇒ wasPaused 当场变 false，
+    ///   判据退化成 `IsRunning || Phase == Running`（运行已结束 ⇒ 恒 false）⇒ 一次**真实成功**的恢复
+    ///   被记成 Unknown / resume-unsettled。实测 case03b：00:47:03.576 点恢复 → 00:47:12.178 运行真的完成，
+    ///   而 footer 在 00:47:42.253 才以 `resume-unsettled / dur=38676 ms`（= 8.6 s 运行 + 30 s 空等）收口，
+    ///   resume.v1 也因此永远拿不到 FeedbackConfirmed。
+    ///   现在"起点阶段"由 <see cref="ResumeAsync"/> 在**发起恢复时**记下（`_resumeOriginPhase`），
+    ///   本方法只负责判断"引擎有没有真的离开那个起点"。
+    /// </summary>
+    public async Task<bool> WaitForResumeSettledAsync(CancellationToken ct = default)
+    {
+        var origin = _resumeOriginPhase ?? Phase;
+        var deadline = DateTime.UtcNow.AddMilliseconds(ActionSla.ResumeSettleDeadlineMs);
+        try
+        {
+            while (DateTime.UtcNow < deadline)
+            {
+                if (ResumeSettled(origin)) return true;
+                try { await Task.Delay(50, ct); }
+                catch (OperationCanceledException) { break; }
+            }
+            return ResumeSettled(origin);
+        }
+        finally { _resumeOriginPhase = null; }
+    }
+
+    /// <summary>恢复是否**真的发生**（唯一判据入口，绝不由"命令返回"或"请求文件被清除"代替）。</summary>
+    private bool ResumeSettled(JobPhase origin)
+    {
+        // ① 从「已暂停」恢复：达标真值 = 引擎**离开暂停**。Running / Completed / CompletedWithErrors /
+        //    Interrupted / Failed 全都是"真的继续跑过"的事实（后续状态由各自的真值面板如实呈现），
+        //    而"停在 Paused"恰恰是"恢复没生效"。
+        if (origin == JobPhase.Paused) return Phase != JobPhase.Paused;
+        // ② 从其它可续传阶段恢复：运行已经开始，或阶段已从起点推进（例如恢复后这一轮直接跑完了）。
+        return IsRunning || Phase != origin;
+    }
+
+    /// <summary>
+    /// ★ FIX BATCH 3 / §6.4（同类审计）★ 停止的达标真值 = 运行**真的收尾**（不再 Running）。
+    /// StopAsync 只发取消令牌就返回（`_cts?.Cancel()` 之后立即 CompletedTask），因此"命令返回"
+    /// 绝不等于"已经停下" —— 这里等到引擎把运行收尾，超时如实返回 false。
+    /// </summary>
+    public async Task<bool> WaitForStopSettledAsync(CancellationToken ct = default)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(ActionSla.StopSettleDeadlineMs);
+        while (IsRunning && DateTime.UtcNow < deadline)
+        {
+            try { await Task.Delay(50, ct); }
+            catch (OperationCanceledException) { break; }
+        }
+        return !IsRunning;
+    }
+
+    /// <summary>是否**真的**已暂停（引擎已确认 worker 停止）。不是"点了暂停按钮"。</summary>
+    public bool IsPaused => PauseUiState == PauseUiState.Paused;
+    /// <summary>正在暂停：请求已写入（或引擎已受理），**尚未**确认停住。界面必须显示"正在暂停…"。</summary>
+    public bool IsPausing => PauseUiState == PauseUiState.Pausing;
+    /// <summary>暂停失败：引擎在硬失败 SLA 内没能停住 worker，**迁移仍在进行**（必须明说）。</summary>
+    public bool IsPauseFailed => PauseUiState == PauseUiState.PauseFailed;
 
     private bool _isRepairing;
     /// <summary>「尝试修复」独立进行中（修复有自己的一条进度条，不与迁移混用）。</summary>
@@ -575,8 +719,100 @@ public sealed class MigrationSessionViewModel : ObservableObject
     public bool IsFinished { get => _isFinished; private set => Set(ref _isFinished, value); }
 
     private string _statusMessage = "等待 Step 1 连接旧电脑；连接完成并在 Step 2 选定内容后，这里会给出可执行的下一步。";
-    /// <summary>给用户看的一句话状态（所有动作的结论都落在这里，不静默失败）。</summary>
+    /// <summary>给用户看的一句话状态（所有动作的结论都落在这里，不静默失败）。
+    /// ★ FIX BATCH 6（§9）★ 它现在是**聚合句**：总是等于最近一次写入通道的完整文本；
+    /// 分流后的语义通道见 <see cref="OperationalStatus"/> 等五个属性，UI 面板按通道取用。</summary>
     public string StatusMessage { get => _statusMessage; private set => Set(ref _statusMessage, value); }
+
+    // ── ★ FIX BATCH 6（指令 §9）：状态消息路由 ────────────────────────────────
+    //   唯一写入者仍是本 ViewModel：所有状态句经 SetXxx/AppendXxx 进入对应语义通道，
+    //   UI 只读通道（禁止在 View 里拼业务状态）。
+    //     · OperationalStatus   运行/流程状态        → 左侧提示面板
+    //     · UserHint            用户操作引导          → 左侧提示面板
+    //     · SecurityHint        凭据/账号/共享安全    → 「连接与安全提示」卡
+    //     · ErrorSummary        失败/拦下/异常摘要    → 左侧提示面板
+    //     · CurrentObjectStatus 当前对象（引擎真值）  → 左侧提示面板
+    //   ExecutionStatus 是**右侧执行卡专用短句**：截到第一句并限长，长文本一律归左侧面板，
+    //   从而不再让一根字符串把执行卡无限撑高（§9）。
+
+    /// <summary>右侧执行卡短句的字符上限；超出即截断（完整文本仍在 <see cref="StatusMessage"/> 与左侧面板）。</summary>
+    public const int ExecutionStatusMaxChars = 96;
+
+    private string _operationalStatus = string.Empty;
+    /// <summary>运行/流程状态（引擎与流程真值）。</summary>
+    public string OperationalStatus { get => _operationalStatus; private set => Set(ref _operationalStatus, value); }
+
+    private string _userHint = string.Empty;
+    /// <summary>用户操作引导（下一步该做什么）。</summary>
+    public string UserHint { get => _userHint; private set => Set(ref _userHint, value); }
+
+    private string _securityHint = string.Empty;
+    /// <summary>安全相关提示（凭据 / 账号 / 共享可用性）。</summary>
+    public string SecurityHint { get => _securityHint; private set => Set(ref _securityHint, value); }
+
+    private string _errorSummary = string.Empty;
+    /// <summary>错误摘要（失败 / 被拦下 / 异常）。</summary>
+    public string ErrorSummary { get => _errorSummary; private set => Set(ref _errorSummary, value); }
+
+    private string _currentObjectStatus = string.Empty;
+    /// <summary>当前对象状态（来自引擎的进度快照，不是 UI 自己推的）。</summary>
+    public string CurrentObjectStatus { get => _currentObjectStatus; private set => Set(ref _currentObjectStatus, value); }
+
+    private string _executionStatus = "等待 Step 1 连接旧电脑；连接完成并在 Step 2 选定内容后，这里会给出可执行的下一步。";
+    /// <summary>右侧执行卡显示的**短句**（第一句 + 限长）；细节在左侧提示面板。</summary>
+    public string ExecutionStatus { get => _executionStatus; private set => Set(ref _executionStatus, value); }
+
+    /// <summary>把状态句写入指定语义通道（同时更新聚合句与执行卡短句）。
+    /// 例外：<see cref="StatusChannel.CurrentObjectStatus"/> 是**每秒刷新的对象信息**，
+    /// 不覆盖聚合句/执行卡短句（否则运行中每帧都会把运行状态句顶掉）。</summary>
+    private void SetChannel(StatusChannel channel, string? text)
+    {
+        text ??= string.Empty;
+        switch (channel)
+        {
+            case StatusChannel.OperationalStatus: OperationalStatus = text; break;
+            case StatusChannel.UserHint: UserHint = text; break;
+            case StatusChannel.SecurityHint: SecurityHint = text; break;
+            case StatusChannel.ErrorSummary: ErrorSummary = text; break;
+            case StatusChannel.CurrentObjectStatus: CurrentObjectStatus = text; break;
+        }
+        if (channel == StatusChannel.CurrentObjectStatus) return;
+        _statusMessage = text;
+        Raise(nameof(StatusMessage));
+        ExecutionStatus = Shorten(text);
+    }
+
+    /// <summary>向已有通道句追加说明（空间守护 / 锁与 EFS / 超大规模等），不新开通道。</summary>
+    private void AppendChannel(StatusChannel channel, string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        var current = channel switch
+        {
+            StatusChannel.OperationalStatus => OperationalStatus,
+            StatusChannel.UserHint => UserHint,
+            StatusChannel.SecurityHint => SecurityHint,
+            StatusChannel.ErrorSummary => ErrorSummary,
+            _ => CurrentObjectStatus,
+        };
+        SetChannel(channel, current + text);
+    }
+
+    private void SetOperational(string? text) => SetChannel(StatusChannel.OperationalStatus, text);
+    private void SetUserHint(string? text) => SetChannel(StatusChannel.UserHint, text);
+    private void SetSecurityHint(string? text) => SetChannel(StatusChannel.SecurityHint, text);
+    private void SetErrorSummary(string? text) => SetChannel(StatusChannel.ErrorSummary, text);
+    private void AppendOperational(string? text) => AppendChannel(StatusChannel.OperationalStatus, text);
+
+    /// <summary>执行卡短句：压平换行、截到第一句、超长截断（左侧面板仍显示完整文本）。</summary>
+    internal static string Shorten(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+        var flat = text.Replace("\r", " ").Replace("\n", " ").Trim();
+        var cut = flat.IndexOf('。');
+        if (cut >= 0) flat = flat[..(cut + 1)];
+        if (flat.Length > ExecutionStatusMaxChars) flat = flat[..ExecutionStatusMaxChars].TrimEnd() + "…";
+        return flat;
+    }
 
     public string JobIdText => Ctx?.JobId ?? "（尚无任务）";
 
@@ -590,18 +826,55 @@ public sealed class MigrationSessionViewModel : ObservableObject
     private static readonly JobPhase[] ResumablePhases =
         [JobPhase.Running, JobPhase.Paused, JobPhase.Interrupted, JobPhase.AwaitingReview, JobPhase.CompletedWithErrors];
 
-    /// <summary>可"恢复任务"（阶段集合与 Core 的 JobManager.ResumablePhases 同口径）。</summary>
-    public bool CanResume => !IsRunning && Ctx is not null && ResumablePhases.Contains(Phase);
+    /// <summary>可"恢复任务"（阶段集合与 Core 的 JobManager.ResumablePhases 同口径）。
+    /// ★ FIX BATCH 2 ★ 两条独立通路：
+    ///   ① 引擎**已确认暂停**（PauseUiState == Paused）⇒ 恢复必须可用，**即使那一次运行还活着**
+    ///      （暂停达成于对象边界时，编排器会原地等请求文件消失，IsRunning 仍为 true）；
+    ///   ② 运行已结束、阶段可续传（Interrupted / CompletedWithErrors …）⇒ 启动新一次运行。
+    ///   "正在暂停中"一律禁用：此刻用户的两次相反意图会叠在一起。</summary>
+    public bool CanResume => Ctx is not null
+        && PauseUiState != PauseUiState.Pausing
+        && (PauseUiState == PauseUiState.Paused || (!IsRunning && ResumablePhases.Contains(Phase)));
 
     private bool _hasVerifyReport;
     /// <summary>可"尝试修复"：有任务且（有验证报告 / 有失败对象 / 上次完成但有错）。</summary>
     public bool CanRepair => !IsRunning && Ctx is not null
         && (_hasVerifyReport || FailedObjects > 0 || Phase is JobPhase.CompletedWithErrors or JobPhase.Interrupted);
 
-    /// <summary>可暂停（运行中且未暂停）。</summary>
-    public bool CanPause => IsRunning && !IsPaused;
-    /// <summary>可停止（运行中）。</summary>
+    /// <summary>可暂停（FIX BATCH 2 按钮矩阵）：运行中、且不在"已暂停 / 正在暂停"两个状态下。
+    /// 暂停失败时**重新可用**（文案变成「重试暂停」）——用户必须有一条重试的路。</summary>
+    public bool CanPause => IsRunning && PauseUiState is PauseUiState.Idle or PauseUiState.PauseFailed;
+    /// <summary>可停止（运行中）。"正在暂停中"也允许停止：用户仍需要一条能真正结束的路。</summary>
     public bool CanStop => IsRunning;
+
+    /// <summary>暂停按钮文案（状态机真值 ⇒ 文案，不反过来）。</summary>
+    public string PauseButtonText => PauseUiState switch
+    {
+        PauseUiState.Pausing => "正在暂停…",
+        PauseUiState.PauseFailed => "重试暂停",
+        PauseUiState.Paused => "已暂停",
+        _ => "暂停",
+    };
+
+    /// <summary>
+    /// 暂停状态的**唯一权威显示句**（BATCH 6 状态路由把它送进左栏运行状态主通道）。
+    /// 三句话分别对应三种真实情况，绝不含糊：
+    ///   · 正在暂停…（请求已受理，引擎尚未确认停住）
+    ///   · 已暂停（引擎确认 worker 停止；含达成时刻）
+    ///   · 暂停失败，迁移仍在进行（硬失败 SLA 内没停住）
+    /// </summary>
+    public string PauseStateText => PauseUiState switch
+    {
+        PauseUiState.Pausing => "⏳ 正在暂停…（请求已送达引擎，正在中止当前对象的传输）",
+        PauseUiState.Paused when _enginePauseAchievedAt is { } at =>
+            $"‖ 已暂停（{at.ToLocalTime():HH:mm:ss} 达成）：传输已停止，当前对象未完成，点「恢复任务」继续。",
+        PauseUiState.Paused => "‖ 已暂停：传输已停止，当前对象未完成，点「恢复任务」继续。",
+        PauseUiState.PauseFailed =>
+            "⚠ 暂停失败，迁移仍在进行：" + (_enginePauseFailureReason ?? "引擎未能在 10 秒内停止当前对象的传输") +
+            "。可点「重试暂停」，或点「停止」。",
+        PauseUiState.Resuming => "▶ 正在恢复…（已清除暂停请求，正在重建传输）",
+        _ => string.Empty,
+    };
 
     // ────────────────────────── 显示位（Step3 的真实来源）──────────────────────────
 
@@ -625,6 +898,35 @@ public sealed class MigrationSessionViewModel : ObservableObject
 
     private string _etaText = "—";
     public string EtaText { get => _etaText; private set => Set(ref _etaText, value); }
+
+    /// <summary>
+    /// ★ FIX BATCH 4（§7.1）★ 引擎最后一次送来的进度真值（顶层/底栏进度条、百分比、字节、速率、ETA
+    /// 的唯一来源）。null = 尚无引擎快照（启动前/测试路径）。
+    /// </summary>
+    private ProgressTruthSnapshot? _lastTruth;
+    public ProgressTruthSnapshot? LastTruth { get => _lastTruth; private set => Set(ref _lastTruth, value); }
+
+    /// <summary>
+    /// ★ UI Closure 2026-10-05（§2 P0）★ **UI 显示真值**（顶栏/底栏/百分比/字节的唯一来源）。
+    /// 与 <see cref="LastTruth"/> 的唯一区别：暂停 → 恢复的正常 catch-up 期内可能被
+    /// <see cref="ResumeDisplayFloor"/> 抬到"用户已看到的显示分子"（raw 追上后自动解除）；
+    /// <see cref="LastTruth"/> 永远保留引擎 raw 真值供诊断与解释，二者绝不互相污染。
+    /// </summary>
+    private ProgressTruthSnapshot? _presentationTruth;
+    public ProgressTruthSnapshot? PresentationTruth { get => _presentationTruth; private set => Set(ref _presentationTruth, value); }
+
+    // ── ★ UI Closure 2026-10-05（§2 P0）★ Resume 显示连续性 floor（说明见文件末尾 ResumeDisplayFloor）──
+    //   唯一写入者：ApplySnapshot（Apply + 暂停候选值）、ResumeAsync（Arm）、RunTransferCoreAsync（Clear）。
+    private readonly ResumeDisplayFloor _resumeDisplayFloor = new();
+    /// <summary>暂停期间"用户已经看到的最大显示分子"（下一次恢复的 floor 候选；只用引擎真值）。</summary>
+    private long? _pausedDisplayedBytes;
+    /// <summary><see cref="_pausedDisplayedBytes"/> 所属任务（换任务即作废，绝不跨任务抬高显示）。</summary>
+    private string? _pausedDisplayedJobId;
+
+    /// <summary>★ 只读诊断 ★ floor 是否生效（显示值高于引擎 raw 时为 true；日志据此解释）。</summary>
+    public bool ResumeDisplayFloorActive => _resumeDisplayFloor.IsActive;
+    /// <summary>★ 只读诊断 ★ 当前 floor 的字节数。</summary>
+    public long ResumeDisplayFloorBytes => _resumeDisplayFloor.FloorBytes;
 
     private int _failedObjects;
     public int FailedObjects
@@ -976,7 +1278,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
     {
         if (IsRunning)
         {
-            StatusMessage = "迁移正在进行中：请先「暂停」或「停止」，再重新预检。";
+            SetUserHint("迁移正在进行中：请先「暂停」或「停止」，再重新预检。");
             return false;
         }
         ArgumentNullException.ThrowIfNull(definition);
@@ -986,16 +1288,16 @@ public sealed class MigrationSessionViewModel : ObservableObject
         var customs = definition.CustomSelections;
         if (wholeShares.Count == 0 && customs.Count == 0)
         {
-            StatusMessage = "请先在 Step 1 勾选要迁移的共享，或在目录树里勾选要迁移的内容：" +
-                            "勾共享=整盘迁移；展开共享可精确勾选目录或单个文件。";
+            SetUserHint("请先在 Step 1 勾选要迁移的共享，或在目录树里勾选要迁移的内容：" +
+                            "勾共享=整盘迁移；展开共享可精确勾选目录或单个文件。");
             return false;
         }
-        if (string.IsNullOrWhiteSpace(definition.TargetRoot)) { StatusMessage = "请先指定目标路径。"; return false; }
+        if (string.IsNullOrWhiteSpace(definition.TargetRoot)) { SetUserHint("请先指定目标路径。"); return false; }
 
         // ---- 目标路径前置校验（与 WPF PrepareAsync 686-704 同口径，傻瓜操作防线）----
         if (definition.TargetRoot.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
         {
-            StatusMessage = $"目标路径包含非法字符（不能含 \" < > | 等）：{definition.TargetRoot}";
+            SetErrorSummary($"目标路径包含非法字符（不能含 \" < > | 等）：{definition.TargetRoot}");
             return false;
         }
         try
@@ -1003,11 +1305,11 @@ public sealed class MigrationSessionViewModel : ObservableObject
             var fullTarget = Path.GetFullPath(definition.TargetRoot.Trim());
             if (File.Exists(fullTarget))
             {
-                StatusMessage = $"目标位置已存在一个同名文件而不是文件夹：{fullTarget}。请换一个目标目录。";
+                SetUserHint($"目标位置已存在一个同名文件而不是文件夹：{fullTarget}。请换一个目标目录。");
                 return false;
             }
         }
-        catch (Exception ex) { StatusMessage = $"目标路径无效：{ex.Message}"; return false; }
+        catch (Exception ex) { SetErrorSummary($"目标路径无效：{ex.Message}"); return false; }
 
         // ---- 同主机+同目标已有未完成任务 → 询问续传或新建（与 WPF 706-725 同口径）----
         JobSummary? dup = null;
@@ -1022,21 +1324,21 @@ public sealed class MigrationSessionViewModel : ObservableObject
             if (dup is not null && Ctx is not null
                 && string.Equals(dup.JobId, Ctx.JobId, StringComparison.OrdinalIgnoreCase)) dup = null;
         }
-        catch (OperationCanceledException) { StatusMessage = "已取消。"; return false; }
+        catch (OperationCanceledException) { SetOperational("已取消。"); return false; }
         catch (Exception ex) { _log.Warning(ex, "未完成任务检测失败"); }
 
         if (resumeDecision == ResumeDecision.ResumeExisting)
         {
             if (dup is null)
             {
-                StatusMessage = "你选择了继续上次任务，但当前源/目标下没有找到未完成的任务：请重新「预检并生成计划」新建一个。";
+                SetUserHint("你选择了继续上次任务，但当前源/目标下没有找到未完成的任务：请重新「预检并生成计划」新建一个。");
                 return false;
             }
             _log.Information("用户选择续传既有任务 {JobId}（未新建）", dup.JobId);
             await AdoptExistingJobAsync(dup.JobDir, ct);
-            StatusMessage = $"已载入未完成任务 {dup.JobId}（{dup.PhaseText}）：" +
+            SetOperational($"已载入未完成任务 {dup.JobId}（{dup.PhaseText}）：" +
                             (dup.StateUnreliable ? "状态文件损坏，进度以回执为准。" : $"已传 {dup.Percent:0.0}%。") +
-                            "点「恢复任务」从断点继续（已完成的对象不会重传）；若要重新生成计划，请再点一次「预检并生成计划」。";
+                            "点「恢复任务」从断点继续（已完成的对象不会重传）；若要重新生成计划，请再点一次「预检并生成计划」。");
             return true;
         }
 
@@ -1045,9 +1347,9 @@ public sealed class MigrationSessionViewModel : ObservableObject
             // 页面没问过用户 → **绝不悄悄新建第二个任务**（同一份数据跑两条任务会在目标目录里互相打架）。
             // 交互由页面包提供（ContentDialog）：页面问完用户后带 CreateNew / ResumeExisting 重新调用本方法。
             PendingResumeCandidate = dup;
-            StatusMessage = $"该源电脑和目标路径下已有未完成任务：{dup.JobId}（{dup.PhaseText}" +
+            SetOperational($"该源电脑和目标路径下已有未完成任务：{dup.JobId}（{dup.PhaseText}" +
                             (dup.StateUnreliable ? "，状态文件损坏，进度以回执为准" : $"，已传 {dup.Percent:0.0}%") +
-                            "）。请选择「继续上次任务（已完成部分不重传）」或「创建全新任务」。";
+                            "）。请选择「继续上次任务（已完成部分不重传）」或「创建全新任务」。");
             _log.Information("检测到未完成任务 {JobId}，等待用户在界面上决定续传或新建（未创建任何新任务）", dup.JobId);
             return false;
         }
@@ -1061,7 +1363,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         // ★ 线程数定案：写进 job.json 的永远是解析后的真实整数（自动 ⇒ 16；4 ⇒ 4；8 ⇒ 8）
         definition.Options.Threads = ResolveThreads(SelectedMt);
 
-        StatusMessage = "正在预检…";
+        SetOperational("正在预检…");
         // ★ A.5（P1-4）：预检 = 进入"新任务"上下文。先把上一个任务的实时投影、验证投影与日志投影
         //   整批复位（否则上一轮的失败清单/当前对象/上一次验证结论会跟着新任务一起显示）。
         //   落在下面两行日志之前，保证日志面板里剩下的都是**本次预检**的真实行。
@@ -1103,15 +1405,27 @@ public sealed class MigrationSessionViewModel : ObservableObject
             {
                 var bad = pre.Checks.Where(c => !c.Pass && c.Severity == "Error").ToList();
                 foreach (var c in bad.Take(8)) AddFail("预检 · " + c.Name, c.Detail);
-                StatusMessage = $"预检未通过（{bad.Count} 项）：{bad.FirstOrDefault()?.Detail ?? "详见失败清单"}";
-                Log("ERROR", $"预检未通过（{bad.Count} 项）：{bad.FirstOrDefault()?.Detail ?? "详见失败清单"}");
+                // ★ 缺陷 A-01a：旧文案只贴第一条 Detail（"路径不存在或不可访问（检查共享名/权限）"）——
+                // 既不说**是哪条路径/哪项检查**，也不给下一步，用户不知道要去掉哪个勾。
+                // 现在按「检查名（原因）」列出失败项，并给一句可执行的下一步。
+                // 观察 O-A19-4：原写法用「检查名（Detail）」包一层括号，而 Detail 自身常带括号
+                // （如目标盘「…（技术细节：…）」），用户会看到「（…（…））」嵌套。
+                // 改为「检查名：Detail」并用 SubTitle 分隔，同时去掉 Detail 末尾句号避免「。。」。
+                var named = string.Join("；", bad.Take(3).Select(c => $"{c.Name}：{c.Detail.TrimEnd('。')}"));
+                var next = bad.Any(c => c.Name.StartsWith("源路径", StringComparison.Ordinal))
+                    ? "请回到第 1 步取消勾选读不到的那条共享（或换成对方开放的共享名后重试）。"
+                    : bad.Any(c => c.Name.Contains("目标盘", StringComparison.Ordinal))
+                        ? "请在右侧「目标根目录」改成这台电脑上真实存在的磁盘路径（例如 D:\\迁移目标），再点「预检并生成计划」。"
+                        : "请按上面的失败项提示修正后，再点「预检并生成计划」。";
+                SetErrorSummary($"预检未通过（{bad.Count} 项）：{named}。{next}");
+                Log("ERROR", $"预检未通过（{bad.Count} 项）：{named}");
                 return false;
             }
 
             var warns = pre.Checks.Where(c => !c.Pass && c.Severity == "Warning").ToList();
-            StatusMessage = warns.Count > 0
+            SetOperational(warns.Count > 0
                 ? $"预检通过（{warns.Count} 项提醒不阻断：{warns[0].Name} —— {warns[0].Detail}）正在扫描源数据…"
-                : "预检通过，正在扫描源数据（大容量磁盘可能需要几分钟）…";
+                : "预检通过，正在扫描源数据（大容量磁盘可能需要几分钟）…");
             Log("INFO", warns.Count > 0
                 ? $"预检通过（{warns.Count} 项提醒不阻断），开始扫描源数据…"
                 : "预检通过，开始扫描源数据…");
@@ -1140,8 +1454,8 @@ public sealed class MigrationSessionViewModel : ObservableObject
                     if (!ok)
                     {
                         _log.Warning("扫描残缺闸门拦截：{Count} 处不可访问，未生成可执行计划（Job {JobId}）", gate.Count, ctx.JobId);
-                        StatusMessage = $"已拦下：扫描存在 {gate.Count} 处不可访问的目录/文件，**未生成可执行计划**（左栏已逐条列出）。" +
-                                        "请修好权限/网络后重新「预检并生成计划」；确知风险仍要继续，请在确认框里选「我已知风险，仍要继续」。";
+                        SetErrorSummary($"已拦下：扫描存在 {gate.Count} 处不可访问的目录/文件，**未生成可执行计划**（左栏已逐条列出）。" +
+                                        "请修好权限/网络后重新「预检并生成计划」；确知风险仍要继续，请在确认框里选「我已知风险，仍要继续」。");
                         return false;
                     }
                     definition.AllowIncompleteScan = true;
@@ -1169,24 +1483,27 @@ public sealed class MigrationSessionViewModel : ObservableObject
             ActualBytesText = "0 B";
             ObjectText = $"{plan.Objects.Count}";
             BalanceText = $"计划 {Format.Bytes(plan.TotalBytes)}　·　实际落盘 0 B";
-            StatusMessage = $"计划已生成（Job {ctx.JobId}）：{plan.Objects.Count} 个对象，共 {Format.Bytes(plan.TotalBytes)}。" +
-                            (observed.Warnings.Count > 0 ? $" ⚠ {observed.Warnings[0]}" : string.Empty);
-            StatusMessage += SpaceGuardNote(definition.TargetRoot, plan.TotalBytes);
-            StatusMessage += LockAndEfsNote(observed);
+            SetOperational($"计划已生成（Job {ctx.JobId}）：{plan.Objects.Count} 个对象，共 {Format.Bytes(plan.TotalBytes)}。" +
+                            (observed.Warnings.Count > 0 ? $" ⚠ {observed.Warnings[0]}" : string.Empty));
+            AppendOperational(SpaceGuardNote(definition.TargetRoot, plan.TotalBytes));
+            AppendOperational(LockAndEfsNote(observed));
             // ★ 真实计数（原先 UI 上那句「计划生成完成：对象 0 个，合计 0 B」是硬编码假数据，已删除）：
             //   这里写的就是本次 Planner 真实产出的对象数与计划字节数。
             Log("INFO", $"计划生成完成：对象 {plan.Objects.Count} 个，合计 {Format.Bytes(plan.TotalBytes)}（Job {ctx.JobId}）。");
             // 文件数只有扫描后才知道：超大规模时明确告知“全程流式、无文件数上限”
             if (observed.TotalFiles >= 5_000_000)
-                StatusMessage += $"（文件量 {observed.TotalFiles:N0}，属超大规模——本任务传输/验证全程流式处理，无文件数上限）";
+                AppendOperational($"（文件量 {observed.TotalFiles:N0}，属超大规模——本任务传输/验证全程流式处理，无文件数上限）");
             HasPlanRaise();
             await RefreshExistingJobsAsync(null, ct);
             return true;
         }
-        catch (OperationCanceledException) { StatusMessage = "已取消。"; return false; }
+        catch (OperationCanceledException) { SetOperational("已取消。"); return false; }
         catch (Exception ex)
         {
-            StatusMessage = $"准备失败：{ex.Message}";
+            // F13：准备阶段同样不许把英文原始异常串抛到界面上（F5 只修了传输路径）。
+            //   实测原文：`准备失败：Access to the path '…\JOB-…\receipts' is denied.`
+            //   这里走"准备阶段"专用翻译：此刻没有任务、也没有已复制数据，所以不说"任务已停止/数据不会重传"。
+            SetErrorSummary("准备失败：" + PCMig.Core.Util.TransferFailureTranslator.ExplainPrepare(ex));
             _log.Error(ex, "WinUI Prepare 失败");
             return false;
         }
@@ -1255,13 +1572,13 @@ public sealed class MigrationSessionViewModel : ObservableObject
         var ctx = Ctx;
         if (ctx is null)
         {
-            StatusMessage = "尚无任务：不能开始迁移（请先在 Step 2 生成计划）。";
+            SetUserHint("尚无任务：不能开始迁移（请先在 Step 2 生成计划）。");
             LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-no-task", null));
             return Task.CompletedTask;
         }
         if (ctx.Plan is null || ctx.Plan.Objects.Count == 0)
         {
-            StatusMessage = "计划里没有任何对象：不能开始迁移。";
+            SetUserHint("计划里没有任何对象：不能开始迁移。");
             LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-no-plan-objects", null));
             return Task.CompletedTask;
         }
@@ -1269,14 +1586,24 @@ public sealed class MigrationSessionViewModel : ObservableObject
     }
 
     /// <summary>
+    /// ★ FIX BATCH 7 ★ 用户点「恢复」那一刻的阶段（<see cref="ResumeAsync"/> 写入）。
+    /// null ⇒ 没有发生过恢复动作，等待判据退回"用当前阶段当起点"。
+    /// </summary>
+    private JobPhase? _resumeOriginPhase;
+
+    /// <summary>
     /// 恢复任务：载入既有任务（可选）后继续。**沿用 job.json 里的线程值**，绝不改写任务定义。
     /// </summary>
+    /// <remarks>
+    /// ★ FIX BATCH 7 ★ <see cref="_resumeOriginPhase"/> 由本方法写入：它记录"用户是在哪个阶段点的恢复"，
+    /// 是 <see cref="WaitForResumeSettledAsync"/> 唯一的起点真值（详见那里的现场证据）。
+    /// </remarks>
     public Task ResumeAsync(string? password, IProgress<string>? progress = null, CancellationToken ct = default)
     {
         var ctx = Ctx;
         if (ctx is null)
         {
-            StatusMessage = "请先选择要恢复的任务（Step 2/4 的未完成任务列表）。";
+            SetUserHint("请先选择要恢复的任务（Step 2/4 的未完成任务列表）。");
             Log("WARN", "恢复任务被拒绝：尚未选择要恢复的任务。");
             LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-no-task", null));
             return Task.CompletedTask;
@@ -1289,17 +1616,55 @@ public sealed class MigrationSessionViewModel : ObservableObject
             new TrnPauseObservedPayload("Cooperative", null),
             DiagnosticLevel.Information, DiagnosticOutcome.Accepted);
         ctx.ClearPauseRequest();
+        // ★ FIX BATCH 2 ★ 恢复是"用户意图"，本轮起界面进入「正在恢复…」：暂停请求文件已清除，
+        //   但引擎要等下一轮运行才重新开始传 ⇒ 此刻若继续显示"已暂停"就是假话，若显示"进行中"也是假话。
+        _pauseRequestWritten = false;
+        _pauseRetryAfterUtc = null;
+        PauseUiState = PauseUiState.Resuming;
+        // ★ FIX BATCH 7 ★ 恢复的"起点阶段"必须在**发起恢复时**记下（旧实现是在等待时才判断，
+        //   而那时整轮运行可能已经跑完 ⇒ 判据恒 false，一次真实成功的恢复被记成 resume-unsettled）。
+        _resumeOriginPhase = Phase;
+        // ★ UI Closure 2026-10-05（§2 P0）★ 恢复前先给**显示连续性**上锁：候选 = 用户已经看到的显示分子
+        //   （暂停期间的最大显示值）。它只抬高 UI 显示，不参与 skip / verify / receipt / success
+        //   （见 ResumeDisplayFloor 的分层纪律）；引擎 raw 追上后自动解除。
+        var floorCandidate = Math.Max(
+            LastTruth?.DisplayedTransferredBytes ?? 0L,
+            _pausedDisplayedJobId is not null && string.Equals(_pausedDisplayedJobId, ctx.JobId, StringComparison.OrdinalIgnoreCase)
+                ? _pausedDisplayedBytes ?? 0L
+                : 0L);
+        if (_resumeDisplayFloor.Arm(ctx.JobId, floorCandidate))
+            _log.Information("Resume 显示连续性 floor 已启用：job={JobId} floorBytes={FloorBytes} —— 仅用于显示，不代表对象已完成（引擎真值追上后自动解除）",
+                ctx.JobId, floorCandidate);
         Log("INFO", $"用户确认恢复任务 {ctx.JobId}（{PhaseText}）：已清除暂停请求，沿用 job.json 里的原线程值续传。");
-        return RunTransferCoreAsync(ctx, password, onlyObjectIds: null, forceRecopy: false, progress, ct);
+        // ★ FIX BATCH 2 ★ 原地恢复：引擎那一次运行**还活着**（暂停达成于对象边界时，编排器正原地等
+        //   请求文件消失）⇒ 请求刚被清除，引擎会在至多一个轮询周期后自己继续。
+        //   这里**绝不能**再启动第二次运行：RunTransferCoreAsync 的 re-entry 守卫虽然拦得住，
+        //   但会把"正在恢复…"改写成"已有一次运行在进行中"，用户看到的就是一次没说清的点击。
+        if (IsRunning)
+        {
+            SetOperational("▶ 已恢复：引擎正在从暂停点继续传输（未重传已完成对象）。");
+            return Task.CompletedTask;
+        }
+        // ★ UI Closure 2026-10-05（§2 P0）★ 这一次运行**是**"用户发起的恢复" ⇒ 携带显示连续性 floor。
+        return RunTransferCoreAsync(ctx, password, onlyObjectIds: null, forceRecopy: false, progress, ct, resumeContinuity: true);
     }
 
-    /// <summary>暂停：Cooperative（当前对象跑完停）/ Immediate（立即终止 robocopy）。</summary>
+    /// <summary>
+    /// 暂停：请求引擎**立即中止当前对象的传输**（FIX BATCH 1 新语义：两种模式都不再"等当前对象传完"）。
+    ///
+    /// ★ FIX BATCH 2（去乐观谎报）★ 本方法只做两件**诚实**的事：
+    ///   ① 把"用户要暂停"写进请求文件（写入结果如实报告）；
+    ///   ② 把界面推进到「正在暂停…」——**不是**「已暂停」。
+    /// 真正的"已暂停"只能由引擎真值推进（`ProgressSnapshot.PauseState == Paused`，见 <see cref="ApplyPauseTruth"/>）。
+    /// 旧实现在这里写 `IsPaused = true` + `LastPauseOutcome = Accepted`，真机上因此出现
+    /// "界面写着已暂停、传输从未停止"（JOB-20261004-171522-b785，8/8 次点击、0 次引擎确认）。
+    /// </summary>
     public Task PauseAsync(bool immediate = false)
     {
         var ctx = Ctx;
         if (ctx is null || !IsRunning)
         {
-            StatusMessage = "当前没有正在进行的迁移，无需暂停。";
+            SetUserHint("当前没有正在进行的迁移，无需暂停。");
             // 没有在跑的运行 ⇒ 暂停请求不可能被受理：如实 Rejected（不写 Succeeded）。
             LastPauseOutcome = ActionOutcomePolicy.ForRequest(honored: false, "pause-requested", "pause-not-running");
             return Task.CompletedTask;
@@ -1309,22 +1674,29 @@ public sealed class MigrationSessionViewModel : ObservableObject
             // ★ A.5（P1-5）★ 用户即时操作的反馈属"绝对不可被节流延迟的量"：
             //   先 Flush 掉累积的批量行，再写状态（状态句/按钮态在下一帧即变，不等到 50ms 节拍）。
             FlushPendingNow();
+            // 重试标记必须**先于**写请求文件设置：引擎的 PauseRequestedAt 由它自己在本轮尝试里打时间戳，
+            // 只有"重试时点 <= 引擎本轮时间戳"才说明引擎报的是**新一轮**结论（否则会被当成上一轮的旧结论）。
+            _pauseRetryAfterUtc = DateTime.UtcNow;
             // ★ D6.1 §16 ★ 暂停请求（意图）——真正的写入结果由 Core 的 PauseRequestWriteResult 记录。
             PublishRepair(TransferEvents.PauseRequested,
                 new TrnPauseObservedPayload(immediate ? "Immediate" : "Cooperative", null),
                 DiagnosticLevel.Information, DiagnosticOutcome.Accepted);
             ctx.RequestPause(immediate);
-            IsPaused = true;
-            StatusMessage = immediate
-                ? "已请求立即暂停：引擎正在终止当前 robocopy…"
-                : "已请求暂停：当前对象跑完即停（已完成的对象不会重传）。";
-            // D6.3 §11：请求已受理；**真停不停是异步的**（Core 的 PauseObserved），所以只写 Accepted。
+            // ① 本地事实：请求已写入成功（引擎尚未表态）⇒ 界面只能说"正在暂停…"
+            _pauseRequestWritten = true;
+            PauseUiState = PauseUiState.Pausing;
+            SetOperational("⏳ 正在暂停…已请求引擎中止当前对象的传输" +
+                "（不再等当前对象跑完；已完成的对象不会重传）。");
+            // D6.3 §11：这里能证明的只有"请求已受理"；**真停不停是异步的**（引擎会给出 PauseObserved/PauseFailed）。
             LastPauseOutcome = ActionOutcomePolicy.ForRequest(honored: true, "pause-requested", "pause-not-running");
         }
         catch (Exception ex)
         {
-            StatusMessage = $"暂停请求写入失败：{ex.Message}";
+            SetErrorSummary($"暂停请求写入失败：{ex.Message}");
             _log.Warning(ex, "Pause 失败");
+            _pauseRequestWritten = false;
+            _pauseRetryAfterUtc = null;
+            PauseUiState = PauseUiState.Idle;
             LastPauseOutcome = new ActionOutcomeDecision(DiagnosticOutcome.Failed, "pause-request-failed");
         }
         return Task.CompletedTask;
@@ -1344,7 +1716,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
                 new TrnPauseObservedPayload("Cancel", null),
                 DiagnosticLevel.Information, DiagnosticOutcome.Accepted);
             _cts?.Cancel();
-            StatusMessage = "已请求停止：已拷入的部分全部保留，可点「恢复任务」续传。";
+            SetOperational("已请求停止：已拷入的部分全部保留，可点「恢复任务」续传。");
             _log.Information("WinUI 会话停止请求");
             // 有在跑的运行 ⇒ 取消请求已投递（Accepted）；没有 ⇒ 什么都没停成，如实 Skipped。
             LastStopOutcome = running
@@ -1353,7 +1725,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            StatusMessage = $"停止请求失败：{ex.Message}";
+            SetErrorSummary($"停止请求失败：{ex.Message}");
             LastStopOutcome = new ActionOutcomeDecision(DiagnosticOutcome.Failed, "stop-request-failed");
         }
         return Task.CompletedTask;
@@ -1370,13 +1742,26 @@ public sealed class MigrationSessionViewModel : ObservableObject
         IReadOnlyCollection<string>? onlyObjectIds,
         bool forceRecopy,
         IProgress<string>? progress,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool resumeContinuity = false)
     {
         if (IsRunning)
         {
-            StatusMessage = "已有一次运行在进行中。";
+            SetOperational("已有一次运行在进行中。");
             LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-already-running", null));
             return;
+        }
+
+        // ★ UI Closure 2026-10-05（§2 P0）★ **只有"用户发起的恢复"**才允许保留显示连续性 floor：
+        //   重新开始（RunAsync）与修复（RepairAsync）都是新语义，显示连续性不跨"重新开始" ⇒ 显式解除。
+        //   同时把 raw 回退基线复位（换了一轮运行的 raw 序列不可比）。
+        if (!resumeContinuity && _resumeDisplayFloor.Clear("new-run"))
+            _log.Information("Resume 显示连续性 floor 已解除（本轮不是恢复：reason=new-run）");
+        _resumeDisplayFloor.ResetRawTracking(ctx.JobId);
+        if (!resumeContinuity)
+        {
+            _pausedDisplayedBytes = null;
+            _pausedDisplayedJobId = null;
         }
 
         // ---- 扫描残缺闸门（v0.3.8）：未确认不允许开跑（Core 的权威判定，不重写规则）----
@@ -1384,7 +1769,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         if (scanGate.Blocks)
         {
             foreach (var p in scanGate.Paths.Take(12)) AddFail("扫描不可访问", p);
-            StatusMessage = "已拦下：扫描存在不可访问位置。\n" + ScanGate.BuildBlockMessage(scanGate, cli: false);
+            SetErrorSummary("已拦下：扫描存在不可访问位置。\n" + ScanGate.BuildBlockMessage(scanGate, cli: false));
             LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-scan-gate-blocked", null));
             return;
         }
@@ -1393,7 +1778,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         using var jobLock = JobLock.TryAcquire(ctx, TimeSpan.FromSeconds(30), out var lockReason);
         if (jobLock is null)
         {
-            StatusMessage = lockReason;
+            SetErrorSummary(lockReason);
             LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-job-lock-busy", null));
             return;
         }
@@ -1457,7 +1842,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                StatusMessage = $"连接失败：{ex.Message}";
+                SetErrorSummary($"连接失败：{ex.Message}");
                 _log.Error(ex, "WinUI 传输前连接失败");
                 LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, null, "run-smb-connect-failed"));
                 CleanupRun(session);
@@ -1467,7 +1852,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         else if (!string.IsNullOrEmpty(effUser))
         {
             // 不硬拦：Windows 可能还缓存着连接；失败原因由引擎照实报（与 WPF Repair 口径一致）
-            StatusMessage = $"该任务使用账号 {effUser}：本次未提供密码，若 Windows 仍缓存着连接可正常继续，否则会以共享不可用失败。";
+            SetSecurityHint($"该任务使用账号 {effUser}：本次未提供密码，若 Windows 仍缓存着连接可正常继续，否则会以共享不可用失败。");
         }
 
         // ★ A.5（P1-5）★ 快照走 **VM 自己的同步 IProgress 实现**（不再用 `Progress<T>`）：
@@ -1487,12 +1872,14 @@ public sealed class MigrationSessionViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             Phase = JobPhase.Interrupted;
-            StatusMessage = "已取消（可续传）：已拷入的部分保留，点「恢复任务」继续。";
+            SetOperational("已取消（可续传）：已拷入的部分保留，点「恢复任务」继续。");
         }
         catch (Exception ex)
         {
             runFaulted = true;
-            StatusMessage = $"传输异常：{ex.Message}";
+            // F5：不再把英文原始异常串（含内部临时文件名）直接抛到界面上；译成"哪个存储不可写/任务什么状态/怎么办"，
+            //      原始异常（含堆栈）照旧进日志。
+            SetErrorSummary(PCMig.Core.Util.TransferFailureTranslator.Explain(ex));
             _log.Error(ex, "WinUI 传输异常");
         }
         finally
@@ -1531,8 +1918,21 @@ public sealed class MigrationSessionViewModel : ObservableObject
         _cts = null;
         IsRunning = false;
         IsRepairing = false;
-        IsPaused = Phase == JobPhase.Paused;
+        // ★ FIX BATCH 2 ★ 收尾时的暂停真值（不再 `IsPaused = Phase == Paused` 一句了事）：
+        //   · 引擎确认过 PauseFailed ⇒ **保留失败态**：FinishRunAsync 必须把"那次暂停其实没成功"如实写进状态句，
+        //     绝不能因为"运行结束了"就把它忘掉（否则用户永远不知道自己的暂停请求落空了）；
+        //   · 阶段确实是 Paused（引擎/persisted 真值）⇒ 保留"已暂停"，用户还需要看到它才能点恢复；
+        //   · 其余（运行中途结束、请求还挂着但从未达成）⇒ 回到"没有暂停在进行"，并清掉本地请求标记。
+        if (PauseUiState != PauseUiState.PauseFailed)
+        {
+            _pauseRequestWritten = false;
+            _pauseRetryAfterUtc = null;
+            PauseUiState = Phase == JobPhase.Paused ? PauseUiState.Paused : PauseUiState.Idle;
+        }
         _lastCompletedCount = -1;
+        // ★ FIX BATCH 6（§9）★ 运行收尾 ⇒ 引擎不再有"当前对象"：对象通道必须清空，
+        //   否则左侧提示面板会残留最后一次快照的对象名（"运行都结束了还写着正在传某个对象"）。
+        SetChannel(StatusChannel.CurrentObjectStatus, string.Empty);
         RaiseDerived();
     }
 
@@ -1558,7 +1958,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         DataLabel = finished ? "实际落盘 / 计划" : "已传 / 计划";
         BalanceText = $"计划 {Format.Bytes(end.TotalBytes)}　·　实际落盘 {Format.Bytes(end.CompletedBytes)}";
 
-        StatusMessage = phase switch
+        SetOperational(phase switch
         {
             JobPhase.Completed => "✔ 迁移完成！建议点「验证」确认一致性，然后「打开报告」。",
             // 两条分支都必须明确"未完整完成"，并给出实际完成比例与可恢复路径；
@@ -1570,23 +1970,57 @@ public sealed class MigrationSessionViewModel : ObservableObject
             JobPhase.CompletedWithErrors =>
                 $"◐ 迁移**未完整完成**（存在失败对象，实际完成 {ActualPercent(end):0.#}%：" +
                 $"{Format.Bytes(end.CompletedBytes)} / {Format.Bytes(end.TotalBytes)}）。" +
-                "失败清单已逐条列出「对象号 + 路径 + 退出码译文」；请打开报告核对，处理后点「恢复任务」只补差异。",
+                "失败清单已逐条列出「对象号 + 路径 + 退出码译文」；请打开报告核对，处理后点「恢复任务」只补差异。" +
+                // ★ 观察项 O-B03-2（Low，已确认）★ 权限被拒的子目录会在目标端留下**同名空目录**：
+                //   目录结构看着"像已经迁过去了"，点开却是空的。不构成数据损坏（失败项已在清单里），
+                //   但人工核对时会被误导，所以必须在结果页说清楚，不能只靠用户自己发现。
+                "　另请注意：**因权限被拒而没能读取的子目录，目标端可能只留下一个同名空目录（里面没有任何文件）**——" +
+                "看到空目录不等于已迁移，请以本页失败清单为准。",
+            // ★ UI Closure 2026-10-05（用户指令 UI-02）★ 暂停文案与"保留真实进度"同口径：
+            //   百分比取自**未归零**的真值，并同时给出剩余字节 —— 避免出现"剩余 100% 未传"却已有
+            //   已传字节的自相矛盾表述（暂停打断第一个大对象时最容易触发）。
             JobPhase.Paused =>
-                $"‖ 已暂停：已完成 {end.CompletedObjects}/{end.TotalObjects} 个对象，剩余 {Math.Max(0, 100.0 - end.Percent):0.#}% 未传——点「恢复任务」续传。",
+                $"‖ 已暂停：已完成 {end.CompletedObjects}/{end.TotalObjects} 个对象，剩余 {Format.Bytes(Math.Max(0, end.TotalBytes - end.CompletedBytes))}（{Math.Max(0, 100.0 - end.Percent):0.#}%）未传——点「恢复任务」续传。",
             JobPhase.Interrupted => "⏸ 已中断（可续传）：点「恢复任务」继续。",
             JobPhase.Failed => $"✘ 迁移失败：{end.LastError ?? "详见日志"}",
             _ => $"阶段结束：{phase}",
-        };
+        });
+
+        // ★ FIX BATCH 2 ★ 收尾时绝不"忘记"一次未达成的暂停：用户的暂停请求失败过、而迁移后来跑完了，
+        //   这件事必须留在状态句里（Diagnostics 侧的 expectation FAILED + incident 由 BATCH 3 承担）。
+        //   旧实现里这个信息只活到下一次快照为止，用户永远不知道自己那次暂停其实落空了。
+        if (_enginePauseState == PauseState.PauseFailed && phase != JobPhase.Paused)
+        {
+            SetErrorSummary("⚠ 本次运行中有一次暂停请求**没有达成**（" +
+                (_enginePauseFailureReason ?? "引擎未能在硬失败 SLA 内停止当前对象的传输") +
+                "）；下面的结束状态是它之后的真实结果。" + Environment.NewLine + StatusMessage);
+        }
 
         if (onlyObjectIds is { Count: > 0 })
         {
             // 定向修复路径：重拷结束后自动复验（与 WPF RepairAsync 同口径）
             IsRepairing = false;
-            StatusMessage = $"重拷结束（{phase}），正在重新校验…";
+            var repairCount = onlyObjectIds.Count;
+            SetOperational($"重拷结束（{phase}），正在重新校验…");
             Log("INFO", $"重拷结束（{phase}）：正在重新校验（基础一致性检查）…");
             await VerifyAsync(VerifyLevel.L1_CountSize, null, ct);
+            // ★ F2b（D16 实测：点「修复」重拷一趟后界面没有任何新提示，用户看不出修复做了什么）★
+            //   复验文案会把上面那句"重拷结束"整个覆盖掉，而"这次修复重拷了哪些对象"是用户唯一能拿到的
+            //   修复记录（作业记录里的 attempt 现在会递增，但界面必须自己说清楚）。两者合成一句，不丢信息。
+            var repairScope = repairCount == 1 ? "1 个对象" : $"{repairCount} 个对象";
+            SetOperational($"重拷结束（{phase}，本次修复重拷 {repairScope}）：{StatusMessage}");
+            Log("INFO", $"本次修复重拷范围：{repairScope}（复验结论见上方状态栏）");
         }
         await RefreshExistingJobsAsync(null, ct);
+
+        // ★ C04B-1（2026-10-04 真机：LAB-DST01 硬断电 → 恢复 → 把那个被中断的任务续传完成）★
+        //   Step4 的「未完成任务检测」那句是**进入本页时的探测快照**，不会自己过期。
+        //   现场同屏同时出现两句话：
+        //     ①「迁移已完成，可在本页做基础一致性检查并打开报告。…」
+        //     ②「检测到未完成的迁移任务：任务 JOB-…｜…｜Interrupted。点「恢复任务」可从断点继续…」
+        //   用户会被 ② 误导为"还要再恢复一次"。任务一结束就重新探测一次，让这句话与真实状态一致
+        //   （探测自带世代号，旧的在途结果不会反向覆盖；未连接时探测入口本来就不做 IO）。
+        if (IsSourceConnected) RunUnfinishedProbeNow();
     }
 
     // ────────────────────────── 方法：验证 / 修复 ──────────────────────────
@@ -1600,14 +2034,14 @@ public sealed class MigrationSessionViewModel : ObservableObject
         var ctx = Ctx;
         if (ctx is null)
         {
-            StatusMessage = "尚无任务：不能验证。";
+            SetUserHint("尚无任务：不能验证。");
             Log("WARN", "验证被拒绝：尚无任务。");
             LastVerifyOutcome = ActionOutcomePolicy.ForVerify(new VerifyBusinessResult(false, false, "verify-no-task", false, false));
             return;
         }
         if (IsRunning)
         {
-            StatusMessage = "迁移/修复进行中：请先结束运行再验证。";
+            SetUserHint("迁移/修复进行中：请先结束运行再验证。");
             Log("WARN", "验证被拒绝：迁移/修复进行中。");
             LastVerifyOutcome = ActionOutcomePolicy.ForVerify(new VerifyBusinessResult(false, false, "verify-already-running", false, false));
             return;
@@ -1617,7 +2051,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         if (!gate.CanVerify)
         {
             AddFail("验证被拒绝", gate.Reason);
-            StatusMessage = gate.Reason;
+            SetErrorSummary(gate.Reason);
             Log("WARN", "验证被闸门拒绝：" + gate.Reason);
             _log.Warning("验证被闸门拒绝: {Reason}", gate.Reason);
             LastVerifyOutcome = ActionOutcomePolicy.ForVerify(new VerifyBusinessResult(false, false, "verify-gate-blocked", false, false));
@@ -1625,7 +2059,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         }
 
         Phase = JobPhase.Verifying;
-        StatusMessage = $"正在验证（{DescribeLevel(level)}）…";
+        SetOperational($"正在验证（{DescribeLevel(level)}）…");
         Log("INFO", $"开始验证：{DescribeLevel(level)}（闸门通过：有计划且源路径可达）");
         VerifyReport? report = null;
         var canceled = false;
@@ -1640,7 +2074,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
             _hasVerifyReport = true;
             TotalHashSampled = report.Objects.Sum(o => o.HashSampled);
             LastVerifyResultText = DescribeVerifyOutcome(report, level);
-            StatusMessage = LastVerifyResultText;
+            SetOperational(LastVerifyResultText);
             // 结论行：文案只能来自 DescribeVerifyOutcome（L1 绝不说成"完整性验证通过"）。
             Log("INFO", "验证结论：" + LastVerifyResultText);
             // 内容级证据行：抽样数为 0 时必须明确说"不代表内容一致"（NoHashSampleText）。
@@ -1652,11 +2086,11 @@ public sealed class MigrationSessionViewModel : ObservableObject
             Raise(nameof(CanRepair));
             await RefreshExistingJobsAsync(null, ct);
         }
-        catch (OperationCanceledException) { canceled = true; StatusMessage = "验证已取消。"; }
+        catch (OperationCanceledException) { canceled = true; SetOperational("验证已取消。"); }
         catch (Exception ex)
         {
             faulted = true;
-            StatusMessage = $"验证失败：{ex.Message}";
+            SetErrorSummary($"验证失败：{ex.Message}");
             Log("ERROR", $"验证失败：{ex.Message}");
             _log.Error(ex, "WinUI 验证失败");
         }
@@ -1680,14 +2114,14 @@ public sealed class MigrationSessionViewModel : ObservableObject
         var ctx = Ctx;
         if (ctx is null)
         {
-            StatusMessage = "尚无任务：不能修复。";
+            SetUserHint("尚无任务：不能修复。");
             Log("WARN", "尝试修复被拒绝：尚无任务。");
             LastRepairOutcome = ActionOutcomePolicy.ForRepair(new RepairBusinessResult(0, 0, 0, "repair-no-task"));
             return;
         }
         if (IsRunning)
         {
-            StatusMessage = "已有一次运行在进行中。";
+            SetOperational("已有一次运行在进行中。");
             Log("WARN", "尝试修复被拒绝：已有一次运行在进行中。");
             LastRepairOutcome = ActionOutcomePolicy.ForRepair(new RepairBusinessResult(0, 0, 0, "repair-already-running"));
             return;
@@ -1707,7 +2141,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
             PublishRepair(RepairEvents.RepairNoTargets,
                 new RprTargetsPayload(0, beforeMismatch, 0, plannedObjects), DiagnosticLevel.Information,
                 DiagnosticOutcome.Skipped);
-            StatusMessage = "没有需要修复的对象：上次校验（若有）全部一致，也没有失败对象。";
+            SetOperational("没有需要修复的对象：上次校验（若有）全部一致，也没有失败对象。");
             Log("INFO", "尝试修复：没有需要修复的对象（上次校验全部一致且无失败对象）——未启动重拷。");
             LastRepairOutcome = ActionOutcomePolicy.ForRepair(new RepairBusinessResult(0, 0, 0, null));
             return;
@@ -1715,8 +2149,8 @@ public sealed class MigrationSessionViewModel : ObservableObject
         PublishRepair(RepairEvents.RepairTargetsCollected,
             new RprTargetsPayload(targets.Count, beforeMismatch, Math.Max(0, targets.Count - beforeMismatch), plannedObjects),
             DiagnosticLevel.Information, DiagnosticOutcome.Succeeded);
-        StatusMessage = (beforeMismatch > 0 ? $"修复前 {beforeMismatch} 个对象不一致" : $"修复前有 {targets.Count} 个对象需要重拷")
-            + (forceOverwrite ? "，将从共享强制覆盖同名文件" : "，按增量补差异");
+        SetOperational((beforeMismatch > 0 ? $"修复前 {beforeMismatch} 个对象不一致" : $"修复前有 {targets.Count} 个对象需要重拷")
+            + (forceOverwrite ? "，将从共享强制覆盖同名文件" : "，按增量补差异"));
         Log("INFO", $"开始修复：{targets.Count} 个对象需要重拷"
             + (beforeMismatch > 0 ? $"（修复前 {beforeMismatch} 个对象不一致）" : string.Empty)
             + (forceOverwrite ? "，强制覆盖同名文件" : "，按增量补差异"));
@@ -1792,18 +2226,18 @@ public sealed class MigrationSessionViewModel : ObservableObject
     public async Task OpenReportAsync(CancellationToken ct = default)
     {
         var ctx = Ctx;
-        if (ctx is null) { StatusMessage = "尚无任务：没有可生成的报告。"; Log("WARN", "打开报告被拒绝：尚无任务（没有可生成的报告）。"); return; }
+        if (ctx is null) { SetUserHint("尚无任务：没有可生成的报告。"); Log("WARN", "打开报告被拒绝：尚无任务（没有可生成的报告）。"); return; }
         try
         {
             var jobLog = LogBootstrap.CreateJobLogger(ctx.JobDir, ctx.JobId);
             var path = await Task.Run(() => new ReportGenerator(ctx, jobLog).Generate(), ct);
             Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-            StatusMessage = $"报告已生成并打开：{path}";
+            SetOperational($"报告已生成并打开：{path}");
             Log("INFO", $"报告已生成并打开：{path}");
         }
         catch (Exception ex)
         {
-            StatusMessage = $"报告生成失败：{ex.Message}";
+            SetErrorSummary($"报告生成失败：{ex.Message}");
             Log("ERROR", $"报告生成失败：{ex.Message}");
             _log.Error(ex, "WinUI 报告生成失败");
         }
@@ -1819,7 +2253,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(target)) target = TargetRoot;
         if (string.IsNullOrWhiteSpace(target))
         {
-            StatusMessage = "尚无目标路径：没有可打开的目标文件夹。";
+            SetUserHint("尚无目标路径：没有可打开的目标文件夹。");
             Log("WARN", "打开目标文件夹被拒绝：尚未指定目标路径。");
             return;
         }
@@ -1827,17 +2261,17 @@ public sealed class MigrationSessionViewModel : ObservableObject
         {
             if (!Directory.Exists(target))
             {
-                StatusMessage = $"目标文件夹不存在（可能已被移动或删除）：{target}";
+                SetErrorSummary($"目标文件夹不存在（可能已被移动或删除）：{target}");
                 Log("WARN", $"打开目标文件夹被拒绝：目录不存在 {target}");
                 return;
             }
             Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
-            StatusMessage = $"已打开目标文件夹：{target}";
+            SetOperational($"已打开目标文件夹：{target}");
             Log("INFO", $"已打开目标文件夹：{target}");
         }
         catch (Exception ex)
         {
-            StatusMessage = $"打开目标文件夹失败：{ex.Message}";
+            SetErrorSummary($"打开目标文件夹失败：{ex.Message}");
             Log("ERROR", $"打开目标文件夹失败：{ex.Message}");
             _log.Error(ex, "WinUI 打开目标文件夹失败: {Target}", target);
         }
@@ -1854,12 +2288,12 @@ public sealed class MigrationSessionViewModel : ObservableObject
         {
             Directory.CreateDirectory(LogBootstrap.AppLogDir);
             Process.Start(new ProcessStartInfo(LogBootstrap.AppLogDir) { UseShellExecute = true });
-            StatusMessage = $"已打开日志目录：{LogBootstrap.AppLogDir}";
+            SetOperational($"已打开日志目录：{LogBootstrap.AppLogDir}");
             Log("INFO", $"已打开日志目录：{LogBootstrap.AppLogDir}");
         }
         catch (Exception ex)
         {
-            StatusMessage = $"打开日志目录失败：{ex.Message}";
+            SetErrorSummary($"打开日志目录失败：{ex.Message}");
             Log("ERROR", $"打开日志目录失败：{ex.Message}");
             _log.Error(ex, "WinUI 打开日志目录失败: {Dir}", LogBootstrap.AppLogDir);
         }
@@ -1903,7 +2337,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
     public async Task<bool> PromptResumeIfAnyAsync(string? targetRoot, CancellationToken ct = default)
     {
         var host = Host;
-        if (string.IsNullOrWhiteSpace(host)) { StatusMessage = "尚未连接旧电脑：无法检测未完成任务。"; Log("WARN", "未完成任务检测被跳过：尚未连接旧电脑。"); return false; }
+        if (string.IsNullOrWhiteSpace(host)) { SetUserHint("尚未连接旧电脑：无法检测未完成任务。"); Log("WARN", "未完成任务检测被跳过：尚未连接旧电脑。"); return false; }
         try
         {
             var target = string.IsNullOrWhiteSpace(targetRoot) ? TargetRoot : targetRoot;
@@ -1926,11 +2360,11 @@ public sealed class MigrationSessionViewModel : ObservableObject
             if (Ctx is null)
             {
                 await AdoptExistingJobAsync(unfinished.JobDir, ct);
-                StatusMessage = $"检测到未完成的迁移任务：{desc}。已载入，点「恢复任务」可从中断处继续（已完成的对象不会重传）。";
+                SetOperational($"检测到未完成的迁移任务：{desc}。已载入，点「恢复任务」可从中断处继续（已完成的对象不会重传）。");
             }
             else
             {
-                StatusMessage = $"检测到未完成的迁移任务：{desc}。请先结束当前任务，再决定是否续传该任务。";
+                SetUserHint($"检测到未完成的迁移任务：{desc}。请先结束当前任务，再决定是否续传该任务。");
             }
             Log("WARN", $"检测到未完成的迁移任务（未自动恢复）：{desc}");
             return true;
@@ -1938,7 +2372,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.Warning(ex, "断点提醒检测失败");
-            StatusMessage = $"未完成任务检测失败：{ex.Message}";
+            SetErrorSummary($"未完成任务检测失败：{ex.Message}");
             return false;
         }
     }
@@ -2338,21 +2772,37 @@ public sealed class MigrationSessionViewModel : ObservableObject
             BalanceText = $"计划 {Format.Bytes(st.TotalBytes)}　·　实际落盘 {Format.Bytes(st.CompletedBytes)}";
             // ★ A.5（P1-4）：失败对象数也按**本任务存档**重建（改前会留着上一个任务/上一轮运行的内存值）。
             FailedObjects = unreliable ? 0 : st.FailedObjects;
-            // 暂停态同样按本任务的真实 Phase 重建（不是"清成 false"，而是与本任务存档一致）。
-            IsPaused = Phase == JobPhase.Paused;
+            // ★ FIX BATCH 2 ★ 暂停态按**本任务存档的暂停真值**重建：不只是"Phase 是不是 Paused"，
+            //   还要能读出"当时请求过暂停、有没有达成、失败原因是什么"——App 崩溃/关机后重启，
+            //   这些字段仍然在 job-state.json 里（FIX BATCH 1 持久化），界面必须把它们说清楚。
+            _pauseRequestWritten = false;
+            _pauseRetryAfterUtc = null;
+            ApplyPauseTruth(st.PauseState, st.PauseRequestedUtc, st.PauseAchievedUtc, st.PauseOutcome, st.PauseFailureReason);
+            if (PauseUiState == PauseUiState.Idle && Phase == JobPhase.Paused) PauseUiState = PauseUiState.Paused;
             _hasVerifyReport = ctx.LoadVerify() is not null;
             TotalHashSampled = 0;   // 旧报告里的抽样数在加载时不重算（避免把历史数据当本次证据）
             RaiseDerived();
 
-            StatusMessage = unreliable
-                ? "⚠ 状态文件 job-state.json 损坏或缺失，进度无法显示（故意不写 0.0%，以免被当成「一点没传」）。" +
-                  "点「恢复任务」会按回执重建进度，已完成的对象不会重传。"
+            // ★ FIX BATCH 6（§9）★ 这条三叉必须**按语义分流**，不能整句只写一个通道：
+            //   · job-state.json 损坏 ⇒ 真问题 ⇒ ErrorSummary；
+            //   · 载入成功（含 CompletedWithErrors 的"没传完"警告）⇒ 运行状态 ⇒ OperationalStatus。
+            //   （此前一条 SetErrorSummary 包住整句，导致"已载入任务…"这种正常信息也被当成报错红字。）
+            if (unreliable)
+            {
+                SetErrorSummary("⚠ 状态文件 job-state.json 损坏或缺失，进度无法显示（故意不写 0.0%，以免被当成「一点没传」）。" +
+                                "点「恢复任务」会按回执重建进度，已完成的对象不会重传。");
+            }
+            else if (Phase == JobPhase.CompletedWithErrors)
+            {
                 // ★ A.5（P1-3）：载入的旧任务若是 CompletedWithErrors，必须明说"没传完 + 实际比例 + 可恢复"。
-                : Phase == JobPhase.CompletedWithErrors
-                    ? $"已载入任务 {ctx.JobId}（{PhaseText}）：{ObjectText} 个对象，实际完成 {ActualPercent(st):0.#}%" +
-                      $"（{Format.Bytes(st.CompletedBytes)} / {Format.Bytes(st.TotalBytes)}）——**没有全部传完**，" +
-                      "点「尝试修复」或「恢复任务」补齐（已完成的对象不会重传）。"
-                    : $"已载入任务 {ctx.JobId}（{PhaseText}）：{ObjectText} 个对象，计划 {PlanBytesText}。";
+                SetOperational($"已载入任务 {ctx.JobId}（{PhaseText}）：{ObjectText} 个对象，实际完成 {ActualPercent(st):0.#}%" +
+                               $"（{Format.Bytes(st.CompletedBytes)} / {Format.Bytes(st.TotalBytes)}）——**没有全部传完**，" +
+                               "点「尝试修复」或「恢复任务」补齐（已完成的对象不会重传）。");
+            }
+            else
+            {
+                SetOperational($"已载入任务 {ctx.JobId}（{PhaseText}）：{ObjectText} 个对象，计划 {PlanBytesText}。");
+            }
             Log("INFO", $"已载入任务 {ctx.JobId}（{PhaseText}）：{ObjectText} 个对象，计划 {PlanBytesText}" +
                         (unreliable ? "；job-state.json 损坏或缺失，进度以回执为准。" : "。"));
             await RefreshRowsFromReceiptsAsync(ct);
@@ -2361,7 +2811,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            StatusMessage = $"载入任务失败：{ex.Message}";
+            SetErrorSummary($"载入任务失败：{ex.Message}");
             _log.Error(ex, "载入既有任务失败: {Job}", jobDirOrId);
             return false;
         }
@@ -2453,37 +2903,145 @@ public sealed class MigrationSessionViewModel : ObservableObject
         _batcher.SetLatestSnapshot(s);
     }
 
+    /// <summary>
+    /// 暂停 UI 状态机的**唯一**转换入口（FIX BATCH 2）。
+    ///
+    /// 输入是引擎真值（随每个 <see cref="ProgressSnapshot"/> 送达），本地只有两个变量：
+    ///   · <c>_pauseRequestWritten</c>：请求文件刚写入成功、引擎还没看到 ⇒ 允许显示"正在暂停…"（诚实地说"正在试"）。
+    ///   · <c>_pauseRetryAfterUtc</c>：用户重新点击暂停的时点 ⇒ 用它区分"引擎对上一轮的旧失败结论"（不重复显示）。
+    ///
+    /// 三条硬纪律：
+    ///   ① **只有引擎**能把它推进到 Paused / PauseFailed；UI 自己最多推到 Pausing。
+    ///   ② 引擎报 PauseFailed 就是"暂停失败，迁移仍在进行"——绝不能被下一次 Running 快照无声抹掉。
+    ///   ③ 引擎报 Paused 之后，本地"已写入请求"的标记作废（真值接管），避免恢复后残留"正在暂停…"。
+    /// </summary>
+    private void ApplyPauseTruth(PauseState engineState, DateTime? requestedAt, DateTime? achievedAt,
+        PauseOutcomeKind outcome, string? failureReason)
+    {
+        _enginePauseState = engineState;
+        _enginePauseRequestedAt = requestedAt;
+        _enginePauseAchievedAt = achievedAt;
+        _enginePauseOutcome = outcome;
+        _enginePauseFailureReason = failureReason;
+
+        // 引擎给的失败结论是否属于"用户已经重新点击过"的那一轮：是则视为过期（界面继续显示"正在暂停…"）。
+        var staleFailure = engineState == PauseState.PauseFailed && _pauseRetryAfterUtc is { } retryAfter
+            && (requestedAt is null || requestedAt < retryAfter);
+        // 新一轮结论已到 ⇒ 重试标记作废（否则它会一直把后续失败判成"旧结论"）。
+        if (!staleFailure && _pauseRetryAfterUtc is { } fresh && requestedAt is not null && requestedAt >= fresh)
+            _pauseRetryAfterUtc = null;
+
+        PauseUiState next;
+        if (staleFailure)
+        {
+            next = PauseUiState.Pausing;
+        }
+        else
+        {
+            switch (engineState)
+            {
+                case PauseState.Paused:
+                    _pauseRequestWritten = false;   // 引擎接管真值
+                    next = PauseUiState.Paused;
+                    break;
+                case PauseState.PauseFailed:
+                    _pauseRequestWritten = false;   // 引擎说它停不住 ⇒ 界面不再自称"正在暂停"
+                    next = PauseUiState.PauseFailed;
+                    break;
+                case PauseState.Pausing:
+                    next = PauseUiState.Pausing;
+                    break;
+                default:
+                    // 引擎侧没有暂停态：若本地请求刚写入、引擎尚未看到，仍如实显示"正在暂停…"；
+                    // 否则就是"没有暂停在进行"（也把 Resuming 收束回 Idle）。
+                    next = _pauseRequestWritten ? PauseUiState.Pausing : PauseUiState.Idle;
+                    break;
+            }
+        }
+
+        PauseUiState = next;
+
+        // 暂停的业务结果只以引擎为准（D6.3：请求受理 = Accepted；真的停住 = Succeeded；停不住 = Failed）。
+        if (engineState == PauseState.Paused)
+            LastPauseOutcome = new ActionOutcomeDecision(DiagnosticOutcome.Succeeded, "pause-achieved");
+        else if (engineState == PauseState.PauseFailed)
+            LastPauseOutcome = new ActionOutcomeDecision(DiagnosticOutcome.Failed, "pause-failed");
+    }
+
     /// <summary>把引擎的进度快照翻译成显示位（唯一入口；所有 UI 更新都在 UI 线程）。</summary>
     private void ApplySnapshot(ProgressSnapshot s)
     {
         // ★ A.5（P1-3）：进度条只有在**真 Completed** 时才走满；CompletedWithErrors 用引擎报的实际比例。
         var finished = s.Phase is JobPhase.Completed or JobPhase.CompletedWithErrors;
         Phase = s.Phase;
-        IsPaused = s.Phase == JobPhase.Paused;
+        // ★ FIX BATCH 2 ★ 唯一转换入口：暂停真值只来自引擎（含 PauseState/PauseRequestedAt/PauseAchievedAt/
+        //   PauseOutcome/PauseFailureReason），UI 绝不自己反推、也绝不被"点击"直接标成已暂停。
+        ApplyPauseTruth(s.PauseState, s.PauseRequestedAt, s.PauseAchievedAt, s.PauseOutcome, s.PauseFailureReason);
         IsFinished = finished;
         DataLabel = finished ? "实际落盘 / 计划" : "已传 / 计划";
-        Percent = s.Phase == JobPhase.Completed ? 100.0 : s.Percent;
-        ProgressText = $"{Format.Bytes(s.CompletedBytes)} / {Format.Bytes(s.TotalBytes)}";
-        PlanBytesText = Format.Bytes(s.TotalBytes);
-        ActualBytesText = Format.Bytes(s.CompletedBytes);
-        BalanceText = $"计划 {Format.Bytes(s.TotalBytes)}　·　实际落盘 {Format.Bytes(s.CompletedBytes)}";
-        EngineSpeedText = s.BytesPerSecond > 0 ? Format.Speed(s.BytesPerSecond) : "—";
-        EtaText = double.IsNaN(s.EtaSeconds) ? "—" : Format.Eta(s.EtaSeconds);
+        // ★ FIX BATCH 4（§7.1）★ 进度真值唯一来源：引擎随快照送来的 ProgressTruthSnapshot。
+        //   下面的百分比/字节/速率/ETA 全部由它派生（顶栏与底栏因此天然同源）；Truth 为 null 只出现在
+        //   测试或兼容路径，此时按快照原始字段如实显示，绝不自己另算一套。
+        // ★ UI Closure 2026-10-05（§2 P0）★ 真值分工（连续性只在**显示层**，业务权威仍是 Completed 回执）：
+        //   · LastTruth       = 引擎 raw 真值（诊断/解释用，永不改写）；
+        //   · PresentationTruth = 供 UI 显示的真值（顶栏/底栏/百分比/字节/速率/ETA 的唯一来源）——
+        //     只在"暂停 → 恢复"的正常 catch-up 期被 floor 抬高，引擎 raw 追上 floor 后自动解除
+        //     （原因码见 ResumeDisplayFloor）。
+        var rawTruth = s.Truth;
+        var continuity = _resumeDisplayFloor.Apply(rawTruth, s.Phase, Ctx?.JobId);
+        RecordProgressTransition(s, rawTruth, continuity);
+        LastTruth = rawTruth;
+        var displayTruth = continuity.Effective;
+        // ★ 真机复验返修（2026-10-05 run2）★ UI 消费端（顶栏 Step3ProgressPage.PushState /
+        //   底栏 MainWindow.PushFooter）读的是**显示真值**，不是 raw：
+        //   真机证据 —— run2 恢复后 raw 重建为 0（committed 回执尚未重建），floor 已把显示真值托在
+        //   10.7 GB，但两处消费端仍在读 LastTruth(raw) ⇒ 用户看到 99.9% → 0.0% 的倒退。
+        PresentationTruth = displayTruth;
+        // ★ UI Closure 2026-10-05（§2 P0）★ 暂停期间记住"用户已经看到的最大显示分子"——
+        //   它是下一次恢复的 floor 候选（只取引擎真值，绝不凭空造数）。
+        if (s.Phase == JobPhase.Paused)
+        {
+            var pausedDisplayed = displayTruth?.DisplayedTransferredBytes ?? s.CompletedBytes;
+            if (_pausedDisplayedBytes is null || pausedDisplayed > _pausedDisplayedBytes.Value)
+                _pausedDisplayedBytes = pausedDisplayed;
+            _pausedDisplayedJobId = Ctx?.JobId;
+        }
+        Percent = displayTruth?.Percent ?? (s.Phase == JobPhase.Completed ? 100.0 : s.Percent);
+        var displayedBytes = displayTruth?.DisplayedTransferredBytes ?? s.CompletedBytes;
+        var plannedBytes = displayTruth?.PlannedBytes ?? s.TotalBytes;
+        ProgressText = $"{Format.Bytes(displayedBytes)} / {Format.Bytes(plannedBytes)}";
+        PlanBytesText = Format.Bytes(plannedBytes);
+        ActualBytesText = Format.Bytes(displayedBytes);
+        BalanceText = $"计划 {Format.Bytes(plannedBytes)}　·　实际落盘 {Format.Bytes(displayedBytes)}";
+        var truthSpeed = displayTruth?.SpeedBytesPerSecond ?? s.BytesPerSecond;
+        var truthEta = displayTruth?.EtaSeconds ?? s.EtaSeconds;
+        EngineSpeedText = truthSpeed > 0 ? Format.Speed(truthSpeed) : "—";
+        EtaText = double.IsNaN(truthEta) ? "—" : Format.Eta(truthEta);
         ObjectText = $"{s.CompletedObjects}/{s.TotalObjects}" + (s.FailedObjects > 0 ? $"（失败 {s.FailedObjects}）" : "");
         FailedObjects = s.FailedObjects;
         CurrentObjectPath = s.CurrentObjectPath ?? string.Empty;
         StallSeconds = s.StallSeconds;
 
-        StatusMessage = s.Phase == JobPhase.Paused
-            ? $"‖ 已暂停：已完成 {s.CompletedObjects}/{s.TotalObjects} 个对象，剩余 {Math.Max(0, 100.0 - s.Percent):0.#}% 未传" +
-              $"（{Format.Bytes(Math.Max(0, s.TotalBytes - s.CompletedBytes))}）——点「恢复任务」续传（已完成的对象不会重传）。"
-            // ★ A.5（P1-3）：引擎给 CompletedWithErrors 的结束语**不再原样透传**（引擎文案可能像"完成"）。
-            //   这里统一改写成"未完整完成 + 实际比例 + 可恢复/可修复"，与 FinishRunAsync 同一口径。
-            : s.Phase == JobPhase.CompletedWithErrors
-                ? $"◐ 迁移**未完整完成**（存在失败对象，实际完成 {s.Percent:0.#}%：" +
-                  $"{Format.Bytes(s.CompletedBytes)} / {Format.Bytes(s.TotalBytes)}）。" +
-                  "失败清单已逐条列出；点「尝试修复」或「恢复任务」处理（已完成的对象不会重传）。"
-                : s.Message;
+        // ★ FIX BATCH 2 ★ 暂停/恢复进行中的状态句**必须**以暂停真值为准：
+        //   引擎还没确认停住时，绝不允许下面那行 `s.Message`（普通运行文案）把「正在暂停…」顶掉——
+        //   这正是旧实现"点击后一会儿又变回进行中"的假象来源之一。
+        if (PauseUiState is PauseUiState.Pausing or PauseUiState.PauseFailed)
+        {
+            SetOperational(PauseStateText);
+        }
+        else
+        {
+            SetOperational(s.Phase == JobPhase.Paused
+                ? $"‖ 已暂停：已完成 {s.CompletedObjects}/{s.TotalObjects} 个对象，剩余 {Math.Max(0, 100.0 - Percent):0.#}% 未传" +
+                  $"（{Format.Bytes(Math.Max(0, plannedBytes - displayedBytes))}）——点「恢复任务」续传（已完成的对象不会重传）。"
+                // ★ A.5（P1-3）：引擎给 CompletedWithErrors 的结束语**不再原样透传**（引擎文案可能像"完成"）。
+                //   这里统一改写成"未完整完成 + 实际比例 + 可恢复/可修复"，与 FinishRunAsync 同一口径。
+                : s.Phase == JobPhase.CompletedWithErrors
+                    ? $"◐ 迁移**未完整完成**（存在失败对象，实际完成 {s.Percent:0.#}%：" +
+                      $"{Format.Bytes(s.CompletedBytes)} / {Format.Bytes(s.TotalBytes)}）。" +
+                      "失败清单已逐条列出；点「尝试修复」或「恢复任务」处理（已完成的对象不会重传）。"
+                    : s.Message);
+        }
 
         // 当前对象 + 停滞提示（"界面长时间不动"是用户判断卡死的直接原因）
         if (!string.IsNullOrEmpty(s.CurrentObjectPath) && s.Phase == JobPhase.Running)
@@ -2504,6 +3062,12 @@ public sealed class MigrationSessionViewModel : ObservableObject
             StallHintText = string.Empty;
         }
 
+        // ★ FIX BATCH 6（§9）★ 当前对象通道：只由**引擎真值**写入（对象 id 来自快照，
+        //   不是 UI 从路径反推），供左侧提示面板显示"现在在传什么"。运行结束即清空。
+        SetChannel(StatusChannel.CurrentObjectStatus, s.Phase == JobPhase.Running && !string.IsNullOrEmpty(s.CurrentObjectId)
+            ? $"当前对象 {s.CurrentObjectId}" + (string.IsNullOrEmpty(s.CurrentObjectPath) ? string.Empty : $"\n{s.CurrentObjectPath}")
+            : string.Empty);
+
         if (s.CompletedObjects != _lastCompletedCount)
         {
             _lastCompletedCount = s.CompletedObjects;
@@ -2511,6 +3075,95 @@ public sealed class MigrationSessionViewModel : ObservableObject
         }
         ApplyObjectRowStatus(s);
     }
+
+    // ── ★ UI Closure 2026-10-05（§5 最小可诊断性）★ 进度真值过渡的结构化记录 ──────────────
+    //   纪律：只在"阶段改变 / Pause-Resume / 恢复后前若干样本 / InFlightSource 改变 / AttemptEpoch 改变 /
+    //   RetryState 改变 / progress 向后 / 单次跳变超阈值"时记录（**绝不** 5 Hz 全量写盘）；
+    //   它只记录，绝不改业务行为、绝不改显示值（显示值由 ResumeDisplayFloor 决定）。
+    private JobPhase? _transitionPhase;
+    private ProgressTruthSource? _transitionSource;
+    private long _transitionEpoch = -1;
+    private RetryState? _transitionRetry;
+    private long _transitionDisplayedBytes = -1;
+    private double _transitionPercent;
+    private int _resumeSampleCount;
+    private PauseUiState _transitionPause = PauseUiState.Idle;
+
+    /// <summary>单次跳变阈值：max(8 MiB, 计划量的 2%)。</summary>
+    private static long TransitionJumpThreshold(long plannedBytes)
+        => Math.Max(8L * 1024 * 1024, plannedBytes > 0 ? (long)(plannedBytes * 0.02) : 0L);
+
+    /// <summary>
+    /// ★ UI Closure 2026-10-05（§5）★ 把进度过渡写成**结构化单行日志**（落盘走 Serilog；未解释回退同时上
+    /// UI 日志面板）。对"未解释的进度回退"给出 <c>UnexpectedProgressRegression</c>（Error 级）。
+    /// </summary>
+    private void RecordProgressTransition(ProgressSnapshot s, ProgressTruthSnapshot? rawTruth, ResumeFloorOutcome continuity)
+    {
+        try
+        {
+            var raw = rawTruth?.DisplayedTransferredBytes ?? s.CompletedBytes;
+            var planned = rawTruth?.PlannedBytes ?? s.TotalBytes;
+            var percentNow = rawTruth?.Percent ?? s.Percent;
+
+            var phaseChanged = _transitionPhase != s.Phase;
+            var sourceChanged = rawTruth is not null && _transitionSource != rawTruth.InFlightSource;
+            var epochChanged = rawTruth is not null && _transitionEpoch != rawTruth.AttemptEpoch;
+            var retryChanged = rawTruth is not null && _transitionRetry != rawTruth.RetryState;
+            var pauseChanged = _transitionPause != PauseUiState;
+            var jumped = _transitionDisplayedBytes >= 0
+                && Math.Abs(raw - _transitionDisplayedBytes) >= TransitionJumpThreshold(planned);
+            var regressed = continuity.RawRegressionBytes > 0;
+            var resumeWindow = _resumeDisplayFloor.IsActive && _resumeSampleCount < 10;
+
+            if (phaseChanged || sourceChanged || epochChanged || retryChanged || pauseChanged
+                || jumped || regressed || resumeWindow || continuity.ClearedThisCall)
+            {
+                var jobId = Ctx?.JobId ?? "-";
+                var previousBytes = _transitionDisplayedBytes < 0
+                    ? "n/a"
+                    : _transitionDisplayedBytes.ToString(CultureInfo.InvariantCulture);
+                var line = string.Create(CultureInfo.InvariantCulture,
+                    $"ProgressTruthTransition job={jobId} phase={s.Phase} previousDisplayedBytes={previousBytes} " +
+                    $"newDisplayedBytes={raw} previousPercent={_transitionPercent:0.###} newPercent={percentNow:0.###} " +
+                    $"committed={rawTruth?.CommittedBytes ?? -1} inFlight={rawTruth?.InFlightConfirmedBytes ?? -1} " +
+                    $"source={rawTruth?.InFlightSource.ToString() ?? "n/a"} object={rawTruth?.CurrentObjectId ?? "-"} " +
+                    $"epoch={rawTruth?.AttemptEpoch ?? -1} retry={rawTruth?.RetryState.ToString() ?? "n/a"} " +
+                    $"pause={PauseUiState} floorActive={continuity.FloorActive} floorBytes={continuity.FloorBytes} " +
+                    $"floorCleared={continuity.ClearedThisCall} clearReason={continuity.ClearReason} " +
+                    $"rawRegressionBytes={continuity.RawRegressionBytes} utc={DateTime.UtcNow:O}");
+
+                if (regressed && !ProgressRegressionExplained(rawTruth, s.Phase, continuity))
+                {
+                    _log.Error("UnexpectedProgressRegression（进度出现未解释回退）：{ProgressTransition}", line);
+                    Log("ERROR", "进度出现未解释回退（UnexpectedProgressRegression）：" + line);
+                }
+                else
+                {
+                    _log.Information("{ProgressTransition}", line);
+                }
+            }
+
+            _transitionPhase = s.Phase;
+            _transitionSource = rawTruth?.InFlightSource;
+            _transitionEpoch = rawTruth?.AttemptEpoch ?? -1;
+            _transitionRetry = rawTruth?.RetryState;
+            _transitionDisplayedBytes = raw;
+            _transitionPercent = percentNow;
+            _transitionPause = PauseUiState;
+            _resumeSampleCount = _resumeDisplayFloor.IsActive ? _resumeSampleCount + 1 : 0;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "进度过渡记录失败（已吞掉，不影响显示与业务）");
+        }
+    }
+
+    /// <summary>回退是否有解释：本轮刚解除 floor / 显式回滚或重试轮次 / 停在暂停或中断态。</summary>
+    private static bool ProgressRegressionExplained(ProgressTruthSnapshot? rawTruth, JobPhase phase, ResumeFloorOutcome continuity)
+        => continuity.ClearedThisCall
+           || (rawTruth is not null && rawTruth.RetryState != RetryState.None)
+           || phase is JobPhase.Paused or JobPhase.Interrupted or JobPhase.Canceled
+              or JobPhase.Completed or JobPhase.CompletedWithErrors;
 
     /// <summary>按进度快照标注"当前对象"的行状态。</summary>
     private void ApplyObjectRowStatus(ProgressSnapshot s)
@@ -2732,7 +3385,11 @@ public sealed class MigrationSessionViewModel : ObservableObject
         LogLines.Clear();
         FailedObjects = 0;
         IsRepairing = false;
-        IsPaused = false;
+        // ★ FIX BATCH 2 ★ 换成新任务 ⇒ 上一个任务的暂停真值必须整体清空（否则新任务界面上会残留
+        //   "已暂停 / 暂停失败"这类属于**上一个任务**的结论）。
+        _pauseRequestWritten = false;
+        _pauseRetryAfterUtc = null;
+        ApplyPauseTruth(PauseState.None, null, null, PauseOutcomeKind.None, null);
         _lastCompletedCount = -1;
     }
 
@@ -2941,6 +3598,16 @@ public sealed class MigrationSessionViewModel : ObservableObject
         var pump = _flushPump;
         if (pump is null) return;
         try { pump.Stop(); } catch { /* 关闭期异常不得外溢 */ }
+        // ★ C-C08-1 修复（真机实证，2026-10-04）★ 停泵之后必须**丢弃实例**：
+        //   生产泵 DispatcherQueueUiFlushPump.Stop() 是**终态**（_stopped=true 后 Start() 直接 return，
+        //   见 UiFlushPump.cs:75-108），而本字段是 `??=` 复用的。旧实现只调 Stop 不清字段，
+        //   于是同会话「停止 → 立即恢复」时 run-2 的 StartFlushTimer 拿到的是同一个**死泵**：
+        //   快照只进 _batcher 的最新值槽位、**再没有任何节拍来排空**，底栏进度就冻结在
+        //   「0.0% / 0 B」上，直到某次显式 FlushPendingNow（点停止/收尾）才跳到真实值
+        //   ——真机 C08 reg2/diag2 在已传 19.59 GB(=40.1%) 时界面仍显示 0 B，属真值分裂。
+        //   关闭路径不受影响：StopUiRefresh 末尾置 _uiRefreshStopped=true，
+        //   StartFlushTimer 的第一道闸门就是它，绝不让节拍在关窗后复活。
+        _flushPump = null;
     }
 
     /// <summary>
@@ -3057,6 +3724,17 @@ public sealed class MigrationSessionViewModel : ObservableObject
         Raise(nameof(CanRepair));
         Raise(nameof(CanPause));
         Raise(nameof(CanStop));
+        // ★ FIX BATCH 2 ★ 暂停真值的派生位（按钮矩阵与状态句都从这里广播；数字区不在此列）
+        Raise(nameof(IsPaused));
+        Raise(nameof(IsPausing));
+        Raise(nameof(IsPauseFailed));
+        Raise(nameof(PauseButtonText));
+        Raise(nameof(PauseStateText));
+        Raise(nameof(EnginePauseState));
+        Raise(nameof(EnginePauseOutcome));
+        Raise(nameof(PauseRequestedAt));
+        Raise(nameof(PauseAchievedAt));
+        Raise(nameof(PauseFailureReason));
         Raise(nameof(CanVerifyNow));
         Raise(nameof(VerifyBlockedReason));
         Raise(nameof(HasJob));
@@ -3110,3 +3788,205 @@ public interface IUnfinishedProbeDebouncePump
     /// <summary>是否有一个尚未到期的窗口在计时（诊断/契约用）。</summary>
     bool IsArmed { get; }
 }
+
+/// <summary>
+/// UI 侧暂停状态机（FIX BATCH 2）。
+///
+/// 它与引擎真值 <see cref="PauseState"/> **不是**一回事，差在"请求已发出但引擎还没表态"这一段：
+///   · <see cref="Idle"/>       —— 没有暂停在进行（正常运行/未运行）。
+///   · <see cref="Pausing"/>    —— 请求已写入（或引擎已受理），**尚未**确认 worker 停住 ⇒ 只能显示"正在暂停…"。
+///   · <see cref="Paused"/>     —— 引擎确认 worker 已停止、暂停达成 ⇒ 才允许显示"已暂停"，Resume 才可用。
+///   · <see cref="PauseFailed"/>—— 引擎在硬失败 SLA 内没能停住 ⇒ 必须显示"暂停失败，迁移仍在进行"。
+///   · <see cref="Resuming"/>   —— 用户已确认恢复、请求文件已清除，正在重建传输。
+///
+/// 纪律：**只有引擎能把它推进到 Paused / PauseFailed**；UI 自己最多推到 Pausing（诚实地说"正在试"）。
+/// </summary>
+public enum PauseUiState
+{
+    /// <summary>没有暂停在进行。</summary>
+    Idle = 0,
+    /// <summary>正在暂停…（请求已发出/已受理，引擎尚未确认停住）。</summary>
+    Pausing = 1,
+    /// <summary>已暂停（引擎确认停住）。</summary>
+    Paused = 2,
+    /// <summary>暂停失败，迁移仍在进行。</summary>
+    PauseFailed = 3,
+    /// <summary>正在恢复…。</summary>
+    Resuming = 4,
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ★ UI Closure 2026-10-05（§2 P0：暂停 42.9% → 恢复后掉到 ~24.8% → 过一会回 42.9%）★
+// ══════════════════════════════════════════════════════════════════════════════
+/// <summary>
+/// Resume 显示连续性 floor —— **纯逻辑、零 WinUI 依赖**（因此可被
+/// <c>tests\PCMig.Core.Tests\PCMig.Core.Tests.csproj</c> 源码链入并直接断言行为，
+/// 见 <c>ResumeProgressContinuityTests</c>）。
+///
+/// 【它解决什么】用户**已经看到**过的显示进度，在"暂停 → 恢复"的正常 catch-up 期间不得无解释倒退。
+///   真机现场（D6.3 / UI-Closure）：暂停时 42.9% → 点「恢复任务」后立刻掉到 ~24.8% → 过一会又回 42.9%。
+///   根因不在 UI：从"已暂停且这一次运行已收尾"恢复走的是**新一轮 RunAsync**，它只从
+///   <c>Status == Completed</c> 的回执重建权威进度（<c>TransferOrchestrator.RunAsync</c> 的 <c>baseBytes</c>，
+///   <c>state.CompletedBytes = baseBytes</c>），而暂停时用户看到的分子里含 in-flight 已确认字节
+///   （<c>PollProgressAsync</c> 的 <c>state.CompletedBytes = truth.DisplayedTransferredBytes</c>）
+///   ⇒ 新一轮从 committed 起算，显示值先跳到 24.8%，再由 robocopy 续传逐段追回 42.9%。
+///
+/// 【分层纪律（绝不可越界）】
+///   · ① Committed / Durable Progress —— 权威 = Completed Receipt，决定 skip / CompletedObjects / 最终判定；
+///        **绝不经过本类型**（本类型不写回执、不动 job-state、不参与 skip / verify / success）。
+///   · ② Resume Presentation Floor —— 本类型：只抬高 UI 侧显示分子与百分比，**不代表对象已完成**。
+///   · 引擎真值一旦追上 floor（rawDisplayed ≥ floor）即自动解除，显示完全跟随 raw truth。
+///
+/// 【何时解除（都必须带原因，不允许静默倒退）】
+///   job-changed（换了任务）/ explicit-rollback（RetryState.RollingBack）/
+///   phase-&lt;X&gt;（不再是 Running/Paused）/ plan-complete / truth-caught-up。
+///   ★ 注意 ★ RetryState.Retrying **不在**解除清单里：恢复后的正常 catch-up 会短暂进入 Retrying，
+///   那不是"允许显示回退"的语义事件（真机复验 run2 证据，见 Apply）。
+///
+/// 【它同时负责】raw（引擎真值）样本间的回退检测（<see cref="LastRawRegressionBytes"/>）——
+///   与 floor 无关：即使没有任何 floor，raw 真值倒退也必须被记录（§5）。
+/// </summary>
+internal sealed class ResumeDisplayFloor
+{
+    /// <summary>容差：raw 显示值下降超过这个字节数才算"回退"（避免同一真值的抖动被当成回退）。</summary>
+    public const long RegressionToleranceBytes = 1;
+
+    private long _floorBytes;
+    private string? _jobId;
+    private bool _active;
+    private long? _lastRawDisplayedBytes;
+    private string? _lastRawJobId;
+
+    /// <summary>floor 是否生效（只读诊断：UI/日志可据此解释"为什么显示值高于引擎 raw"）。</summary>
+    public bool IsActive => _active;
+    /// <summary>当前 floor 的字节数（只读诊断）。</summary>
+    public long FloorBytes => _floorBytes;
+    /// <summary>floor 绑定的任务 id（只读诊断）。</summary>
+    public string? JobId => _jobId;
+    /// <summary>最近一次解除的原因码（空 = 从未解除）。</summary>
+    public string LastClearReason { get; private set; } = string.Empty;
+    /// <summary>最近一次 <see cref="Apply"/> 观察到的 raw 回退字节数（0 = 未回退）。</summary>
+    public long LastRawRegressionBytes { get; private set; }
+
+    /// <summary>
+    /// 由"用户发起的恢复"标记 floor：候选值 = 暂停时用户**已经看到**的那个显示分子
+    /// （`LastTruth.DisplayedTransferredBytes`）。候选 ≤ 0 时不标记（绝不凭空造一个 floor）。
+    /// </summary>
+    public bool Arm(string? jobId, long displayedBytes)
+    {
+        if (displayedBytes <= 0) return false;
+        if (_active && displayedBytes <= _floorBytes && string.Equals(_jobId, jobId, StringComparison.Ordinal))
+            return false;   // 已经有一个更高或相等的 floor：不降低它
+        _floorBytes = displayedBytes;
+        _jobId = jobId;
+        _active = true;
+        LastClearReason = string.Empty;
+        return true;
+    }
+
+    /// <summary>解除 floor（原因码必填）。返回是否真的从"生效"变为"解除"。</summary>
+    public bool Clear(string reason)
+    {
+        LastClearReason = reason;
+        if (!_active) return false;
+        _active = false;
+        _floorBytes = 0;
+        _jobId = null;
+        return true;
+    }
+
+    /// <summary>把 raw 样本跟踪复位到指定任务（跨任务/重新开始时用），并清掉回退基线。</summary>
+    public void ResetRawTracking(string? jobId)
+    {
+        _lastRawDisplayedBytes = null;
+        _lastRawJobId = jobId;
+        LastRawRegressionBytes = 0;
+    }
+
+    /// <summary>
+    /// 把引擎 raw 真值翻译成"显示用"真值：floor 生效且 raw 尚未追上时抬高显示分子；
+    /// 命中任一解除条件则**完全跟随** raw（并回报原因）。
+    /// </summary>
+    public ResumeFloorOutcome Apply(ProgressTruthSnapshot? truth, JobPhase phase, string? currentJobId)
+    {
+        LastRawRegressionBytes = TrackRawRegression(truth is null ? null : currentJobId, truth?.DisplayedTransferredBytes);
+
+        if (truth is null)
+            return new ResumeFloorOutcome(null, _active, false, string.Empty, LastRawRegressionBytes, 0, _floorBytes);
+
+        var rawDisplayed = truth.DisplayedTransferredBytes;
+        if (!_active)
+            return new ResumeFloorOutcome(truth, false, false, string.Empty, LastRawRegressionBytes, rawDisplayed, 0);
+
+        // ── 解除条件（任一命中：完全跟随引擎真值，并在日志里给出原因）──
+        if (!string.IsNullOrEmpty(_jobId) && !string.IsNullOrEmpty(currentJobId)
+            && !string.Equals(_jobId, currentJobId, StringComparison.OrdinalIgnoreCase))
+            return ClearAndFollow(truth, "job-changed");
+
+        // ★ 真机复验返修（2026-10-05 run2）★ 自动重试（RetryState.Retrying）**不再**解除 floor：
+        //   "暂停 → 恢复"的正常 catch-up 期间，引擎重建会推高 AttemptEpoch 并短暂进入 Retrying；
+        //   真机证据：run2 的 20:33:48.498 行被旧代码以 retry-restart 清掉了 floor。§2 只把
+        //   显式 RollingBack / Repair / 换任务 / 明确重新计划列为"允许解释的回退"，自动重试不是。
+        if (truth.RetryState == RetryState.RollingBack)
+            return ClearAndFollow(truth, "explicit-rollback");
+
+        if (phase is not (JobPhase.Running or JobPhase.Paused))
+            return ClearAndFollow(truth, "phase-" + phase);
+        if (phase == JobPhase.Paused)
+        {
+            // 已经停在暂停态：用户下一刻看到的必须是引擎真值（此刻 raw 一般就等于暂停值）。
+            // floor 保留（等待恢复），但不再抬高本轮显示。
+            return rawDisplayed >= _floorBytes
+                ? ClearAndFollow(truth, "truth-caught-up")
+                : new ResumeFloorOutcome(truth, true, false, string.Empty, LastRawRegressionBytes, rawDisplayed, _floorBytes);
+        }
+
+        var planned = truth.PlannedBytes;
+        if (planned > 0 && rawDisplayed >= planned)
+            return ClearAndFollow(truth, "plan-complete");
+        if (rawDisplayed >= _floorBytes)
+            return ClearAndFollow(truth, "truth-caught-up");
+
+        // ── 抬高显示分子（绝不压低引擎真值：percent 取两者较大）──
+        var lifted = planned > 0 ? Math.Min(_floorBytes, planned) : _floorBytes;
+        var percent = planned > 0
+            ? Math.Min(ProgressTruthSnapshot.RunningPercentCeiling, lifted * 100.0 / planned)
+            : truth.Percent;
+        if (percent < truth.Percent) percent = truth.Percent;
+
+        var effective = truth with { DisplayedTransferredBytes = lifted, Percent = percent };
+        return new ResumeFloorOutcome(effective, true, false, string.Empty, LastRawRegressionBytes, rawDisplayed, _floorBytes);
+    }
+
+    private ResumeFloorOutcome ClearAndFollow(ProgressTruthSnapshot truth, string reason)
+    {
+        var floor = _floorBytes;
+        Clear(reason);
+        return new ResumeFloorOutcome(truth, false, true, reason, LastRawRegressionBytes, truth.DisplayedTransferredBytes, floor);
+    }
+
+    private long TrackRawRegression(string? jobId, long? rawDisplayed)
+    {
+        if (rawDisplayed is null) return 0;
+        var prev = _lastRawDisplayedBytes;
+        var sameJob = string.Equals(_lastRawJobId, jobId, StringComparison.Ordinal);
+        _lastRawDisplayedBytes = rawDisplayed.Value;
+        _lastRawJobId = jobId;
+        if (prev is null || !sameJob) return 0;
+        var delta = prev.Value - rawDisplayed.Value;
+        return delta > RegressionToleranceBytes ? delta : 0;
+    }
+}
+
+/// <summary>
+/// <see cref="ResumeDisplayFloor.Apply"/> 的判定结果。
+/// <paramref name="Effective"/> = 供 UI 显示的真值（可能被 floor 抬高）；它**不是**业务完成度。
+/// </summary>
+internal readonly record struct ResumeFloorOutcome(
+    ProgressTruthSnapshot? Effective,
+    bool FloorActive,
+    bool ClearedThisCall,
+    string ClearReason,
+    long RawRegressionBytes,
+    long RawDisplayedBytes,
+    long FloorBytes);

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using PCMig.Core.Matrix;
 using PCMig.Core.Diagnostics;
@@ -24,7 +25,7 @@ public sealed record RobocopyRunResult(int ExitCode, bool Success, bool Killed, 
 ///   —— /Z 与 /MT 不同 pass 使用，规避两者组合的不确定性。
 /// 退出码：位掩码，&lt; 8 为成功；&gt;= 8 存在失败项。
 /// </summary>
-public sealed class RobocopyRunner
+public sealed class RobocopyRunner : ITransferWorker
 {
     private readonly ILogger _log;
     private Process? _current;
@@ -61,6 +62,59 @@ public sealed class RobocopyRunner
         };
     }
 
+    /// <summary>
+    /// F12（D01 r4 真机现场）：/MT 模式的重试行把 "正在重试..." 追在文件名后面
+    /// （robocopy 日志原样：<c>新文件  1.0 g  \\LAB-SRC01\D\D-Cases\D26\big.bin 正在重试...</c>）。
+    /// 旧实现把整段当成路径 ⇒ 进度回冲用的键与错误行里的真路径不是同一个字符串，那个 1 GB 失败文件的
+    /// 字节永远留在分子上：底栏 11 秒内从 1.4% 跳到 98.1% 并钉在 99.9%，而目标盘上只有 20.4 MB。
+    /// 这里只剥掉 robocopy 自己的重试标记，不改路径本身、不改任何复制行为。
+    /// </summary>
+    internal static string NormalizeFileName(string raw)
+    {
+        var name = raw.Trim();
+        if (name.Length == 0) return name;
+        foreach (var suffix in RetrySuffixes)
+            if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                return name[..^suffix.Length].TrimEnd();
+        return name;
+    }
+
+    private static readonly string[] RetrySuffixes = { "正在重试...", "正在重试..", "正在重试", "Retrying..." };
+
+    /// <summary>
+    /// 文件级错误行解析（中英双语）：<c>2026/10/04 11:30:21 错误 112 (0x00000070) 正在复制文件 &lt;源路径&gt;</c>。
+    /// 与进度入账共用同一处解析，保证"入账的键"和"回冲的键"由同一段代码产出（F12 的根因正是两者不一致）。
+    /// </summary>
+    internal static bool TryParseFileErrorLine(string line, out string code, out string srcPath)
+    {
+        var m = s_fileErrorRx.Match(line ?? string.Empty);
+        if (!m.Success) { code = string.Empty; srcPath = string.Empty; return false; }
+        code = m.Groups["code"].Value;
+        srcPath = m.Groups["path"].Value.Trim();
+        return true;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex s_fileErrorRx = new(
+        @"(?:错误|ERROR)\s+(?<code>\d+)\s+\(0x[0-9A-Fa-f]{8}\)\s+正在复制文件\s+(?<path>.+?)\s*$",
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// F12b：目标文件长度**永远**不能当作"已确认落盘字节"——/Z 与 /J 都会先给目标文件预分配最终长度，
+    /// 复制刚开始时 stat 就已经是整段长度（D01 现场：目标文件 1.0 g 在 6 秒内就"看起来传完了"）。
+    /// 同一文件里对"回退枚举"早有完全相同的结论（Large 通道因此跳过枚举），所以两条通道都不得采信 stat，
+    /// 只能用 robocopy 已确认的输出。
+    /// </summary>
+    internal static bool TrustsTargetStatForProgress(bool restartableSerialPass) => false;
+
+    /// <summary>
+    /// F12f（D01 r5 真机现场）：/MT 通道里同一个文件会被 robocopy 反复报
+    /// <c>新文件 … &lt;路径&gt; 正在重试...</c>，每次报都再加一次近似字节——3 次内部重试就是 3 倍入账，
+    /// 而文件级错误行只能回冲最后一次，于是底栏在"正在重试"期间钉在 99.9%（目标盘上只有 20.4 MB）。
+    /// 规则：同一路径每趟只入账一次；本趟已经报过文件级错误的路径永不再入账（宁可少算，不可虚报）。
+    /// </summary>
+    internal static bool ShouldCreditAnnouncement(bool creditedThisPass, bool failedThisPass)
+        => !creditedThisPass && !failedThisPass;
+
     static RobocopyRunner()
     {
         // 使 GBK/OEM 代码页可用（robocopy 控制台输出为本地化编码）
@@ -69,8 +123,34 @@ public sealed class RobocopyRunner
 
     public RobocopyRunner(ILogger log) { _log = log.ForContext<RobocopyRunner>(); }
 
-    /// <summary>退出码 &lt; 8 为成功；必须排除负数（-1 = 进程被强杀，绝不能算成功）。</summary>
-    public static bool IsSuccess(int exitCode) => exitCode >= 0 && exitCode < 8;
+    /// <summary>退出码位掩码（微软文档）：1=有文件被复制，2=检测到额外条目，4=检测到不匹配条目，8=有复制失败，16=严重错误。</summary>
+    public const int ExitMaskCopied = 1;
+    public const int ExitMaskExtra = 2;
+    public const int ExitMaskMismatch = 4;
+    public const int ExitMaskFailed = 8;
+    public const int ExitMaskFatal = 16;
+
+    /// <summary>
+    /// 退出码 &lt; 8 且**不含"不匹配"位(4)** 才算成功；必须排除负数（-1 = 进程被强杀，绝不能算成功）。
+    /// 位 4 = robocopy 检测到目标已有同名但类型不同的条目（源是文件、目标是同名目录，或重解析点），
+    /// 它**不会**把这些条目放到目标上——旧实现把 4..7 当成"成功（含不匹配）"，于是一整个对象里的
+    /// 条目被静默丢弃却报 Success / receipt status=completed / errorClass=none（GROUP D F1）。
+    /// 位 2（目标有额外条目）保持成功语义：产品从不 /MIR、/PURGE，目标侧独有数据是正常现象。
+    /// </summary>
+    public static bool IsSuccess(int exitCode)
+        => exitCode >= 0 && exitCode < 8 && (exitCode & ExitMaskMismatch) == 0;
+
+    /// <summary>退出码是否声明"存在不匹配条目"（目标同名条目类型不同，robocopy 无法放置）。</summary>
+    public static bool HasMismatch(int exitCode) => exitCode >= 0 && (exitCode & ExitMaskMismatch) != 0;
+
+    /// <summary>
+    /// 不匹配条目的人话说明：退出码本身就说明"有条目没落到目标"，不依赖日志文本是否被解析到。
+    /// 重试不可能自愈（同名类型冲突是静态事实），所以这条失败是 Permanent。
+    /// </summary>
+    public static string MismatchDetail(int exitCode)
+        => $"robocopy 报告存在不匹配条目（退出码 {exitCode}，位掩码 4 = 不匹配）：目标位置已有**同名但类型不同**的条目" +
+           "（例如源是文件、目标是同名文件夹，或目标是重解析点），robocopy 不会覆盖它，" +
+           "这些条目**没有复制到目标**。请在目标侧处理同名条目（改名或删除）后点「恢复任务」重试；已复制的数据不会丢。";
 
     /// <summary>命令行安全长度上限（Win32 命令行极限 32767，留足余量）。</summary>
     private const int MaxArgsLength = 30000;
@@ -524,7 +604,7 @@ public sealed class RobocopyRunner
                     if (fm.Success)
                     {
                         // /MT 模式文件行直接含完整路径；非 /MT 模式只有裸文件名，需拼当前目录
-                        var name = fm.Groups["name"].Value.Trim();
+                        var name = NormalizeFileName(fm.Groups["name"].Value);
                         string? full = name.StartsWith(@"\\", StringComparison.Ordinal) ||
                                        (name.Length > 2 && name[1] == ':')
                             ? name
@@ -613,7 +693,65 @@ public sealed class RobocopyRunner
         finally { _current = null; }
     }
 
-    /// <summary>立即终止当前 robocopy（Immediate 暂停 / 取消）。robocopy 增量语义保证下次运行自动续接。</summary>
+    /// <summary>
+    /// 当前是否还有 robocopy 在跑（Trust-Critical Recovery FIX BATCH 1）。
+    /// 这是"暂停是否真的达成"的**权威判据**：请求文件写成功 ≠ 传输停了，只有这个为 false 才算停住。
+    /// 旧实现没有这个查询，调用方（UI/诊断）只能假设"请求发出去了就当停了"。
+    /// </summary>
+    public bool HasRunningWorker
+    {
+        get
+        {
+            var p = _current;
+            if (p == null) return false;
+            try { return !p.HasExited; }
+            catch { return false; }   // 进程对象已被回收 ⇒ 已经没有在跑的 worker
+        }
+    }
+
+    /// <summary>最近一次 <see cref="KillCurrent"/> 是否真的杀成功了（未调用过 ⇒ false）。</summary>
+    public bool LastKillSucceeded { get; private set; }
+
+    /// <summary>
+    /// ★ FIX BATCH 4（P1-1）★ worker 进程累计从源读出的字节（内核 I/O 计数器，连续、不受 stdout 块缓冲影响）。
+    /// 只用于**显示**飞行中进度：/Z 通道目标长度被预分配污染、回退枚举被禁、robocopy 行是块缓冲，
+    /// 三者叠加会让 28.5 GB 单对象整段没有任何进度信号。
+    /// </summary>
+    public bool TryGetWorkerReadBytes(out long bytes)
+    {
+        bytes = 0;
+        var p = _current;
+        if (p == null) return false;
+        try
+        {
+            if (p.HasExited) return false;
+            if (!GetProcessIoCounters(p.Handle, out var counters)) return false;
+            var v = counters.ReadTransferCount;
+            if (v > long.MaxValue) return false;
+            bytes = (long)v;
+            return true;
+        }
+        catch
+        {
+            return false;   // 句柄失效/权限不足 ⇒ 只是"此刻无法确认"，不得影响传输
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoCounters
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetProcessIoCounters(IntPtr hProcess, out IoCounters counters);
+
+    /// <summary>立即终止当前 robocopy（**任意模式**的暂停 / 取消）。robocopy 增量语义保证下次运行自动续接。</summary>
     public void KillCurrent()
     {
         var p = _current;
@@ -628,6 +766,7 @@ public sealed class RobocopyRunner
         var succeeded = false;
         try { p.Kill(entireProcessTree: true); succeeded = true; }
         catch (Exception ex) { _log.Warning(ex, "终止 robocopy 失败"); }
+        LastKillSucceeded = succeeded;
 
         Publish(RobocopyEvents.KillResult, new RbcKillPayload("immediate-pause-or-cancel", succeeded),
             succeeded ? DiagnosticLevel.Information : DiagnosticLevel.Error,

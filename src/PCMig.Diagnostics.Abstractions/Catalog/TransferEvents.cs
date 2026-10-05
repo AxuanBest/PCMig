@@ -99,12 +99,22 @@ public static class TransferEvents
         DiagnosticCategory.Transfer, 22, "TRN.SpaceAbortRequested",
         DiagnosticLevel.Error, DeliveryClass.Operational, PrivacyClassification.Public);
 
+    /// <summary>
+    /// 暂停**失败**（Trust-Critical Recovery FIX BATCH 1）：请求已被引擎读到并受理，
+    /// 但在硬失败 SLA 内 worker 拒绝停止 ⇒ 迁移仍在进行。
+    /// 与 <see cref="PauseRequested"/> 的区别就是"请求受理"和"业务效果达成"的区别：
+    /// 真机上只有前者、没有后者，事件卡却是 0、健康却是 healthy —— 这条事件是那道防线的输入。
+    /// </summary>
+    public static readonly EventDescriptor PauseFailed = EventDescriptor.Define(
+        DiagnosticCategory.Transfer, 23, "TRN.PauseFailed",
+        DiagnosticLevel.Error, DeliveryClass.Operational, PrivacyClassification.Public, "TrnPauseObserved");
+
     internal static readonly EventDescriptor[] All =
     {
         JobRunStarted, JobRunCompleted, ObjectStarted, ObjectCompleted, ObjectInterrupted,
         RetryScheduled, RetryStarted, ProgressObserved, PauseRequested, PauseRequestWriteResult,
         PauseObserved, PauseBoundaryReached, Paused, ResumeRequested, PauseRequestCleared,
         CheckpointLoaded, Resumed, StopRequested, StopObserved, RootFilesVisibilityEnsured,
-        TransferNoticeRaised, SpaceAbortRequested,
+        TransferNoticeRaised, SpaceAbortRequested, PauseFailed,
     };
 }

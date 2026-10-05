@@ -7,6 +7,8 @@ using Microsoft.UI.Xaml.Media.Animation;
 using PCMig.WinUI.Diagnostics;
 using PCMig.Diagnostics.Abstractions;
 using PCMig.Core.Diagnostics;
+using PCMig.Core.Models;
+using PCMig.Core.Util;
 using PCMig.WinUI.Presentation;
 using Windows.Graphics;
 
@@ -38,6 +40,22 @@ public sealed partial class MainWindow : Window
 
     /// <summary>关闭收尾只执行一次（AppWindow.Closing 可能被多次触发）。</summary>
     private bool _shuttingDown;
+
+    /// <summary>
+    /// ★ FIX BATCH 5（§8）★ 底栏进度填充的唯一真值来源：由 PushFooter 从 ProgressTruthSnapshot
+    /// （会话的 LastTruth）写入，再交给 UpdateFooterProgressFill 换算成像素宽度。
+    /// </summary>
+    private double _footerProgressPercent;
+
+    /// <summary>
+    /// ★ UI Closure 2026-10-05（用户指令 UI-05：进度视觉不得一帧一帧跳）★
+    /// 底栏进度填充的视觉补间驱动（Composition 层，60 Hz 由合成器承担）。它只做"真实旧值 → 真实新值"
+    /// 之间的补间，绝不预测下一进度；暂停/停止/中断/失败/完成与任何回退一律 SnapTo 真值。
+    /// </summary>
+    private ProgressMotionDriver? _footerMotion;
+
+    /// <summary>上一帧渲染的填充像素宽度：用于判断目标是否在前进（回退必须立刻落位，不得动画）。</summary>
+    private double _lastFooterFillWidth;
 
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(IntPtr hwnd);
@@ -414,7 +432,77 @@ public sealed partial class MainWindow : Window
     private void AttachFooterToSession()
     {
         Session.PropertyChanged += (_, _) => PushFooter();
+        // ★ FIX BATCH 5（§8）★ 轨道宽度变化（窗口缩放 / 响应式密度档位切换）时必须重算填充宽度，
+        //   否则填充会停留在上一次的像素值上与真实百分比不符。写入者仍是 UpdateFooterProgressFill（唯一）。
+        FooterProgressHost.SizeChanged += (_, _) => UpdateFooterProgressFill();
+        // ★ UI Closure 2026-10-05（用户指令 UI-05）★ 底栏与顶栏共用同一个补间驱动实现：真值仍是
+        //   PushFooter 推进来的 ProgressTruthSnapshot 百分比，动画只负责把"已经发生的真实变化"画平。
+        _footerMotion = new ProgressMotionDriver(FooterProgressFill, FooterProgressHost);
+        // ★ FIX BATCH 6（§9）★ 左侧提示卡接上同一会话：它只读语义通道
+        //   （OperationalStatus / UserHint / ErrorSummary / CurrentObjectStatus），
+        //   禁止在这里或卡片里拼业务状态。
+        HintCard.Attach(Session);
+        // ★ UI Closure 2026-10-05（用户指令 UI-07）★ 提示卡向上增长必须有上界，否则长流程文案会把卡片
+        //   顶进步骤导航里（碰/压/穿 Step4）。尺寸变化时重算；**不**监听 HintCard.SizeChanged ——
+        //   卡片高度正是由本上界约束的，反向监听会形成回环。
+        SidebarHost.SizeChanged += (_, _) => UpdateHintCardBounds();
+        StepNav.SizeChanged += (_, _) => UpdateHintCardBounds();
+        SidebarHost.Loaded += (_, _) => UpdateHintCardBounds();
+        UpdateHintCardBounds();
         PushFooter();
+    }
+
+    /// <summary>
+    /// ★ UI Closure 2026-10-05（用户指令 UI-07）★ 计算提示卡上界：
+    /// <c>侧栏可用高度 − 步骤导航（StepNav，即 Step4 所在控件）实际高度 − 标准段间距</c>。
+    /// 标准段间距取 <c>HintCard</c> 在 XAML 里的 <c>Margin.Top = 12</c>（与 XAML 同源，不新造数字）。
+    /// 布局未完成（任一高度 ≤ 0）时**不设限**，避免装配早期把卡片压成 0 高；
+    /// 超出上界的部分由卡内 <c>ScrollViewer</c> 承担轻量滚动（见 ShellHintCard.xaml）。
+    /// </summary>
+    private void UpdateHintCardBounds()
+    {
+        try
+        {
+            var sidebarHeight = SidebarHost.ActualHeight;
+            var navHeight = StepNav.ActualHeight;
+            if (sidebarHeight <= 0d || navHeight <= 0d) return;
+            const double standardSectionGap = 12d;   // = HintCard.Margin.Top（XAML 同源）
+            HintCard.SetMaxSurfaceHeight(sidebarHeight - navHeight - standardSectionGap);
+        }
+        catch
+        {
+            // 上界只是约束：计算失败时卡片保持无上限，绝不影响其它布局。
+        }
+    }
+
+    /// <summary>
+    /// ★ FIX BATCH 5（§8）★ 底栏进度填充的**唯一写入者**：宽度 = 百分比 × 轨道实际宽度。
+    /// 为什么不用 ProgressBar 控件：见 <c>Themes\Controls.xaml</c> 中 PCMigProgressTrack/PCMigProgressFill
+    /// 的说明 —— WinUI 3 的 ProgressBar 不按 DeterminateRoot/ProgressBarIndicator 驱动自定义模板的填充
+    /// 宽度（实测 UIA RangeValue=47.29% 而同位置截图在进度条区域零像素变化）。
+    /// 这里没有任何动画推进宽度：百分比来自唯一真值（ProgressTruthSnapshot），Pause 时百分比不变，
+    /// 完成时稳定 100%（PMML-R8：动画只能装饰，不能成为业务状态的依赖）。
+    /// </summary>
+    private void UpdateFooterProgressFill()
+    {
+        var clamped = double.IsNaN(_footerProgressPercent) ? 0 : Math.Clamp(_footerProgressPercent, 0, 100);
+        var trackWidth = FooterProgressHost.ActualWidth;
+        var width = trackWidth > 0 ? Math.Round(trackWidth * clamped / 100.0, 1) : 0;
+        // ★ UI Closure 2026-10-05（用户指令 UI-05）★ width 只作为**目标值**交给补间驱动；
+        //   不再直接写 FooterProgressFill.Width（布局属性：20 Hz 真值 × 60 fps 补间会每秒触发布局 60 次）。
+        //   前进（Running 且目标不回退）走补间；暂停/停止/中断/失败/完成与任何回退一律 SnapTo 真值 ——
+        //   暂停时让填充自己继续爬 = 撒谎（用户指令 UI-23 禁止）。
+        if (_footerMotion is not null)
+        {
+            _footerMotion.SetTrackWidth(trackWidth);
+            // ★ UI-06 状态映射 ★ 只有 Running 开装饰：暂停 / 停止 / 失败 / 完成一律关（暂停时让光波继续扫 = 撒谎）。
+            _footerMotion.SetActive(Session.Phase == JobPhase.Running);
+            var normalProgress = Session.Phase == JobPhase.Running && width >= _lastFooterFillWidth;
+            if (normalProgress) _footerMotion.SetTarget(width);
+            else _footerMotion.SnapTo(width);
+            _lastFooterFillWidth = width;
+        }
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(FooterProgressHost, $"迁移进度 {clamped:0.0}%");
     }
 
     /// <summary>把会话的真实状态推到共用底栏（唯一入口）。</summary>
@@ -424,23 +512,43 @@ public sealed partial class MainWindow : Window
         var queue = DispatcherQueue;
         if (queue is not null && !queue.HasThreadAccess) { queue.TryEnqueue(PushFooter); return; }
 
-        var percent = Session.Percent;
+        // ★ FIX BATCH 4（§7.1）★ 底栏进度只读**唯一真值**（引擎送来的 ProgressTruthSnapshot）：
+        //   顶栏、底栏、百分比、字节、速率、ETA 必须同源。旧实现里底栏百分比来自 Session.Percent、
+        //   字节来自另一条字符串、速率/ETA 又是两条独立属性，于是真机上出现过"job-state 47.29% /
+        //   界面 49.6%"、"已传 19.59 GB 而底栏 0 B"这类真值分裂。
+        //   ★ 真机复验返修（2026-10-05 run2）★ 改读 **PresentationTruth**：暂停 → 恢复的正常 catch-up
+        //   期内引擎 raw 会先重建（曾观察到 99.9% → 0.0%），而 PresentationTruth 由显示连续性 floor
+        //   托在用户已看到的分子上；LastTruth(raw) 只留给诊断/日志（MigrationSessionViewModel §2）。
+        var truth = Session.PresentationTruth;
+        var percent = truth?.Percent ?? Session.Percent;
         FooterPercentText.Text = $"{percent:0.0}%";
-        FooterBytesText.Text = Session.ProgressText;
-        FooterProgressBar.Value = double.IsNaN(percent) ? 0 : Math.Clamp(percent, 0, 100);
-        FooterSpeedText.Text = Session.EngineSpeedText;
-        FooterEtaText.Text = Session.EtaText;
+        FooterBytesText.Text = truth is null
+            ? Session.ProgressText
+            : $"{Format.Bytes(truth.DisplayedTransferredBytes)} / {Format.Bytes(truth.PlannedBytes)}";
+        _footerProgressPercent = double.IsNaN(percent) ? 0 : Math.Clamp(percent, 0, 100);
+        UpdateFooterProgressFill();
+        FooterSpeedText.Text = truth is null
+            ? Session.EngineSpeedText
+            : (truth.SpeedBytesPerSecond > 0 ? Format.Speed(truth.SpeedBytesPerSecond) : "—");
+        FooterEtaText.Text = truth is null ? Session.EtaText : Format.Eta(truth.EtaSeconds);
 
         // 四态在底栏的呈现（可用性矩阵，全部来自会话的真实布尔量，不自行推断）：
         //   运行中（Resume 后正在传）：开始✗ 暂停✓ 停止✓ 恢复✗
-        //   已请求暂停（Pause 合作式中）：开始✗ 暂停✗ 停止✓ 恢复✗（IsPaused ⇒ CanPause=false，仍在跑）
-        //   已暂停 Paused（可续传）    ：开始✓ 暂停✗ 停止✗ 恢复✓
+        //   正在暂停…（请求已受理，引擎尚未确认停住）：开始✗ 暂停✗ 停止✓ 恢复✗  ← FIX BATCH 2
+        //   已暂停 Paused（引擎确认停住，可续传）：开始✓ 暂停✗ 停止✗ 恢复✓
+        //   暂停失败（引擎停不住，迁移仍在进行）：开始✗ **暂停✓（文案＝「重试暂停」）** 停止✓ 恢复✗  ← FIX BATCH 2
         //   已中断 Interrupted（可续传）：开始✓ 暂停✗ 停止✗ 恢复✓
         //   已取消 Canceled（不可续传）：开始✓ 暂停✗ 停止✗ 恢复✗ —— 与「已中断」必须能区分
         FooterStartButton.IsEnabled = Session.CanStart;
         FooterPauseButton.IsEnabled = Session.CanPause;
         FooterStopButton.IsEnabled = Session.CanStop;
         FooterResumeButton.IsEnabled = Session.CanResume;
+
+        // ★ FIX BATCH 2 ★ 暂停按钮的文案与图标**只能**来自会话的暂停状态机（真值 ⇒ 文案，不反过来）：
+        //   「暂停」/「正在暂停…」/「已暂停」/「重试暂停」。旧实现永远显示「暂停」，
+        //   于是"点了没反应"和"点了正在办"在界面上完全一样。
+        FooterPauseLabel.Text = Session.PauseButtonText;
+        FooterPauseIcon.Glyph = Session.IsPauseFailed ? "\uE7BA" : "\uE769";
     }
 
     /// <summary>开始迁移（底栏）：与 Step2 的「开始迁移」同一入口（同一个会话、同一份 Core 计划）。</summary>
@@ -451,6 +559,10 @@ public sealed partial class MainWindow : Window
         trace.Eligibility(Session.CanStart, Session.CanStart ? "allowed" : "cannot-start");
         if (!Session.CanStart) { trace.Reject("cannot-start", "ShellFooter"); return; }
         trace.Started();
+        // ★ FIX BATCH 3 / §6.4 ★ 同类审计：Start/Stop/Resume 过去同样**不建立任何兑现期望**，
+        //   于是"命令派发了"就冒充了"事情办成了"。这里补上外部步骤期望（契约里本就写着），
+        //   终点仍在 await 之后才发（不在点击瞬间），故不改变任何行为语义。
+        trace.Expect("transfer.v1", "start.external");
         await Session.RunAsync(PageConnect.CurrentPassword);
         // D6.3 §11：终点结果 = 既有 JobPhase（Completed / CompletedWithErrors / Paused / Interrupted / Failed），
         // 不是"RunAsync 返回了"（审计 P1-4）。
@@ -458,15 +570,41 @@ public sealed partial class MainWindow : Window
         PushFooter();
     }
 
-    /// <summary>暂停（底栏）：走 Core 的 JobContext.RequestPause（VM 的 PauseAsync，合作式）。</summary>
+    /// <summary>暂停（底栏）：走 VM 的 PauseAsync —— FIX BATCH 1 起两种模式都是"立即打断当前对象"。</summary>
     private async void FooterPause_Click(object sender, RoutedEventArgs e)
     {
         using var trace = ActionTrace.Begin(ActionKinds.Pause, ControlIds.ShellTransferPause, "click", "ShellFooter");
-        trace.Eligibility(true, "allowed");
+        // ★ FIX BATCH 2 ★ 观察**真实**的可用性守卫（旧写法把 Eligibility 硬编码成 true/"allowed"，
+        //   于是"按钮明明是灰的"这件事在诊断里看不见）。
+        trace.Eligibility(Session.CanPause, Session.CanPause ? "allowed" : "cannot-pause");
+        if (!Session.CanPause) { trace.Reject("cannot-pause", "ShellFooter"); return; }
         trace.Started();
+        // ★ FIX BATCH 3 / §6（信任关键）★ 点击 → 建立**业务兑现期望**：契约承诺在硬失败 SLA（10 s）
+        //   + 宽限内观察到 pause.external（引擎**真的停住**）。旧实现里 footer 一处都不建立期望，
+        //   于是"请求已被受理"就是这条动作在诊断里的全部故事 —— 事件卡 0 张、健康 healthy，
+        //   而传输从未停止（真机：8/8 次点击、8/8 次请求写入成功、0 次引擎确认）。
+        trace.Expect("pause.v2", "pause.external");
         await Session.PauseAsync();
-        // 暂停是**请求**语义：只报 Accepted，绝不报 Succeeded。
-        trace.Finish(Session.LastPauseOutcome, "ShellFooter");
+
+        // ★ 终结点只能在**引擎真值**落定之后发出：若在点击瞬间就 Complete，跟踪器会立刻以
+        //   "completed" 关闭这条期望 —— 那正是"请求成功冒充业务成功"的老毛病。
+        var paused = await Session.WaitForPauseSettledAsync();
+
+        if (paused)
+        {
+            trace.Confirm("pause.v2", "pause.external");           // 业务效果真的达成了
+            trace.Complete(DiagnosticOutcome.Succeeded, "paused");
+        }
+        else if (Session.EnginePauseState == PauseState.PauseFailed)
+        {
+            // 暂停失败 ⇒ **绝不 Confirm**。诊断侧据此开卡并降级健康（引擎还会发 TRN-023 PauseFailed）。
+            trace.Complete(DiagnosticOutcome.Failed, "pause-failed");
+        }
+        else
+        {
+            // SLA 内没有落定：如实记 Unknown，不假装成功（旧实现这里永远记 Accepted）。
+            trace.Complete(DiagnosticOutcome.Unknown, "pause-unsettled");
+        }
         PushFooter();
     }
 
@@ -476,9 +614,20 @@ public sealed partial class MainWindow : Window
         using var trace = ActionTrace.Begin(ActionKinds.Stop, ControlIds.ShellTransferStop, "click", "ShellFooter");
         trace.Eligibility(true, "allowed");
         trace.Started();
+        // ★ FIX BATCH 3 / §6.4 ★ 与暂停同理：停止也必须是"请求 + 兑现"两段。
+        //   StopAsync 只发取消令牌就返回；终点事件必须等运行真的收尾（否则"已受理"冒充"已停止"）。
+        trace.Expect("stop.v1", "stop.external");
         await Session.StopAsync();
-        // 停止也是**请求**语义：受理 ⇒ Accepted；没有在跑的运行 ⇒ Skipped。
-        trace.Finish(Session.LastStopOutcome, "ShellFooter");
+        var stopped = await Session.WaitForStopSettledAsync();
+        if (stopped)
+        {
+            trace.Confirm("stop.v1", "stop.external");
+            trace.Complete(DiagnosticOutcome.Succeeded, "stop-settled");
+        }
+        else
+        {
+            trace.Complete(DiagnosticOutcome.Unknown, "stop-unsettled");
+        }
         PushFooter();
     }
 
@@ -489,9 +638,20 @@ public sealed partial class MainWindow : Window
         trace.Eligibility(Session.CanResume, Session.CanResume ? "allowed" : "cannot-resume");
         if (!Session.CanResume) { trace.Reject("cannot-resume", "ShellFooter"); return; }
         trace.Started();
+        // ★ FIX BATCH 3 / §6.4 ★ 恢复同理：建立兑现期望（契约里本就写着 resume.external），
+        //   并且**等引擎真的离开暂停**再收口 —— "请求文件被清除"不是"迁移已恢复"。
+        trace.Expect("resume.v1", "resume.external");
         await Session.ResumeAsync(PageConnect.CurrentPassword);
-        // 恢复 = 又一次真实运行 ⇒ 同样以 JobPhase 为准。
-        trace.Finish(Session.LastRunOutcome, "ShellFooter");
+        var resumed = await Session.WaitForResumeSettledAsync();
+        if (resumed)
+        {
+            trace.Confirm("resume.v1", "resume.external");
+            trace.Complete(DiagnosticOutcome.Succeeded, "resume-settled");
+        }
+        else
+        {
+            trace.Complete(DiagnosticOutcome.Unknown, "resume-unsettled");
+        }
         PushFooter();
     }
     /// <summary>

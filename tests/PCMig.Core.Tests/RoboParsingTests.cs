@@ -16,10 +16,22 @@ public class RoboParsingTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(1, true)]
-    [InlineData(7, true)]
+    [InlineData(2, true)]    // 2 = 目标有额外条目（产品不 /MIR、/PURGE：目标独有数据不该判失败）
+    [InlineData(3, true)]
     [InlineData(8, false)]
     [InlineData(16, false)]
     [InlineData(-1, false)]
+    // ★ 语义变更（GROUP D · F1，2026-10-04 真机 D13/D28）★
+    //   旧契约：< 8 即成功 ⇒ 退出码 7（位1 复制 + 位2 额外 + 位4 **不匹配**）被记成
+    //   Success=true / status=completed / errorClass=none，界面显示「迁移完成」；
+    //   而真实情况是"目标已有同名异型节点（源是文件、目标是同名目录）或重解析点"，
+    //   这些源条目**根本没复制到目标**——事后只有手动 L1 Verify 才暴露。
+    //   新契约：不匹配位不再算成功，6/7（含不匹配的 5/7 组合）同样判失败并给出中文结论；
+    //   位 2（目标有额外条目）保持成功语义不变。
+    [InlineData(4, false)]
+    [InlineData(5, false)]
+    [InlineData(6, false)]
+    [InlineData(7, false)]
     public void IsSuccess_ExitCodeSemantics(int code, bool expected)
         => Assert.Equal(expected, RobocopyRunner.IsSuccess(code));
 

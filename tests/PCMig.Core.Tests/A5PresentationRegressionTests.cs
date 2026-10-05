@@ -1569,6 +1569,64 @@ public sealed class A5PresentationRegressionTests : IDisposable
         Assert.Equal(0, probes);
     }
 
+    /// <summary>
+    /// ★ C-C04B-1（2026-10-04 真机：LAB-DST01 硬断电 → 恢复 → 把那个被中断的任务续传完成）★
+    ///
+    /// 现场：**同一次会话内**跑完那个中断任务之后，Step4 的「未完成任务检测」仍是
+    /// **进入本页时的探测快照**，于是同屏同时出现两句话：
+    ///   ①「迁移已完成，可在本页做基础一致性检查并打开报告。…」
+    ///   ②「检测到未完成的迁移任务：任务 JOB-…｜…｜Interrupted。点「恢复任务」可从断点继续…」
+    /// 用户会被 ② 误导为"还要再恢复一次"（真机 C04 run5 实测；重启应用后自愈）。
+    ///
+    /// 本用例：① 连接后真实探测（真读盘、真候选）⇒ 出现"检测到未完成的迁移任务"；
+    ///         ② 用**按真实引擎契约落盘**的假引擎把该任务跑到 Completed
+    ///            （真引擎在运行结束时会自己把 `Phase` 写进 job-state.json；
+    ///             不落盘的假引擎覆盖不到这条性质）；
+    ///         ③ 结束后那句话必须已被**重新探测**刷新，不得继续留在屏幕上。
+    ///
+    /// 改前会红：`UnfinishedProbeText` 保持快照文案（`DoesNotContain` 失败）。
+    /// </summary>
+    [Fact]
+    public async Task A5_7j_FinishRun_RefreshesTheStaleUnfinishedProbeConclusion()
+    {
+        var ctx = CreateResumableJob("JOB-A5-C04B");          // Phase=Interrupted，源=ProbeHost
+        var conn = NewConnection();
+        conn.ForceConnectedForTest(true);
+        var vm = NewSession(conn);
+        var pump = InstallFakeProbeDebouncePump(vm);
+        vm.UnfinishedProbeForTest = (host, target) => new JobManager(_log).FindUnfinished(host, target);
+
+        // ① 进入 Step4：真实探测报出"被中断的任务"
+        vm.RequestUnfinishedProbe();
+        if (pump.ArmCount == 1) pump.Fire();                  // 走了去抖分支就手动到期（无 sleep）
+        var probe = vm.LastProbeTaskForTest;
+        Assert.NotNull(probe);
+        await probe!;
+        Assert.Contains("检测到未完成的迁移任务", vm.UnfinishedProbeText, StringComparison.Ordinal);
+
+        // ② 把这个任务跑完（假引擎按真实契约把结束阶段落盘）
+        Assert.True(await vm.AdoptExistingJobAsync(ctx.JobDir));
+        vm.TransferRunner = (JobContext c, TransferEngineHooks _, IProgress<ProgressSnapshot> _,
+                             CancellationToken _, IReadOnlyCollection<string>? _, bool _) =>
+        {
+            var st = c.LoadStateOrNew();
+            st.Phase = JobPhase.Completed;
+            st.Percent = 100.0;
+            st.CompletedBytes = st.TotalBytes;
+            c.SaveState(st);
+            return Task.FromResult(JobPhase.Completed);
+        };
+        await WithInlineSyncContext(() => vm.ResumeAsync(password: null));
+        Assert.Equal(JobPhase.Completed, vm.Phase);
+
+        // ③ 结束态必须重新探测 ⇒ 过期结论不得留在屏幕上
+        var refreshed = vm.LastProbeTaskForTest;
+        Assert.NotNull(refreshed);
+        Assert.False(ReferenceEquals(probe, refreshed), "任务结束后没有重新发起未完成任务探测");
+        await refreshed!;
+        Assert.DoesNotContain("检测到未完成的迁移任务", vm.UnfinishedProbeText, StringComparison.Ordinal);
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     //  要求 8：TreeView 未加载根具有正确的"可展开"状态
     // ══════════════════════════════════════════════════════════════════════

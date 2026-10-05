@@ -1,6 +1,7 @@
 using PCMig.Core.Diagnostics;
 using PCMig.Core.Matrix;
 using PCMig.Core.Models;
+using PCMig.Core.Native;
 using PCMig.Diagnostics.Abstractions;
 using PCMig.Diagnostics.Abstractions.Events;
 using PCMig.Diagnostics.Abstractions.Payloads;
@@ -73,7 +74,11 @@ public sealed class Planner
                 EstimatedBytes = Math.Max(obj.Bytes, 0),
                 EstimatedFiles = Math.Max(obj.Files, 0),
                 UseRestartablePass = opt.SplitLargeFiles && obj.HasLargeFiles,
-                FileList = obj.FileList
+                FileList = obj.FileList,
+                // ★ 缺陷 B12b4 ★ 固化"计划时这份数据在哪"的文件系统级身份指纹（卷序列号 + 目录文件 ID）。
+                // 之后每次开跑（含续传）都会重新取一次比对；共享被同名换底时指纹必然变化 ⇒ 拒绝续传。
+                // 取不到就是 null（无基线，不参与校验），不会因为探测失败而阻断正常迁移。
+                SourceIdentity = SourceIdentity.Capture(obj.SourcePath, _log)
             });
 
             // 只统计（不参与映射决策）：有多少对象定位不到源根、多少走 /Z 可续传通道。

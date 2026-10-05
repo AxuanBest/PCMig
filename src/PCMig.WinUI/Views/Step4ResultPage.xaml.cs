@@ -199,9 +199,9 @@ public sealed partial class Step4ResultPage : UserControl
 
             _gateReason = string.Empty;
             trace.Started();
-            trace.Expect("verify.v1", "verify-completed");
+            trace.Expect("verify.v1", "verify.external");
             await session.VerifyAsync(VerifyLevel.L1_CountSize);
-            trace.Confirm("verify.v1", "verify-completed");
+            trace.Confirm("verify.v1", "verify.external");
             // D6.3 §11：终点结果 = VM 记录的**实际验证业务结论**（报告 OverallPass / 取消 / 故障），
             // 不是"VerifyAsync 返回了"（审计 P1-4）。
             trace.Finish(session.LastVerifyOutcome, "Step4ResultPage");
@@ -251,11 +251,11 @@ public sealed partial class Step4ResultPage : UserControl
         var force = ToolbarOverwrite.IsChecked == true;
         session.AppendLog("INFO", $"用户点「尝试修复」（强制覆盖同名文件：{(force ? "开" : "关")}）。");
         trace.Started();
-        trace.Expect("repair.v1", "repair-targets-collected");
+        trace.Expect("repair.v1", "repair.external");
         try
         {
             await session.RepairAsync(forceOverwrite: force, password: _passwordProvider?.Invoke());
-            trace.Confirm("repair.v1", "repair-targets-collected");
+            trace.Confirm("repair.v1", "repair.external");
             // D6.3 §11：终点结果 = 既有回执统计（无目标 ⇒ Skipped；有失败 ⇒ Failed；全成 ⇒ Succeeded）。
             trace.Finish(session.LastRepairOutcome, "Step4ResultPage");
         }
@@ -331,12 +331,21 @@ public sealed partial class Step4ResultPage : UserControl
             }
 
             trace.Started();
-            // 契约期望：恢复动作的反馈面（与 Step2 / 底栏同一个 resume.v1 契约）。
-            trace.Expect("resume.v1", "run-resumed");
+            // ★ FIX BATCH 3 / §6.4 ★ 步骤名必须与契约（resume.v1）里的名字一致：
+            //   旧值 "run-resumed" 在注册表里不存在（契约里是 resume.immediate / resume.external）。
+            trace.Expect("resume.v1", "resume.external");
             await session.ResumeAsync(_passwordProvider?.Invoke());
-            trace.Confirm("resume.v1", "run-resumed");
-            // 终点取**业务结果**（ActionOutcomePolicy 的判定），绝不用"方法返回了"冒充成功。
-            trace.Finish(session.LastRunOutcome, "Step4ResultPage");
+            // ★ FIX BATCH 3 / §6.4 ★ 等引擎真的离开暂停/真的开始运行再收口 —— 
+            //   "ResumeAsync 返回了"绝不等于"迁移已恢复"。
+            if (await session.WaitForResumeSettledAsync())
+            {
+                trace.Confirm("resume.v1", "resume.external");
+                trace.Complete(DiagnosticOutcome.Succeeded, "resume-settled");
+            }
+            else
+            {
+                trace.Complete(DiagnosticOutcome.Unknown, "resume-unsettled");
+            }
         }
         catch (Exception ex)
         {

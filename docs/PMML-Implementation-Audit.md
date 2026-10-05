@@ -1,4 +1,4 @@
-﻿# PMML Implementation Audit — 当前代码 → PMML 术语 → Resource → 参数映射
+# PMML Implementation Audit — 当前代码 → PMML 术语 → Resource → 参数映射
 
 > 目的：记录 PCMig v0.5.0 UI 的**真实世界**（PMML v1.0 冻结依据）。
 > 原则：**代码是多少就记多少**；没有统一 Resource 而散落魔法数字的，一律标注 `Scattered Implementation` / `Legacy Deviation`，不虚构统一值。
@@ -263,6 +263,59 @@ Primary Button ・ Secondary Button ・ Icon Button ・ TextBox ・ PasswordBox 
 **要点（主控核实）**：
 - Task Picker 三段（`PCMigTaskPickerPresenterStyle` / `PCMigTaskPickerFlyoutStyle` / `PCMigTaskPickerItemStyle`）均落在 `Views/Step2SelectDataPage.xaml` 的 `<UserControl.Resources>`，材质/圆角/选中色全部取自 ComboBox 同套主题资源；
 - 缺态一律以"未实现"记录，**不补造**。
+
+### Progress 族（2026-10-04 更新，FIX BATCH 5 / 指令 §8）
+
+原族条目是"用 ProgressBar + `PCMigProgressBar` 模板"。**该实现已废弃**，原因是实测而非设计偏好：
+
+- **WinUI 3 的 `ProgressBar` 不按 `DeterminateRoot`/`ProgressBarIndicator` 驱动自定义模板的填充宽度**。运行时视觉树探针显示 `Rectangle#ProgressBarIndicator w=0` 而 `Value=47.29025842745828`；同页、同窗口几何的两态截图（0% vs 47.3%）在进度条带**逐像素零差异** ⇒ 填充宽度恒为 0，从未绘制。
+- 静态取证不可行：`Microsoft.UI.Xaml.dll` 与 `PCMig.WinUI.pri` 中搜不到任何部件名字符串（ASCII 与 UTF-16 两种搜法均为 0 命中）。
+
+**现行实现（Progress 族新条目）**：
+
+| 项 | 真实值 | 位置 |
+|---|---|---|
+| 轨道 | `PCMigProgressTrack`（`Border`：`CornerRadius=6`、`Background={StaticResource ProgressTrackBrush}`） | `Themes/Controls.xaml`（Progress 族样式块） |
+| 填充 | `PCMigProgressFill`（`Grid`：`Left`/`Stretch`/`Width=0`/`IsHitTestVisible=False`，内含 `Rectangle RadiusX/Y=6 Fill={StaticResource AccentGradientBrush}`） | 同上 |
+| 唯一写入者（底栏） | `UpdateFooterProgressFill()`：`width = Math.Round(轨道 ActualWidth × clamp(percent,0,100)/100, 1)`；真值来自 `Session.LastTruth` | `MainWindow.xaml.cs`；`FooterProgressFill` 于 `MainWindow.xaml` |
+| 唯一写入者（Step3） | `UpdateTotalProgressFill()`：同式；真值来自 `PushState` 的同一 `ProgressTruthSnapshot` | `Views/Step3ProgressPage.xaml.cs` / `Step3ProgressPage.xaml` |
+| 动画 | **无**（宽度只由真值驱动；PMML-R8 合规，"填充只能装饰、不能自己推进 Value"） | — |
+| 无障碍 | `AutomationProperties.SetName(进度宿主, "迁移进度 xx.x%")`（原 `RangeValuePattern` 随 ProgressBar 移除） | 两个写入者内 |
+| LMDS 归属 | L3（轨道 + 填充同层）；材质/光源/圆角全部复用既有 token，未引入新 token（PMML-R14） | — |
+| 已知取舍 | **未做**「前沿高光 / subtle glow」：当前无可用裁剪原语（Grid/Border 默认不裁剪子元素），强加会在 0% 时漏出亮条 | 源码注释已记录 |
+
+**⚠ 上表「动画 = 无」「已知取舍 = 未做前沿高光」两条已由 2026-10-05 UI Closure 取代，见下节。**
+
+实测证据（像素级）：填充覆盖整 12 DIP 轨道高度（y 843..854 全 12 行），满宽行右边界 364（预测 `285 + 0.473×170 ≈ 365.4`，圆角内缩 1 px），颜色自 `(43,152,254)` 渐变到 `(20,107,234)`。详见 `E:\PCMigLab\Evidence\Trust-Critical-Recovery\FIX-BATCH-5-UI.md` §3。
+
+### Progress 族（2026-10-05 UI Closure 更新，用户指令 UI-05 / UI-06）
+
+**填充元素改为"常驻满宽 + 裁剪标量"**（不再写 `Width`）：
+
+| 项 | 本轮实现值 | 位置 |
+|---|---|---|
+| 填充几何 | `Width="Auto"` + `HorizontalAlignment="Stretch"`（本地值覆盖 `PCMigProgressFill` 样式的 `Width=0`），常驻满宽；可见长度由 `InsetClip.RightInset = 轨道宽 − 已完成像素` 表达 | `Views/Step3ProgressPage.xaml`（`TotalProgressFill`）/ `MainWindow.xaml`（`FooterProgressFill`） |
+| 视觉补间 | 新类 `ProgressMotionDriver`（`internal sealed`，零业务引用）：追赶上限 `MaxCatchUpPerSecond = 0.55`（轨道宽 55%/s）、单段 `MinSpanSeconds = 0.06` / `MaxSpanSeconds = 0.40`、段内线性（**不加 easing** —— `InsetClip` 无可回读动画值，新段起点必须用 Stopwatch + 上段起止值精确复现，否则回跳） | `Presentation/ProgressMotionDriver.cs` |
+| 调用点 | Step3：`UpdateTotalProgressFill()` 内 `SetTrackWidth / SetActive / SetTarget / SnapTo`（`normalProgress = Phase == Running && width >= _lastRenderedWidth`）；底栏：`UpdateFooterProgressFill()` 同构 | `Views/Step3ProgressPage.xaml.cs` / `MainWindow.xaml.cs` |
+| 前沿柔光 | 带宽 `GlowWidth = 26f`、亮峰 `GlowPeakAt = 9f`、峰值 `#5ABCA4FF`、右侧渐隐至全透明；挂**轨道宿主**子树（挂填充会被前沿 clip 切平）；位置与前沿用同一组起止值/时长并行插值 | 同上 |
+| 扫描高光 | 带宽 `SweepBandWidth = 44f`、峰值 `SweepPeakAlpha = 0x1E`（≈12%）、`SweepSeconds = 1.60`（与既有 Token `PCMigMotionProgressSweepDuration` 同源）、`IterationBehavior.Forever`；挂**填充元素**子树 ⇒ 自动被裁剪在已完成区内 | 同上 |
+| 粒子流 | `ParticleCount = 8`、半径 2.0/1.65/1.3 DIP、`ParticleSpan = 34f`（活动带）、`ParticleCycleSeconds = 0.90`、负 `DelayTime` 错相、Opacity 峰值 0.26、颜色 `#8CB4FF` / `#BCA4FF` 交替 | 同上 |
+| 状态映射 | `SetActive(Phase == JobPhase.Running)`：**只有 Running 开装饰**；Pausing / Paused / Stopped / Failed / Interrupted / Resumable / Completed / CompletedWithErrors 一律 `SnapTo` 真值 + `IsVisible=false` + `StopAnimation` | 两个调用点 |
+| Reduced Motion | 复用 `MotionDirector.SystemAnimationsEnabled`：关闭时 `SnapTo` 真值，装饰对象仍会被创建但保持 `IsVisible=false`；业务状态零变化 | 同上 |
+
+**实现纪律（踩坑记录）**：`VisualCollection` **没有索引器**（`Children[i]` 编译失败 CS0021）⇒ 按序号访问必须先 `ToArray()`；`Microsoft.UI.Composition` 与 `Windows.UI.Composition` **是两套类型不可混用**；一个 XAML 元素**只能挂 1 个 child visual**（装饰合并到各挂载点唯一的 `ContainerVisual` 下）；动画属性名是字符串，拼错会**静默不生效**。
+
+### Token / 样式增量（2026-10-05）
+
+| 项 | 变更 | 位置 |
+|---|---|---|
+| 新增 Token | `PCMigRadiusOverlay = 16`（Flyout/Popup/Dropdown 面板）、`PCMigRadiusListItem = 10`（列表条目/行内 chip） | `Themes/Materials.xaml` |
+| 圆角收敛（原为系统默认值） | `PcmigComboBoxRoll` 收起态 `ControlCornerRadius(4)` → `PCMigRadiusInput(14)`；`HighlightBackground` 同改；`PopupBorder` `OverlayCornerRadius(8)` → `PCMigRadiusOverlay(16)`；TaskPicker Presenter/Flyout/Item 三处同规则 | `Themes/PcmigComboBoxRoll.xaml` / `Views/Step2SelectDataPage.xaml` |
+| LineHeight 增量（自然行高 + 余量） | `PCMigTextFooterPercent` 24→**26**；`PCMigTextFooterValue` 18→**20**；`PCMigTextTotalPercent` 52→**60**；`PCMigTextStatValue` 28→**32**；`ObjectPaneHintText` 16→**18** | `Themes/Typography.xaml` / `Views/Step3ProgressPage.xaml` |
+| 关键数字标签宽度 | `FooterPercentText` `Width 48 → 68` + `TextTrimming None`；`FooterEtaText` `Width 100 → 112` + `TextTrimming None`（依据 Pillow 实测：`100.0%`@17Bold = 61.0 px；`约 23 小时 59 分`@13 = 100.0 px） | `MainWindow.xaml` |
+| 锚定浮层宽度 | `ExistingJobsPickerButton_Click` 先调 `AlignExistingJobsFlyoutWidth()`：`ExistingJobsList.Width = Math.Max(180, anchorWidth − 6)`（`flyoutChrome = 2+2+1+1`）；移除 `MinWidth/MaxWidth` 夹取；FlyoutPresenter `MaxWidth 380 → 1200`（仅防御极端视口） | `Views/Step2SelectDataPage.xaml.cs` / `.xaml` |
+| 面板上界与入场 | `ShellHintCard.SetMaxSurfaceHeight(double)`（下界 160 DIP）+ `AnimateSurfaceHeight()`（180 ms `CubicEase/EaseOut`，走 XAML `Height`，**不用** Composition `Size/Offset` —— 那不参与布局）；`SetLine()` + `PlayEntrance()`（`Opacity 0→1` + `Offset (0,6,0)→0`，170 ms，只在折叠↔显示或文本真变化时播一次）。调用方：`MainWindow.UpdateHintCardBounds()`（上界 = 侧栏高 − 导航高 − 12） | `Views/ShellHintCard.xaml(.cs)` / `MainWindow.xaml(.cs)` |
+| 状态路由 | `ConnectionViewModel` 新增 `FlowStatus` / `InlineNote` 两通道（15 处写入点分流：流程级 → `SetFlowStatus`，字段/错误级 → `SetInlineNote`）；`MigrationSessionViewModel` 订阅 `FlowStatus` 并转投 `SetOperational`；`Step1ConnectPage.xaml:28 StatusLineText` 改绑 `InlineNote` | `Presentation/ConnectionViewModel.cs` / `MigrationSessionViewModel.cs` / `Views/Step1ConnectPage.xaml` |
 
 ---
 

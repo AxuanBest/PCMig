@@ -229,9 +229,14 @@ public sealed class DiagnosticCenterViewModel : ObservableObject
         Raise(nameof(IsDegraded));
         Raise(nameof(EvidenceComplete));
 
-        OverviewHealthText = health.IsDegraded
-            ? "存在降级：结论仍可用，但「没有观察到」不等于「没有发生」"
-            : "健康";
+        // ★ FIX BATCH 3 / §6 ★ 「健康」不能只看"有没有丢证据"：一个用户动作被受理、
+        //   请求也写下了、但承诺的业务效果从未达成（如暂停停不住），旧实现照样报"健康"。
+        OverviewHealthText = health.ActionUnfulfilled > 0
+            ? $"存在降级：有 {health.ActionUnfulfilled} 个用户动作已被受理，但业务效果从未达成" +
+              "（「请求成功」不等于「状态达成」）"
+            : health.IsDegraded
+                ? "存在降级：结论仍可用，但「没有观察到」不等于「没有发生」"
+                : "健康";
         EvidenceText = health.EvidenceComplete
             ? "证据完整（无丢失）"
             : $"证据不完整：丢失世代 {health.LossEpoch}，丢弃 {health.EventsDropped}，替换 {health.EventsEvicted}";
@@ -241,7 +246,7 @@ public sealed class DiagnosticCenterViewModel : ObservableObject
                        $"环 {health.RingBytes / 1024}KiB/{health.RingEvents} 条 · 分析滞后 {health.AnalyzerLagMs}ms · " +
                        $"待满足期望 {expectations?.Pending ?? 0}";
 
-        RebuildIncidentRows(incidents);
+        RebuildIncidentRows(incidents, health.ActionUnfulfilled, expectations?.Pending ?? 0);
         RebuildTimeline(recentEvents);
         RebuildMetrics(health, flight, rules, expectations);
         FeedLogFromEvents(recentEvents);
@@ -276,7 +281,11 @@ public sealed class DiagnosticCenterViewModel : ObservableObject
         Raise(nameof(FilteredLog));
     }
 
-    private void RebuildIncidentRows(IReadOnlyList<Incident> incidents)
+    /// <param name="actionUnfulfilled">
+    /// 已受理但业务效果从未达成的用户动作数（引擎/契约层真值）。★ FIX BATCH 3 / §6 ★
+    /// 只要它 &gt; 0 或还有未满足的期望，**"事件卡：0" 就绝不能被读成"没有问题"**。
+    /// </param>
+    private void RebuildIncidentRows(IReadOnlyList<Incident> incidents, long actionUnfulfilled = 0, int pendingExpectations = 0)
     {
         _incidents.Clear();
         foreach (var incident in incidents
@@ -300,7 +309,13 @@ public sealed class DiagnosticCenterViewModel : ObservableObject
         }
 
         IncidentSummaryText = _incidents.Count == 0
-            ? "事件卡：0（没有发现问题，或尚未开始采集）"
+            // ★ FIX BATCH 3 / §6（防假绿）★ 零事件卡 + 仍有未兑现的动作/未满足的期望
+            //   ⇒ 绝不能说"没有发现问题"。这正是真机上的形态：8/8 次暂停点击、请求都写下、
+            //   传输从未停止，而这里显示"事件卡：0（没有发现问题）"。
+            ? actionUnfulfilled > 0 || pendingExpectations > 0
+                ? $"事件卡：0，但有 {actionUnfulfilled} 个动作已被受理却未兑现、" +
+                  $"{pendingExpectations} 个动作期望仍未满足 —— **不等于没问题**"
+                : "事件卡：0（没有发现问题，或尚未开始采集）"
             : $"事件卡：{_incidents.Count}（错误 {_incidents.Count(i => i.Severity == "Error")}，警告 {_incidents.Count(i => i.Severity == "Warning")}）";
 
         Raise(nameof(Incidents));
@@ -380,6 +395,10 @@ public sealed class DiagnosticCenterViewModel : ObservableObject
         Add("采集", "事件（产生/接受/落盘）", $"{health.EventsProduced}/{health.EventsAccepted}/{health.EventsWritten}", "条");
         Add("采集", "丢失（丢弃/替换/关键）", $"{health.EventsDropped}/{health.EventsEvicted}/{health.CriticalLost}", "条");
         Add("采集", "丢失世代 LossEpoch", health.LossEpoch.ToString(), "", estimated: false);
+        // ★ FIX BATCH 3 / §6 ★ 把"用户动作未兑现"变成**可看见的一等指标**，而不是散落在日志里。
+        Add("动作兑现", "已受理但业务效果未达成", health.ActionUnfulfilled.ToString(), "个");
+        if (health.LastActionUnfulfilledReason is not null)
+            Add("动作兑现", "最近未兑现原因", health.LastActionUnfulfilledReason);
         Add("延时", "写入延时（最近）", health.WriterLatencyMs.ToString(), "ms", estimated: true);
         Add("延时", "刷盘延时（最近）", health.FlushLatencyMs.ToString(), "ms", estimated: true);
         Add("延时", "分析滞后（最近）", health.AnalyzerLagMs.ToString(), "ms", estimated: true);

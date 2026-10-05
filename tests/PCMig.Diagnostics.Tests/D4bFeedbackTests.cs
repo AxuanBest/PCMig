@@ -93,8 +93,13 @@ public sealed class D4bFeedbackTests
             Assert.True(contract.DeferredTimeoutMs >= contract.ImmediateTimeoutMs);
         }
 
-        // 合作式暂停的预算必须**远大于** UI 即时预算：暂停要等对象边界，不能用 100ms 判失败。
-        Assert.True(registry.All.Single(c => c.ActionKind == "Pause").ExternalWaitTimeoutMs >= 600_000);
+        // 合作式暂停的预算必须**远大于** UI 即时预算：暂停要等 worker 真正停住，不能用 100ms 判失败。
+        // ★ FIX BATCH 3 / §6 ★ 但它**必须**等于引擎自己的硬失败 SLA（+ 宽限）—— 旧值 600_000（1 小时）
+        //   正是 R-006 假绿根源：引擎 10 秒就自报"停不住"，诊断却要等一小时才可能开卡。
+        var pauseContract = registry.All.Single(c => c.ActionKind == "Pause");
+        Assert.Equal(ActionSla.PauseFulfillmentDeadlineMs, pauseContract.ExternalWaitTimeoutMs);
+        Assert.True(pauseContract.ExternalWaitTimeoutMs >= 10_000, "暂停预算必须覆盖引擎的 10 秒硬失败 SLA");
+        Assert.True(pauseContract.ExternalWaitTimeoutMs <= 15_000, "暂停预算必须与引擎 SLA 同量级，不是 1 小时");
 
         // 重复 ActionKind 必须直接拒绝（两套口径会互相覆盖）。
         Assert.Throws<InvalidOperationException>(() => new FeedbackContractRegistry(new[]
@@ -187,7 +192,28 @@ public sealed class D4bFeedbackTests
     }
 
     [Fact]
-    public void ExternalWaitTimeoutOnlySaysNotYetInsteadOfFailure()
+    public void ExternalWaitTimeoutOnANonTrustCriticalContractOnlySaysNotYet()
+    {
+        var tracker = NewTracker(out _, out var timeouts);
+        var actionId = Guid.NewGuid();
+
+        // ★ FIX BATCH 3 / §6 ★ 这条用例原本用 Pause 表达"外部等待超时只是还没等到"，
+        //   而那恰恰是假绿本身。保留它**真实的意图**（不是每个 external 步骤都该判失败）：
+        //   Connect 的 external 步骤没有声明 DeadlineBreachIsFailure ⇒ 超时仍只是"还没等到"。
+        tracker.Observe(ActionObserved(actionId, "Connect", monotonic: 0));
+        tracker.Tick(TicksFromMs(200_000), true, 0, 10);
+
+        var timeout = timeouts.Single(t => t.Step.ExpectationId == "connect.external");
+        Assert.False(timeout.Step.DeadlineBreachIsFailure);
+
+        var incident = new UiFeedbackMissingRule().Create(in timeout);
+        Assert.Equal(DiagnosticLevel.Warning, incident.Severity);
+        Assert.Contains("还没等到", incident.UserFacingSummary, StringComparison.Ordinal);
+        Assert.Contains("不一定是失败", incident.UserFacingSummary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PauseExternalWaitBreachIsReportedAsFailureNotAsStillWaiting()
     {
         var tracker = NewTracker(out _, out var timeouts);
         var actionId = Guid.NewGuid();
@@ -196,19 +222,20 @@ public sealed class D4bFeedbackTests
         tracker.Observe(ActionEvent(TransferEvents.PauseRequestWriteResult, actionId, 2, TicksFromMs(20),
             DiagnosticOutcome.Succeeded, new TrnPauseRequestPayload(true, true, null)));
 
-        // 合作式暂停的 External 预算是小时级：刚到 1 分钟**不应**判超时。
-        tracker.Tick(TicksFromMs(60_000), true, 0, 10);
+        // ★ §6 ★ 预算不再是一小时：12 秒（引擎 10 秒硬失败 SLA + 2 秒诊断宽限）之内不判超时。
+        tracker.Tick(TicksFromMs(11_000), true, 0, 10);
         Assert.Empty(timeouts);
 
-        // 越过 1 小时预算 ⇒ 只报"还没等到"。
-        tracker.Tick(TicksFromMs(3_700_000), true, 0, 10);
+        tracker.Tick(TicksFromMs(13_000), true, 0, 10);
         var timeout = Assert.Single(timeouts);
-        Assert.Equal(ExpectationKind.ExternalWait, timeout.Step.Kind);
+        Assert.Equal("pause.external", timeout.Step.ExpectationId);
+        Assert.True(timeout.Step.DeadlineBreachIsFailure);
 
         var incident = new UiFeedbackMissingRule().Create(in timeout);
-        Assert.Contains("还没等到", incident.UserFacingSummary, StringComparison.Ordinal);
-        Assert.Contains("不一定是失败", incident.UserFacingSummary, StringComparison.Ordinal);   // 只报"还没等到"
-        Assert.DoesNotContain("已失败", incident.UserFacingSummary, StringComparison.Ordinal);
+        // 旧实现：Warning + "目前只是「还没等到」，不一定是失败" —— 请求受理成功就冒充了业务成功。
+        Assert.Equal(DiagnosticLevel.Error, incident.Severity);
+        Assert.Contains("业务效果", incident.UserFacingSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("不一定是失败", incident.UserFacingSummary, StringComparison.Ordinal);
     }
 
     // ────────────────────────── loss：采集有损必须降级 ──────────────────────────

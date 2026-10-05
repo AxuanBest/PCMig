@@ -421,3 +421,186 @@ Reduced Motion:
 
 - 历史不统一（本轮不改）：`docs/PMML-Legacy-Deviations.md`
 - v1.0 已知缺口：同文件 `Known Gap` 分节（Reduced Motion、Dark 覆盖、ThemeShadow 无数值、Scattered 材质/圆角等）
+
+---
+
+# 附录 A：UI Closure 视觉基础标准（PMML v1.0 §19–§24，2026-10-05 增补）
+
+> **来源与授权**：由项目所有者于 2026-10-05 下达的 UI Closure 指令（`docs/UI-CLOSURE-ISSUES-20261005.md`，R15 授权出处见该文件 §118）。
+> **性质**：本附录收录**跨页面可复用的基础视觉 / 动效 / 布局标准**，不收录任何一次性问题记录。
+> 写法纪律：每条都写成「以后所有同类 UI 都必须遵守」，而不是「这次修了什么」。参数与 `docs/PMML-Implementation-Audit.md` 的实现侧逐条对应。
+> **参数集中原则**：本节出现的数值都是**上限/下限/基准**。调用点不得自行发明数值：能落在 Token 的必须走 Token，不能的必须回到本节登记后才可使用。
+
+## §19 几何基础标准
+
+### §19.1 Corner Radius System（收敛，不新增孤立值）
+
+任何新 Surface / 控件族必须归入下表某一档，**不得**引入表中不存在的孤立圆角值（如 6/7/11/15/18）。层级与材质景深（LMDS）同源：
+
+| 档位 | Token | 值(DIP) | 适用 |
+|---|---|---|---|
+| Secondary / Step Card / **Overlay** | `PCMigRadiusSecondarySurface` / `PCMigRadiusStepCard` / **`PCMigRadiusOverlay`** | 16 | 次级材质卡、步骤卡、**Flyout / Popup / Dropdown 面板容器** |
+| Inset Surface | `PCMigRadiusInset` | 13 | 内嵌面板（提示卡等） |
+| Input / Picker | `PCMigRadiusInput` | 14 | TextBox、ComboBox 收起态、下拉选择器、路径框 |
+| Button | `PCMigRadiusButton` | 12 | 所有按钮 |
+| **List Item** | **`PCMigRadiusListItem`** | 10 | **列表条目、行内 chip（与 `ListItemSurfaceBrushBorder` 同值）** |
+| Badge | `PCMigRadiusBadge` | 9 | 徽章 |
+
+- **PMML-R21（新增）**：控件**收起态**与**展开态**必须使用同一族圆角语义：收起态走 Input 档（14），展开的浮层容器走 Overlay 档（16）。禁止一端继承系统 `ControlCornerRadius`(4)、另一端继承 `OverlayCornerRadius`(8) —— 系统默认值与本设计语言不属同一体系。
+- 轨道类（ProgressTrack / ProgressFill）使用半径 = **高度 ÷ 2**（当前高 12 ⇒ 半径 6），不单列 Token。
+
+### §19.2 Spacing 与 Safe Gap
+
+| 语义 | 值(DIP) | 说明 |
+|---|---|---|
+| 页根行间距 | 12 | 四个页面根容器 |
+| 卡内元素间距 | 10 | 卡内纵向节奏 |
+| 底栏列间距 | 18 | 底栏 Grid |
+| 标准段间距（Section Gap） | 12 | 侧栏内相邻区块之间的最小安全间隙；与 `HintCard.Margin.Top` 同源 |
+
+- **PMML-R22（新增）**：任何低于 8 DIP 的间距都必须注释说明理由（紧凑态 chip / 图标与文字配对例外）。低于该阈值的元素**不得**用于两个可交互目标之间。
+
+### §19.3 Critical Numeric Label Geometry（关键数字标签几何）
+
+**关键数字标签** = 百分比、已传/计划字节、速率、ETA、对象进度等"用户扫一眼就要读到全部字符"的字段。
+
+- **PMML-R16（新增）**：关键数字标签**禁止** `TextTrimming`（含 `CharacterEllipsis`），宽度必须按**最长合法串**预留并可容纳完整字符（含 `%`、单位、空格）；数值位数变化**不得**推动相邻的 Data / Speed / ETA / Action 区域。
+- 预留宽度必须由**程序化测量**决定（字体自然宽度 + 余量），不得手调。已登记的基准（100% DPI，Microsoft YaHei UI）：
+
+| 字段 | 字号/字重 | 最长合法串 | 实测宽 | 预留 |
+|---|---|---|---|---|
+| 底栏百分比 | 17 Bold | `100.0%` | 61.0 px | **68** |
+| 底栏 ETA | 13 Regular | `约 23 小时 59 分` | 100.0 px | **112** |
+
+- 新增关键数字字段时，必须补测并在此表登记后才可预留宽度；**禁止**四张统计卡各自加 Magic Margin 来"躲开裁切"。
+
+### §19.4 No Text Clipping（不得裁切墨迹）
+
+- **PMML-R18（新增）**：**行高必须 ≥ 字体的自然行高 + 余量**，只按「字号 × 1.4」推导是**不充分**的 —— 实测存在"配置值恰等于自然行高（零余量）"与"配置值小于自然行高（真裁切）"两种情况。Critical Numeric 与汉字混排的标签，必须在此口径下复核。
+- 自然行高基准（Microsoft YaHei UI，ascent+descent，实测量）：11→15、13→18、17→23、**20→28**、40→54。
+- 已登记的 LineHeight（→ 为增补后值）：Footer 17→**26**、FooterValue 13→**20**、TotalPercent 40→**60**、StatValue 20→**32**。
+- **禁止**通过"给每个 TextBlock 单独设 Height/MinHeight"来规避；统一走 `Themes/Typography.xaml` 的样式族。
+- 验收必须在 **100% / 125% / 150% DPI** 下确认无上下裁切，且视觉中心与基线一致（`UseLayoutRounding` 开启时尤其要复核亚像素舍入）。
+
+## §20 排版与光学基线
+
+### §20.1 Metric Card Typography / Optical Baseline
+
+- **PMML-R23（新增）**：同一行内的 Metric Card 必须**共享同一套数值/标签样式与垂直基线**：数值用 `PCMigTextStatValue`，标签用 `PCMigTextStepSubtitle`，**不得**给单张卡单独设 FontSize / FontWeight / Padding / Margin 来对齐。
+- 卡内节奏：`Padding=14` + `StackPanel Spacing=4`；标签在上、数值在下；数值 `TextWrapping=NoWrap` + 固定行高。
+- **对齐口径**：以「标签墨迹上沿 → 卡顶距离」为不变量（实测基准 59 px @ 整窗缩放 1.0）。新增统计卡必须复核该距离与同排其它卡一致（允许 ±2 px）。
+- 诊断提示：截图标注（红框/黑块/箭头）会覆盖真实边缘。**判定裁切必须基于未遮挡的对照截图或程序化像素测量**，不得仅凭带标注的图下结论（本项目曾据此证伪一次"文字被裁切"的误判）。
+
+## §21 布局隔离与锚定
+
+### §21.1 Footer Layout Isolation（底栏动态内容与动作区隔离）
+
+- **PMML-R24（新增）**：底栏动态数值区（百分比 / 已传·计划 / 速率 / ETA）**不得**改变动作区（开始 / 暂停 / 停止 / 恢复）的 X 位置。隔离手段优先级：
+  1. 关键数字按 §19.3 预留固定宽度；
+  2. 单位/位数变化造成的伸缩由**中间的弹性区**（进度轨道列）吸收，不得裁切关键数字、不得压缩动作按钮；
+  3. 动作按钮保持固定宽度与固定顺序（查看 / 开始 / 暂停 / 停止 / 恢复各自 `Width` 固定）。
+- 验收字符串集：百分比 `0.0% / 9.9% / 99.9% / 100.0%`；字节 `MB / GB / TB` 三档；ETA `— / 约 5 秒 / 约 59 分 59 秒 / 约 1 小时 20 分 / 约 23 小时 59 分`。
+
+### §21.2 Anchored Popup Alignment（锚定浮层几何对齐）
+
+- **PMML-R20（新增）**：锚定浮层（Flyout / Popup / Dropdown 面板）的**内容 Border 左右几何边界必须与锚点控件一致**；默认同宽。阴影允许视觉外溢，但**不计入内容边界**。
+- 实现纪律：
+  - 宽度**由锚点驱动**（`anchorWidth − flyoutChrome`），不得绑定固定数值或用负 Margin / 魔法偏移凑；
+  - **`flyoutChrome` = FlyoutPresenter 的 `Padding` 左右 + `BorderThickness` 左右**（当前 `2+2+1+1 = 6 DIP`）。该常量必须带注释说明其构成，禁止出现身份不明的补偿数字；
+  - 禁止给浮层列表设 `MinWidth/MaxWidth` 硬夹取（会与锚点宽度打架）；上限只用于防御极端视口。
+- 验收：同一锚点在 100%/125%/150% DPI、窗口缩放与滚动状态下，浮层左右边界与锚点差值均为 0（±1 px 抗锯齿容差）。
+
+## §22 进度视觉语言（Progress Visual Language）
+
+> 本节收敛此前散落在 §10/§12/§13 的四处进度条描述；对外行为以本节为准，实现参数以 `docs/PMML-Implementation-Audit.md` 的 Progress 族为准。
+
+### §22.1 真值与呈现的分工
+
+- 进度条由三个**互相独立**的东西构成：**数据真值**（引擎派发的 `ProgressTruthSnapshot`）、**渲染宽度**（`InsetClip.RightInset` 标量）、**装饰物**（前沿柔光 / 扫描高光 / 粒子）。
+- **PMML-R25（新增）**：填充元素**常驻满宽**，可见长度只由裁剪标量表达；**禁止**按帧写 `Width` / `Canvas.Left` / `Margin` / `Clip.Rect` 等布局或几何属性来驱动进度动画（`Width` 是布局属性，60 fps 插值 = 每秒 60 次布局）。
+
+### §22.2 Leading Edge Glow（前沿柔光）
+
+- **PMML-R19（新增）**：装饰物必须裁剪或衰减排布在**已完成区**内，**禁止**越界覆盖未完成区、文字与百分比。
+- 前沿柔光登记参数：带宽 **26 DIP**、亮峰距带左端 **9 DIP**（使峰值恰落在已完成区右缘）、峰值 alpha **0x5A**、色相取项目 Ambient 蓝紫（`#8CB4FF` / `#BCA4FF`）、右侧**渐隐至全透明**（因此视觉外溢部分不可见，不构成越界）。
+- **挂载位置纪律**：柔光挂**轨道宿主**子树 —— 填充元素的右边缘被裁成硬边，柔光挂在那里会被切平。
+
+### §22.3 Sweep / Shimmer（扫描高光）
+
+- 登记参数：带宽 **44 DIP**、峰值 alpha **0x1E**（约 12%，克制）、渐变 `透明 → 淡白/淡蓝 → 透明`、单程时长取 Token **`PMML.Motion.Duration.ProgressSweep = 1.60s`**（`Themes/Motion.xaml` 的 `PCMigMotionProgressSweepDuration`）。
+- **挂载位置纪律**：扫描高光挂**填充元素**子树 ⇒ 自动被裁剪在已完成区内，绝不扫进未完成区。
+- 禁止"100% 后无限 shimmer"（见 §23.2）。
+
+### §22.4 Progress Particle Motion（粒子流）
+
+- 登记参数：粒子数 **8**（低密度）、半径 2.0 / 1.65 / 1.3 DIP 三档、颜色在 Ambient 蓝与蓝紫之间交替、透明度峰值 **0.26**、单粒子周期 **0.90s**、错相方式 = 负 `DelayTime`、活动带宽度 **34 DIP**。
+- **几何纪律**：粒子容器整体跟随**真实前沿**（与填充前沿使用同一组起止值、同一时长并行插值），粒子只在**前沿往后 34 DIP 的带内**流动 ⇒ 永远不会跑进未完成区。
+- **形态纪律**：低密度柔和亮点，**不得**呈火花、星空、闪粉、噪点；禁止高密度粒子与每帧新建 Composition 对象。
+
+### §22.5 Progress State Motion（进度装饰的状态映射）
+
+- **PMML-R26（新增）**：进度装饰**只在 `Running` 打开**；`Pausing / Paused / Stopped / Failed / Interrupted / Resumable / Completed / CompletedWithErrors` 一律**立即落到真值并关闭装饰**。
+- 「暂停时粒子仍前流」「暂停时扫描高光继续扫」被明确定为**视觉撒谎**（用户指令 §23 假修复清单）。关闭必须同时 `IsVisible=false` 与 `StopAnimation`，避免"半路静止的亮带/光点"。
+
+## §23 运动与入场
+
+### §23.1 Progress Motion / Smooth Interpolation（平滑插值）
+
+- **PMML-R17（新增）**：**数据真值与视觉插值必须解耦**。UI 在 Composition 层做高帧率平滑，业务快照**不需要** 60 Hz；动画只能插值**真实的新旧值之间**。
+- 登记参数：追赶上限 **轨道宽度的 55% / 秒**、单段时长 **60 – 400 ms**、段内**线性**（不加 easing）。
+- **为什么不加 easing**：`InsetClip` 无可回读的当前动画值，新一段的起点必须用「上一段起止值 + 时长 + 时间戳」精确复现 —— 带 easing 就无法精确复现，会造成**回跳**。
+- **禁止**（用户指令 §23 假修复清单）：预测下一进度、外推、卡在 9x% 自爬到 99%、随机加进度、动画值回写业务、完成态不走满 100%。
+- 系统关闭动画（Reduced Motion）时直接 `SnapTo` 真值；**装饰物连对象都不建**，业务状态零变化。
+
+### §23.2 Expandable Panel Motion（可扩张面板动画）
+
+- **PMML-R27（新增）**：任何会随内容增长的面板必须同时满足三件事：
+  1. **有上界**：增长不得碰 / 压 / 穿相邻区块；上界 = 「容器可用高度 − 上方区块高度 − 标准段间距」，并保留下界（当前提示卡下界 160 DIP：标题行 + 一行状态 + 署名行）；超出后由面板**内部**轻量滚动消化；
+  2. **扩张/收缩必须是动画**，不得一帧跳高/缩回，也不得引发 Workspace 大范围抖动：时长 **180 ms**、`CubicEase/EaseOut`、目标差 < 0.5 DIP 不重播；
+  3. 动画属性必须是**参与布局的高度**（XAML `Height`）。**禁止**用 Composition `Visual.Size/Offset` 冒充面板扩张 —— 它只改渲染尺寸、不参与布局，会导致父容器不重排、命中测试错位、滚动条长度错误。
+- 禁止反向监听面板自身 `SizeChanged` 反推上界（面板高度正是被上界约束的 ⇒ 形成回环）。
+
+### §23.3 Text Entrance Motion（文本/状态入场）
+
+- **PMML-R28（新增）**：状态文本"出现"时统一使用轻入场：`Opacity 0→1` **+** 垂直位移（Option B：`Offset (0,6,0) → (0,0,0)`）或水平位移（Option A：`TranslateX −8…−12 → 0`），时长 **170 ms**，**不 bounce、不 overshoot、不大位移**。
+- **触发纪律（关键）**：只在「折叠 ↔ 显示」或「文本内容真正变化」时播一次；**同一句话重复抵达绝不重播** —— 否则会退化为"每两秒自播"的干扰源。
+- 覆盖范围：提示卡各通道新消息、连接中/生成计划/复制 object/当前文件变化/日志新增/成功·Warning/状态标题切换。
+- **降级**：`Reduced Motion` 关闭时直接显示终值；入场动画全部包在 try/catch 中，**装饰失败不得影响文本内容本身**。
+
+### §23.4 Log / Status Item Entrance
+
+- 日志行与状态项沿用 §23.3 同一套 Token 与触发纪律，**不得**各自发明时长；列表新增项只对**新增的那一项**播放入场，已有项不重播。
+
+## §24 Motion 性能规则
+
+- **PMML-R29（新增）**：动画必须是 GPU-friendly 的：
+  - 优先 **Composition Layer**（`Offset` / `Opacity` / `Clip` / `Scale`）与原生 ThemeTransition；
+  - **禁止**高频 `DispatcherTimer` 改 `Width`、每帧触发大量 XAML layout、每帧创建/销毁 Composition 对象、主线程 60 Hz 业务轮询、高密度粒子；
+  - Composition 对象**在挂载时一次性创建**，稳态零创建；尺寸变化只改 `Size` 并重启动画；
+  - `Forever` 动画必须配有停止路径（状态映射见 §22.5）。
+- **PMML-R30（新增）**：动画属性名是字符串（`StartAnimation("Offset.X", …)` 等），**拼错会静默不生效**。新增动画必须至少有一次真机可播放证据（截图/短捕获或 UIA + 像素证据），不得只凭代码存在就宣称已实现。
+- 环境依赖：`Microsoft.WindowsAppSDK 2.5.1`；`Microsoft.UI.Composition` 与 `Windows.UI.Composition` 是**两套类型不可混用**；一个 XAML 元素**只能挂 1 个 child visual**（多处装饰必须合并到同一 `ContainerVisual` 下）。
+- **PMML-R31（新增）**：禁止为动画引入重量级第三方依赖（社区工具包需先评估），业务核心不得为纯视觉问题而改动。
+
+---
+
+## 附录 A 规则索引补充（接 §16）
+
+| 规则 | 内容 |
+|---|---|
+| **PMML-R16** | 关键数字标签禁止 Trimming；宽度按最长合法串程序化预留；数值位数变化不得推动相邻元素。 |
+| **PMML-R17** | 数据真值与视觉插值解耦；动画只插值真实新旧值；禁止预测/外推/自爬/回写业务。 |
+| **PMML-R18** | 行高 ≥ 字体自然行高 + 余量；Critical Numeric 在多 DPI 下不得顶裁。 |
+| **PMML-R19** | 装饰物必须裁剪或衰减排布在已完成区内；Reduced Motion 可关且不改变业务状态。 |
+| **PMML-R20** | 锚定浮层内容边界与锚点左右几何一致；阴影可外溢但不计入内容边界。 |
+| **PMML-R21** | 控件收起态与展开态使用同一族圆角语义（Input / Overlay），禁止继承系统默认圆角。 |
+| **PMML-R22** | 间距 < 8 DIP 必须注释理由；不得用于两个可交互目标之间。 |
+| **PMML-R23** | 同行 Metric Card 共享同一套数值/标签样式与垂直基线，禁止单卡私有排版。 |
+| **PMML-R24** | 底栏动态数值不得改变动作区 X 位置；伸缩由中间弹性区吸收。 |
+| **PMML-R25** | 填充常驻满宽，可见长度只由裁剪标量表达；禁止按帧写布局/几何属性驱动进度。 |
+| **PMML-R26** | 进度装饰只在 Running 打开；其余状态立即落真值并关装饰（暂停时继续扫 = 撒谎）。 |
+| **PMML-R27** | 可扩张面板必须有上界（含下界与内部滚动）、有动画、用参与布局的属性。 |
+| **PMML-R28** | 文本入场统一轻动效与触发纪律（只在折叠↔显示或真变化时播一次）。 |
+| **PMML-R29** | 动画必须 GPU-friendly；Composition 对象一次性创建；Forever 必须可停。 |
+| **PMML-R30** | 字符串属性名的动画必须有真机可播放证据；拼错会静默失效。 |
+| **PMML-R31** | 禁止为动画引入重量级依赖；业务核心不得为纯视觉问题改动。 |

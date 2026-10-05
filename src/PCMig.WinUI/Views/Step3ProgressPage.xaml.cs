@@ -2,6 +2,8 @@ using System;
 using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using PCMig.Core.Models;
+using PCMig.Core.Util;
 using PCMig.WinUI.Presentation;
 
 namespace PCMig.WinUI.Views;
@@ -28,9 +30,124 @@ public sealed partial class Step3ProgressPage : UserControl
     private MigrationSessionViewModel? _session;
     private StepNavigation? _nav;
 
+    /// <summary>★ FIX BATCH 5 ★ 顶栏进度填充的唯一真值来源（由 PushState 从 ProgressTruthSnapshot 写入）。</summary>
+    private double _totalProgressPercent;
+
+    /// <summary>
+    /// ★ UI Closure 2026-10-05（用户指令 UI-05）★ 进度条**渲染补间**驱动：真值仍由本页唯一写入者提供，
+    /// 驱动只把它在 Composition 层（GPU、InsetClip.RightInset）平滑过去，不参与任何业务判断。
+    /// </summary>
+    private ProgressMotionDriver? _progressMotion;
+
+    /// <summary>上一次交给驱动的真值像素宽（用于识别"目标回退" ⇒ 必须 SnapTo 而不是回爬）。</summary>
+    private double _lastRenderedWidth;
+
+    /// <summary>★ PHASE C-1 探针 ★ 调试覆盖层刷新定时器（仅 PCMIG_PROGRESS_DEBUG=1 时存在）。</summary>
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _debugTimer;
+
     public Step3ProgressPage()
     {
         InitializeComponent();
+        // ★ FIX BATCH 5（§8）★ 轨道宽度变化（窗口缩放 / 密度档位切换）时必须重算填充宽度，
+        //   否则填充会停留在上一次的像素值上与真实百分比不符。写入者仍是 UpdateTotalProgressFill（唯一）。
+        TotalProgressHost.SizeChanged += (_, _) => UpdateTotalProgressFill();
+        // ★ UI Closure 2026-10-05（用户指令 UI-05）★ 填充元素常驻满宽（XAML 本地 Width="Auto" 覆盖样式里的 0），
+        //   用 Composition 的 InsetClip 表示"未完成部分"，在 GPU 上把视觉补间到真值。
+        _progressMotion = new ProgressMotionDriver(TotalProgressFill, TotalProgressHost);
+        StartDebugProbe();
+    }
+
+    /// <summary>
+    /// ★ PHASE C-1 探针（PCMIG_PROGRESS_DEBUG=1）★ 每 250 ms 把进度条渲染链路的内部状态写进屏幕角落的
+    /// 诊断覆盖层：驱动是否 Active、轨道/真值/视觉像素、RightInset、三个装饰物 IsVisible、真值到达间隔 EMA，
+    /// 以及 raw（引擎真值）与 display（显示真值，含 Resume floor）两层数据。
+    ///
+    /// 为什么需要它：上一轮把"代码里调用了 StartAnimation"当成验收结论，而真机上像素可能毫无变化
+    /// （§0 的 UI-05/UI-06 被证伪）。探针 + 帧序列像素差分才是证据。探针不改任何业务与真值行为。
+    /// </summary>
+    private void StartDebugProbe()
+    {
+        if (!ProgressMotionDriver.DebugEnabled) return;
+        ProgressDebugPanel.Visibility = Visibility.Visible;
+        try
+        {
+            var timer = DispatcherQueue?.CreateTimer();
+            if (timer is null)
+            {
+                UpdateDebugProbe();
+                return;
+            }
+
+            timer.Interval = TimeSpan.FromMilliseconds(250);
+            timer.IsRepeating = true;
+            timer.Tick += (_, _) => UpdateDebugProbe();
+            timer.Start();
+            _debugTimer = timer;
+        }
+        catch
+        {
+            // 探针失败绝不影响进度显示本身。
+        }
+
+        UpdateDebugProbe();
+    }
+
+    private void UpdateDebugProbe()
+    {
+        if (!ProgressMotionDriver.DebugEnabled) return;
+
+        try
+        {
+            var motion = _progressMotion?.DescribeDebug() ?? "PMD (none)";
+            var session = _session;
+            var raw = session?.LastTruth;
+            var shown = session?.PresentationTruth;
+            ProgressDebugText.Text =
+                $"{motion}\n"
+                + $"phase={session?.Phase.ToString() ?? "-"} uiPercent={_totalProgressPercent:0.0}\n"
+                + $"raw: pct={raw?.Percent:0.0} displayed={raw?.DisplayedTransferredBytes ?? 0} committed={raw?.CommittedBytes ?? 0} "
+                + $"inFlight={raw?.InFlightConfirmedBytes ?? 0} src={raw?.InFlightSource.ToString() ?? "-"} retry={raw?.RetryState.ToString() ?? "-"}\n"
+                + $"display: pct={shown?.Percent:0.0} displayed={shown?.DisplayedTransferredBytes ?? 0} "
+                + $"floorActive={session?.ResumeDisplayFloorActive ?? false} floorBytes={session?.ResumeDisplayFloorBytes ?? 0}\n"
+                + $"track={TotalProgressHost.ActualWidth:0.0} fillActual={TotalProgressFill.ActualWidth:0.0} localNow={DateTime.Now:HH:mm:ss.fff}";
+        }
+        catch
+        {
+            // 同上。
+        }
+    }
+
+    /// <summary>
+    /// ★ FIX BATCH 5（§8）★ 顶栏进度填充的**唯一写入者**：宽度 = 百分比 × 轨道实际宽度。
+    /// 为什么不用 ProgressBar 控件：见 <c>Themes\Controls.xaml</c> 中 PCMigProgressTrack/PCMigProgressFill
+    /// 的说明 —— WinUI 3 的 ProgressBar 不会按 DeterminateRoot/ProgressBarIndicator 驱动自定义模板的
+    /// 填充宽度（实测 UIA 值 47.29% 而像素零变化）。这里没有任何动画推进宽度；百分比本身来自唯一真值。
+    /// </summary>
+    private void UpdateTotalProgressFill()
+    {
+        var percent = Math.Clamp(double.IsNaN(_totalProgressPercent) ? 0 : _totalProgressPercent, 0, 100);
+        var trackWidth = TotalProgressHost.ActualWidth;
+        var width = trackWidth > 0 ? Math.Round(trackWidth * percent / 100.0, 1) : 0;
+
+        // ★ UI Closure 2026-10-05（用户指令 UI-05 / §23 禁止的假修复）★ 补间只用于"运行中的正常推进"：
+        //   · 暂停 / 暂停中 / 停止 / 中断 / 失败 / 完成 —— 一律 SnapTo（不留在半路，也绝不让光波/粒子继续前进）；
+        //   · 目标比上一次更小（新任务、真值重置）—— SnapTo（进度不可能变小，视觉回爬就是伪造）；
+        //   · 系统关闭动画 —— 驱动内部直接落位，业务状态与最终像素完全一致。
+        var motion = _progressMotion;
+        if (motion is not null)
+        {
+            motion.SetTrackWidth(trackWidth);
+            var phase = _session?.Phase ?? JobPhase.Created;
+            // ★ UI-06 状态映射 ★ 只有 Running 开装饰：暂停 / 停止 / 失败 / 完成一律关（暂停时让光波继续扫 = 撒谎）。
+            //   走局部引用 motion 而不是字段：字段可能被其它路径改写，编译器对字段解引用会报 CS8602。
+            motion.SetActive(phase == JobPhase.Running);
+            var normalProgress = phase == JobPhase.Running && width >= _lastRenderedWidth;
+            if (normalProgress) motion.SetTarget(width); else motion.SnapTo(width);
+            _lastRenderedWidth = width;
+        }
+
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
+            TotalProgressHost, $"迁移总进度 {percent:0.0}%");
     }
 
     public void ApplyState(PageReadiness state)
@@ -97,14 +214,24 @@ public sealed partial class Step3ProgressPage : UserControl
         if (session is null) return;
 
         // ── 总进度：百分比 / 已传字节 / 进度条 ──
-        var percent = session.Percent;
+        // ★ FIX BATCH 4（§7.1）★ 与底栏**同一个真值**（引擎的 ProgressTruthSnapshot）：页内不再有
+        //   第二套算术，顶栏与底栏因此不可能再出现"两个百分比/两个字节数"。
+        //   ★ 真机复验返修（2026-10-05 run2）★ 与底栏同一个 **PresentationTruth**（显示连续性 floor 托底）；
+        //   LastTruth(raw) 只用于诊断：恢复后 raw 会先重建到 0，直接读它会让用户看到进度倒退。
+        var truth = session.PresentationTruth;
+        var percent = truth?.Percent ?? session.Percent;
         TotalPercentText.Text = $"{percent:0.0}%";
-        TotalBytesText.Text = session.ProgressText;
-        TotalProgressBar.Value = double.IsNaN(percent) ? 0 : Math.Clamp(percent, 0, 100);
+        TotalBytesText.Text = truth is null
+            ? session.ProgressText
+            : $"{Format.Bytes(truth.DisplayedTransferredBytes)} / {Format.Bytes(truth.PlannedBytes)}";
+        _totalProgressPercent = double.IsNaN(percent) ? 0 : Math.Clamp(percent, 0, 100);
+        UpdateTotalProgressFill();
 
         // ── 四张统计卡：传输速度 / 预计剩余 / 对象进度 / 已传-计划 ──
-        SpeedValueText.Text = session.EngineSpeedText;
-        EtaValueText.Text = session.EtaText;
+        SpeedValueText.Text = truth is null
+            ? session.EngineSpeedText
+            : (truth.SpeedBytesPerSecond > 0 ? Format.Speed(truth.SpeedBytesPerSecond) : "—");
+        EtaValueText.Text = truth is null ? session.EtaText : Format.Eta(truth.EtaSeconds);
         ObjectValueText.Text = session.ObjectText;
         BytesCardLabel.Text = session.DataLabel;
         BytesValueText.Text = $"{session.ActualBytesText} / {session.PlanBytesText}";

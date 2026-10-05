@@ -230,6 +230,11 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
         // ★ R-2 收口（第二轮：两处无计数静默吞异常）★ 跟踪器内部故障同样进健康通道：
         //   事件被消费却没被解释 ⇒ 它负责的那类"没等到反馈"的判定根本没发生，与规则没跑成同性质。
         _expectations.OnFault = reason => _health.MarkRuleFault(reason);
+        // ★ FIX BATCH 3 / §6 ★ **受理 ≠ 兑现**：引擎自报"业务效果没达成"（如 TRN-023 PauseFailed）
+        //   ⇒ 关期望为失败，并把它记进**健康 verdict 的"动作未兑现"账**。
+        //   没有这条接线，真机事故里 8/8 次暂停点击、0 次引擎确认就仍然是"0 事件卡 + healthy"。
+        _expectations.OnFailure = failure => _health.MarkActionUnfulfilled(
+            "expectation-failed:" + failure.Step.ExpectationId + ":" + failure.TriggerEventName);
 
         SetAnalyzerSink(evt =>
         {
@@ -262,11 +267,17 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
     {
         try
         {
+            // ★ FIX BATCH 3 / §6 ★ 信任关键步骤的**期限已过**同样是"动作未兑现"：
+            //   引擎连 PauseFailed 都没报（进程被杀/卡死）时，这是唯一还能说真话的通路。
+            if (timeout.Step.DeadlineBreachIsFailure)
+                _health.MarkActionUnfulfilled("expectation-deadline:" + timeout.Step.ExpectationId);
+
             var incident = UiCommandNotDispatchedRule.Handles(timeout)
                 ? _notDispatchedRule.Create(in timeout)
                 : _feedbackMissingRule.Create(in timeout);
 
-            _ruleEngine.ReportIncident(incident, triggerFlight: false);
+            // 信任关键的兑现期限已过 ⇒ 与 Error 级事件卡同等待遇（冻结前后证据，便于事后归因）。
+            _ruleEngine.ReportIncident(incident, triggerFlight: timeout.Step.DeadlineBreachIsFailure);
         }
         catch (Exception ex)
         {

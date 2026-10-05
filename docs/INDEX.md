@@ -163,7 +163,14 @@
 
 - `E:\Project\deepseek work\PCMig\archive\evidence\diagnostics-audit-20261001\*`、`E:\Project\deepseek work\PCMig\archive\evidence\diagnostics-d61-20261001\*`（**仓库内** archive；events / incidents / metrics / snapshots / flight）—— **原始机器证据，禁止删除；其中的空目录是证据结构，不是垃圾**
 
-**未来三 VM / Stage B**：未开始，等授权。
+**Route A 三 VM 回归实验室（实验室侧，2026-10-04 实读）**
+
+- 实验室根：`E:\PCMigLab\`（规格 `Staging\RouteA-Spec.md`、夹具/用例 `Staging\ctl\{cases,host,faults}\`、证据 `Evidence\RouteA\`）；三台 VM：LAB-DC01 / LAB-SRC01 / LAB-DST01（源 `\\LAB-SRC01\D`，目标 `D:\*Target`，Runner 在 guest 会话 1）。
+- **进度**：GROUP A = CLEAN/CLOSED；GROUP B = CLEAN/CLOSED；GROUP C = CLEAN/CLOSED（C01–C11 全部 VALID）；**GROUP D = IN PROGRESS**（gd-r1/gd-r2/gd-r3 已跑，D01/D02/D04 因夹具缺陷 INVALID、修复已就绪）；Full Route A Round 1/2/3 尚未开始；PRODUCT BUGS OPEN = 0。
+- 实验室侧当前交接（**唯一入口**，随路线推进更新）：`E:\PCMigLab\Evidence\RouteA\SESSION-HANDOFF-GROUP-D-INPROGRESS-20261004-1125.md`（短卡 `…-1125-QUICK.txt`）、检查点 `…\CURRENT-ROUTE-A-CHECKPOINT.txt`、权威账本 `…\Route-A-Bug-Ledger.md`、历史归档 `…\history\`。
+- 该实验室交接与本文档 §七 的「Current Handover」**不是同一条轨道**：§七 管产品治理（D6.3 收口），实验室交接管 Route A 回归执行；两者互不覆盖。
+
+**未来 Stage B**：未开始，等授权。
 
 **已取代**：`docs\archive\公司域环境验证清单.md`（Superseded by `First-Day-Company-Test-Checklist.md`；其「对 IT 申请资源的话术」与「给安全团队的评审要点」两块独有内容已合并保留）。
 
@@ -173,6 +180,30 @@
 
 **当前**：`docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md`
 （上一份 Current `工作交接-20261002-D6.3可信度收口完成.md` 已于 2026-10-02 按本节规则移入 `docs\handover\history\`，只作历史追溯；更早的 `工作交接-20261001-D6.2真实验证完成.md`、`工作交接-20261001-Workspace治理完成与D6.2起点.md` 亦已在历史目录。）
+
+**并行 lab 轨道交接（不替换产品 Current）**：
+- **最新**：`docs\工作交接-20261005-UI-Closure.md`（2026-10-05 03:00）
+  —— 用户 **UI Closure** 专项（14 项已确认问题 UI-01…UI-14 + §19 的 PMML 17 章节同步）。全部 14 项**代码级 FIXED**，
+  Release 构建 0 error / 3 warning（= 基线）。真实运行证据：Step1 连接 `localhost` ⇒ **发现 8 个共享**、表单内状态行
+  **空**（流程级提示已按 UI-10 改投左侧提示卡通道）。证据目录
+  `E:\PCMigLab\Evidence\Trust-Critical-Recovery\UI-CLOSURE-20261005\`（含像素测量报告、字体度量、截图）。
+  PMML 已同步（`PCMig-Visual-Motion-Language.md` 新增附录 A §19–§24 + R16–R31；`PMML-Implementation-Audit.md`
+  新增 Progress 族 UI Closure 更新与 Token 增量；`PMML-Legacy-Deviations.md` 更新 L-07/G-04 并新增 L-17/L-18）。
+  改动全部**未 commit / 未 push / 未 tag**。交付报告见 `docs\UI-CLOSURE-REPORT-20261005.md`（含 §25 汇报字段、逐项修复说明、PMML diff summary、人工复验清单）。**会话级交接（做了什么 / 没做什么 / 文件坐标 / 下一步）见 `docs\工作交接-20261005-UI-Closure-会话交接.md`；可直接粘贴给新会话的短卡见 `docs\工作交接-20261005-UI-Closure-QUICK.txt`。**
+- 并行 lab 轨道（前一轮）：`docs\工作交接-20261005-Trust-Critical-Recovery.md`（2026-10-05 02:00）
+  —— **FIX BATCH 1→7 已全部施工完成**（Pause 核心语义 / Pause UI 状态机 / 诊断动作兑现 / 进度真值 / 底栏视觉 / 状态路由 / 全量质量门），
+  并修复两个真实信任级缺陷（暂停 UI 终点假 `pause-unsettled`、恢复终点假 `resume-unsettled`，均含 RED 双证 + 真机复测）；
+  `RECOVERY GATE` 的 **case1/2/3/4/5/7 = CLEAN**（三层真值 + Action Causality）。改动全部**未 commit**（工作树 51 modified + 23 untracked = 74 条）。
+  **唯一未结卡点 = 缺陷#3**（进程被杀→重启→采纳中断任务后，第一次点「恢复任务」被完全吞掉、零反馈；已确定性复现，
+  「产品浮层 light-dismiss」与「夹具强制激活吞点击」两种解释**尚未判定**）。完整细节与恢复后顺序见实验室侧
+  `E:\PCMigLab\Evidence\Trust-Critical-Recovery\SESSION-HANDOFF-TRUST-CRITICAL-RECOVERY-20261005-0200.md`（+ `…-QUICK.txt`）
+  与现场账本 `CURRENT-TRUST-CRITICAL-CHECKPOINT.txt`（尾部 `PAUSE / FREEZE RECORD` 2026-10-05 01:44）。
+- 历史（只增不覆保留）：`docs\工作交接-20261004-Trust-Critical-Recovery.md`
+  —— 2026-10-04 真实物理机 200+ GB 验收暴露 P0 暂停失效 / 诊断假绿 / 进度真值 / UI 布局问题后开启的
+  **Trust-Critical Recovery Campaign** 会话交接（只读调查已完成并交付，修复战役仅完成 baseline，产品源码零改动）。
+
+权威指令与证据在实验室侧 `E:\PCMigLab\Evidence\Trust-Critical-Recovery\`。上述并行轨道交接按"只增不覆"新增，
+**不改变**本节的"当前工作交接"归属，故未触发历史归档流程。
 
 规则（与 `AGENTS.md` 铁律 10 一致）：
 
@@ -257,7 +288,7 @@
 1. **【已完成 · 2026-10-02】D6.3 Final Repository Closure（提交 + 文档收口）**：按人工拍板采用 **2 个本地 Commit**（`fix(diagnostics): close D6.3 trust-critical risks` + `docs(diagnostics): finalize D6.3 closure handover`；**逐文件白名单 staging，禁止 `git add .` / `git add -A`**）；最终 Closure Report 已登记进本 INDEX（§四）；`PCMig\archive\` 已由 `.gitignore` 的 `/archive/` 规则保护；**未 push / 未 tag / 未 release**。D6.3 权威变更范围以 Final Closure Commit 的 `git show --name-status` / `git show --stat` 为准。
 2. **D6.2 遗留修复项**：G-1/G-3 Deep Trace 出口（`DIA.RingTriggered`/`DIA.RingSealed` → 真正写进包）**仍未做**（D6.3 只做到"诚实地说 `included=false`"）；**G-2 跨包隐私令牌化 / G-4 显式 AutomationId 绑定 / G-9 `UI.NavigationChanged` 已在 D6.3 完成**
 3. **Stage B**（未授权；D6.2 结论为 **NOT READY**；D6.3 的**独立复验已完成 / PASSED**；前置清单见 D6.2 报告 §十五）
-4. **三 VM 企业模拟实验室**（未开始）—— 6/9 Action 真实链路与 10 项故障场景需在此执行
+4. **三 VM 企业模拟实验室**（**已建成并在用 —— 2026-10-04 实读修正**：实验室根 `E:\PCMigLab\`，Route A 回归执行中）—— GROUP A/B/C = CLEAN/CLOSED，GROUP D = IN PROGRESS（D01/D02/D04 待用修复后的夹具重跑），PRODUCT BUGS OPEN = 0；Full Route A Round 1/2/3 未开始。实验室侧当前交接与证据见 §六「Route A 三 VM 回归实验室」。原始口径「未开始」已作废。
 5. **Release Governance**（登记未改）：`tools\release.ps1` 交付清单、`首日实测检查表.md` 陈旧口径、`AGENTS.md` 版本号与 INDEX 指针
 6. **Harness / DSH Workspace Cleanup**（工作区根 174 散落文件 + 12 重复目录，明确不碰）
 

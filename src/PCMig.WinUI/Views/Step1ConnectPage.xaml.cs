@@ -106,7 +106,7 @@ public sealed partial class Step1ConnectPage : UserControl
         if (permitted)
         {
             trace.Started();
-            trace.Expect("connect", "vm-status-change");
+            trace.Expect("connect.v1", "connect.external");
             try
             {
                 await _vm!.ConnectAsync(PasswordInput.Password);
@@ -140,7 +140,7 @@ public sealed partial class Step1ConnectPage : UserControl
 
             if (_vm is { IsConnected: true })
             {
-                trace.Confirm("connect", "vm-status-change");
+                trace.Confirm("connect.v1", "connect.external");
                 // ★ D6.1 §2.3 ★ Phase 必须是**稳定 code**，不能塞 UI 展示文字（可能含主机名/路径/用户输入）。
                 trace.Complete(DiagnosticOutcome.Succeeded, "connected");
             }

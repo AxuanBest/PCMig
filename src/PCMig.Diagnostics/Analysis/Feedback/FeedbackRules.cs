@@ -109,12 +109,17 @@ public sealed class UiFeedbackMissingRule
     public Incident Create(in ExpectationTimeout timeout)
     {
         var pending = timeout.Expectation;
+        // ★ FIX BATCH 3 / §6 ★ 信任关键步骤的期限已过 = **业务效果未达成**，不是"还没等到"：
+        //   Error 级 + 高置信度（我们有"请求确实被受理"和"期限内什么都没兑现"两条事实）。
+        var breach = timeout.Step.DeadlineBreachIsFailure;
+        var severity = breach ? DiagnosticLevel.Error : DiagnosticLevel.Warning;
+
         var incident = new Incident(
             incidentId: IncidentIdFor(pending, timeout.Step),
             ruleId: Id,
             ruleVersion: 1,
             symptomCode: Symptom,
-            severity: DiagnosticLevel.Warning,
+            severity: severity,
             firstSeenUtc: pending.OpenedUtc,
             lastSeenUtc: pending.OpenedUtc,
             actionId: pending.ActionId,
@@ -128,17 +133,22 @@ public sealed class UiFeedbackMissingRule
         {
             AtUtc = pending.OpenedUtc,
             Fact = new IncidentEvidence(pending.OpenedFrom, UiEvents.UserActionObserved.Name, IncidentEvidence.Fact),
-            Severity = DiagnosticLevel.Warning,
+            Severity = severity,
             // 缺事件结论 ⇒ 采集有损时降级为 Inconclusive。
             Status = timeout.EvidenceComplete ? null : IncidentStatus.Inconclusive,
             Confidence = !timeout.EvidenceComplete ? ConfidenceBand.Unknown
+                : breach ? ConfidenceBand.High
                 : hasAnySatisfied ? ConfidenceBand.Medium
                 : ConfidenceBand.Low,
             ConfidenceRationale = !timeout.EvidenceComplete
                 ? "采集不完整（lossEpoch=" + timeout.LossEpoch + "）：无法区分「反馈没出现」与「没记到」"
-                : "契约 " + pending.ContractId + " 要求观察到 " + expected +
-                  "；已超出预算 " + timeout.OverdueMs + "ms" +
-                  (hasAnySatisfied ? "（动作链前段已满足）" : "（动作链前段也未观察到）"),
+                : breach
+                    ? "信任关键步骤：" + pending.ContractId + " 承诺在 " + (timeout.OverdueMs + 1) +
+                      "ms 量级内观察到 " + expected + "，实际已超出 " + timeout.OverdueMs +
+                      "ms 仍未出现 ⇒ 用户动作被受理但业务效果未达成"
+                    : "契约 " + pending.ContractId + " 要求观察到 " + expected +
+                      "；已超出预算 " + timeout.OverdueMs + "ms" +
+                      (hasAnySatisfied ? "（动作链前段已满足）" : "（动作链前段也未观察到）"),
             BreakPoint = "Ui.Feedback." + timeout.Step.ExpectationId,
             EvidenceIncomplete = !timeout.EvidenceComplete,
             LossEpoch = timeout.LossEpoch == 0 ? null : timeout.LossEpoch,
@@ -148,31 +158,55 @@ public sealed class UiFeedbackMissingRule
             },
             UserFacingSummary = !timeout.EvidenceComplete
                 ? "这一步的证据不完整：无法判断反馈是「没出现」还是「没记到」。"
-                : timeout.Step.Kind == ExpectationKind.ExternalWait
-                    ? "这一步依赖外部世界（网络/磁盘/对象边界），目前只是「还没等到」，不一定是失败。"
-                    : "动作在执行，但按预期应当出现的反馈没有出现：界面可能一直停在「看不到结果」的状态。",
+                : breach
+                    ? "信任关键：这个动作**已经被受理**，但承诺的业务效果没有在期限内达成 —— " +
+                      "「请求成功」不等于「事情真的发生了」，请按失败对待。"
+                    : timeout.Step.Kind == ExpectationKind.ExternalWait
+                        ? "这一步依赖外部世界（网络/磁盘/对象边界），目前只是「还没等到」，不一定是失败。"
+                        : "动作在执行，但按预期应当出现的反馈没有出现：界面可能一直停在「看不到结果」的状态。",
             TechnicalSummary = "expectation=" + timeout.Step.ExpectationId + " kind=" + timeout.Step.Kind +
                                " expected=" + expected + " waitedMs=" + timeout.OverdueMs +
+                               " deadlineBreachIsFailure=" + breach +
                                " satisfied=" + string.Join(";", pending.Satisfied.Keys),
-            Candidates = timeout.Step.Kind == ExpectationKind.ExternalWait
+            Candidates = breach
                 ? new[]
                 {
-                    new IncidentCandidate("external-slow", "外部等待本来就慢（DNS/IPC$/robocopy 退避/对象边界）", ConfidenceBand.Medium, Refuted: false),
-                    new IncidentCandidate("external-stalled", "外部调用卡住（无超时的 IO/句柄等待）", ConfidenceBand.Low, Refuted: false),
-                    new IncidentCandidate("collection-loss", "事件没被采集到", ConfidenceBand.Low, Refuted: timeout.EvidenceComplete),
+                    new IncidentCandidate("effect-never-achieved",
+                        "引擎只完成了「受理请求」，从未完成「达成业务效果」（如 worker 停不住）",
+                        ConfidenceBand.High, Refuted: false),
+                    new IncidentCandidate("fulfillment-watch-broken",
+                        "达成事件存在，但没有任何一处发射它（契约指名的期望事件是死事件）",
+                        ConfidenceBand.Medium, Refuted: false),
+                    new IncidentCandidate("collection-loss",
+                        "达成事件发生过但没被采集到（可由同一时刻的持续推进/无 PauseObserved 反驳或证实）",
+                        ConfidenceBand.Low, Refuted: timeout.EvidenceComplete),
+                }
+                : timeout.Step.Kind == ExpectationKind.ExternalWait
+                    ? new[]
+                    {
+                        new IncidentCandidate("external-slow", "外部等待本来就慢（DNS/IPC$/robocopy 退避/对象边界）", ConfidenceBand.Medium, Refuted: false),
+                        new IncidentCandidate("external-stalled", "外部调用卡住（无超时的 IO/句柄等待）", ConfidenceBand.Low, Refuted: false),
+                        new IncidentCandidate("collection-loss", "事件没被采集到", ConfidenceBand.Low, Refuted: timeout.EvidenceComplete),
+                    }
+                    : new[]
+                    {
+                        new IncidentCandidate("projection-not-pushed", "状态已更新但控件没被真正推送（代码直推遗漏/在错误线程）", ConfidenceBand.Medium, Refuted: false),
+                        new IncidentCandidate("binding-path-broken", "绑定路径与属性名不一致（界面永远不刷新）", ConfidenceBand.Medium, Refuted: false),
+                        new IncidentCandidate("feedback-deferred-by-batching", "UI 批量节流把这次更新合并掉了（终态反馈不应当被合并）", ConfidenceBand.Low, Refuted: false),
+                    },
+            SuggestedChecks = breach
+                ? new[]
+                {
+                    "看同一时段是否有 ACTION_FULFILLMENT_FAILED 事件卡（引擎自报的失败是直接证据）",
+                    "看目标目录里那一份文件的大小是否仍在变化（与「已经暂停」互斥）",
+                    "确认引擎/复制子进程是否仍然存活（存活 ⇒ 业务效果确实没达成）",
                 }
                 : new[]
                 {
-                    new IncidentCandidate("projection-not-pushed", "状态已更新但控件没被真正推送（代码直推遗漏/在错误线程）", ConfidenceBand.Medium, Refuted: false),
-                    new IncidentCandidate("binding-path-broken", "绑定路径与属性名不一致（界面永远不刷新）", ConfidenceBand.Medium, Refuted: false),
-                    new IncidentCandidate("feedback-deferred-by-batching", "UI 批量节流把这次更新合并掉了（终态反馈不应当被合并）", ConfidenceBand.Low, Refuted: false),
+                    "对照诊断中心的时间线：动作链走到哪一步就断了",
+                    "确认该动作的终态反馈没有走「批量/可丢弃」通道（终态必须走立即通道）",
+                    "若为外部等待，先看指标页的链路速度与进程状态，再判断是否真的卡住",
                 },
-            SuggestedChecks = new[]
-            {
-                "对照诊断中心的时间线：动作链走到哪一步就断了",
-                "确认该动作的终态反馈没有走「批量/可丢弃」通道（终态必须走立即通道）",
-                "若为外部等待，先看指标页的链路速度与进程状态，再判断是否真的卡住",
-            },
         };
 
         incident.Merge(update);

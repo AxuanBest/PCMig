@@ -171,6 +171,48 @@ public sealed class PlannedObject
     public bool UseRestartablePass { get; set; }     // 是否需要第二遍 /Z 大文件队列
     /// <summary>非空 = 文件清单对象：只传 SourcePath 目录下的这些文件（文件名列表）。</summary>
     public List<string>? FileList { get; set; }
+
+    /// <summary>
+    /// ★ 缺陷 B12b4（数据完整性 / 假成功）★ 计划生成时该对象**源根的身份指纹**
+    /// （卷序列号 + 目录文件 ID，取不到时退化为服务端共享物理路径）。
+    ///
+    /// 为什么必须有：共享被撤销后**以同名重建到别的目录**时，共享名与 UNC 前缀完全不变，
+    /// 产品只看名字就会"同名即同源"地继续取数——B12b4 实测冒名数据到达目标端而界面宣称
+    /// 「✔ 迁移完成 100%」。续传（以及任何一次开跑）前用同一算法重新取指纹比对，
+    /// 不一致即拒绝继续，堵住这条假成功链。
+    /// 旧 plan（字段为 null）不参与校验，保持向后兼容。
+    /// </summary>
+    public string? SourceIdentity { get; set; }
+}
+
+// ------------------------------------------------------------
+
+/// <summary>
+/// 暂停状态机（Trust-Critical Recovery FIX BATCH 1）。
+/// 旧实现用单个 <c>bool IsPaused</c> 承担"请求 → 正在停 → 真的停了 → 停不下来"全过程，
+/// 于是"写入 pause.request 成功"被当成了"迁移已暂停"——真机上 8/8 次点击都没停住，UI 却报已暂停。
+/// 本枚举只表达**引擎侧的真实进度**，请求文件是否存在不能替代它。
+/// </summary>
+public enum PauseState
+{
+    /// <summary>没有暂停这件事（未请求 / 已恢复 / 已结束）。</summary>
+    None = 0,
+    /// <summary>已读到暂停请求，正在尝试停止传输（SLA 计时中）。</summary>
+    Pausing = 1,
+    /// <summary>传输**真的停了**：worker 已退出，目标字节不再增长，当前对象未完成。</summary>
+    Paused = 2,
+    /// <summary>请求已受理，但在硬失败 SLA（<see cref="Transfer.PauseSla.HardFailSeconds"/> s）内没能停住——迁移仍在进行。</summary>
+    PauseFailed = 3,
+}
+
+/// <summary>暂停的最终结果（Diagnostics 行动兑现判定用：请求 vs 业务效果必须分开）。</summary>
+public enum PauseOutcomeKind
+{
+    None = 0,
+    /// <summary>暂停达成（worker 已停止）。</summary>
+    Achieved = 1,
+    /// <summary>暂停失败（worker 拒绝停止）——绝不是"已暂停"。</summary>
+    Failed = 2,
 }
 
 // ------------------------------------------------------------
@@ -192,6 +234,31 @@ public sealed class JobState
     public double BytesPerSecond { get; set; }
     public DateTime LastUpdateUtc { get; set; } = DateTime.UtcNow;
     public string? LastError { get; set; }
+
+    // ---- 暂停真值（Trust-Critical Recovery FIX BATCH 1）----
+    // 契约：这些字段只在"存在暂停这件事"时被写入（默认值不落盘，旧 job-state.json 完全兼容）；
+    //       它们记录的是**引擎侧的真实结果**，不是"请求文件写成功了"。Diagnostics 与 UI 都从这里取值。
+    /// <summary>暂停状态机当前档位。默认 None 不落盘（保持旧存档形状）。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public PauseState PauseState { get; set; } = PauseState.None;
+    /// <summary>请求文件里的模式原文（Cooperative / Immediate）。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PauseRequestMode { get; set; }
+    /// <summary>引擎读到暂停请求的时刻（UTC）。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTime? PauseRequestedUtc { get; set; }
+    /// <summary>**真的停下来**的时刻（UTC）。没达成就必须为 null——绝不用请求时刻冒充。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTime? PauseAchievedUtc { get; set; }
+    /// <summary>从请求到（未）达成的耗时毫秒。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? PauseElapsedMs { get; set; }
+    /// <summary>暂停结果。默认 None 不落盘。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public PauseOutcomeKind PauseOutcome { get; set; } = PauseOutcomeKind.None;
+    /// <summary>PauseFailed 的可解释原因（迁移仍在进行）。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PauseFailureReason { get; set; }
 }
 
 // ------------------------------------------------------------
@@ -226,6 +293,22 @@ public sealed class PreflightReport
     public bool OverallPass { get; set; }
     public List<PreflightCheck> Checks { get; set; } = new();
     public List<ShareInfo> Shares { get; set; } = new();
+
+    /// <summary>
+    /// ★ 缺陷 O-B22c-1 ★ 用户输入的那套凭据**是否已被独立证实可用**
+    /// （IPC$ 会话用输入凭据建立成功 / 直连源共享成功 / 源路径真的读得到 / 共享枚举成功）。
+    ///
+    /// 为什么必须与 <see cref="OverallPass"/> 分开：预检可以在"凭据没被证实"的情况下通过
+    /// （例如对方不导出 IPC$ 只报 67），此时界面若只说「已连接 + 发现 0 个共享」，
+    /// 用户会把"没验证"读成"验证过了"。凡是要宣称"已连接"的地方都必须先看这个字段。
+    /// </summary>
+    public bool CredentialVerified { get; set; }
+
+    /// <summary>
+    /// ★ 缺陷 O-B22c-1 ★ 本次连接**复用了本机已有的 SMB 连接**（1219/85 冲突），
+    /// 即用户输入的账号**没有被使用**。界面必须如实告知，禁止把它呈现成"凭据正确"。
+    /// </summary>
+    public bool CredentialReused { get; set; }
 }
 
 public sealed class PreflightCheck

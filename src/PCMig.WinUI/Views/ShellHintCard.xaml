@@ -4,12 +4,31 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!--
-        侧栏底部提示卡（从 MainWindow.xaml 原样搬入，markup 未改）。
+        侧栏底部提示卡（Shell 层组件，四个 Step 共用同一份外观）。
         属于 **Shell 层**：四个 Step 都显示同一张（Shell/Header/Sidebar/Footer 不重复创建）。
-        内容全部是静态展示（就绪 / 暂无报错 / 署名），不承载业务状态——
-        将来的真实健康度若接入，应在 Presentation 层加薄状态，而不是在四个页面各写一份。
+
+        ★ FIX BATCH 6（指令 §9）：状态消息路由 ★
+        改前：卡片里是两行**冻结文案**（Text="就绪" / Text="暂无报错"），
+              而真实状态句全部挤在右侧执行卡的一根 StatusMessage 上（长句把执行卡无限撑高）。
+        改后：本卡只读 ViewModel 的**语义通道**（OperationalStatus / UserHint / ErrorSummary /
+              CurrentObjectStatus），不再有硬编码状态；空通道才折叠对应行，
+              全部为空时第一行显示「就绪」、状态行显示「暂无报错」。
+        纪律：本卡**不拼业务状态**（禁止在 View 里根据 Phase/Percent 自己造句）——
+              文案的唯一来源是 MigrationSessionViewModel 的通道属性。
     -->
-    <Border Style="{StaticResource SecondarySurface}" Padding="14,16" Translation="0,0,8" Margin="0,12,0,0">
+    <Border x:Name="HintCardSurface" Style="{StaticResource SecondarySurface}" Padding="14,16" Translation="0,0,8" Margin="0,12,0,0">
+        <!-- ★ UI Closure 2026-10-05（用户指令 UI-07）★ 提示卡向上增长必须有上界：
+             上界 = 侧栏里 Step4（步骤导航）底部 + 标准段间距（本卡 Margin.Top = 12）。该上界由
+             MainWindow.UpdateHintCardBounds() 在侧栏/导航尺寸变化时下发（ShellHintCard.SetMaxSurfaceHeight）。
+             超出上界后**内容**在卡内轻量滚动，卡片自身不再变高 ⇒ 绝不碰/压/穿 Step4。
+             未测量到上界（0/NaN）时保持无上限，避免装配早期把卡片压成 0 高。
+             ★ 返修 ★ 卡片高度回到 **XAML 自然布局**（Auto + MinHeight + MaxHeight）：不再由代码动画
+             "钉死" Height（那会形成 SizeChanged → Height → SizeChanged 自激，并让 ScrollViewer 反复
+             误判溢出）。MaxHeight = 真实物理上界，绝不因"下界 160"被反向抬高。因此标准窗口、当前正常
+             提示内容下**不会出现滚动条**；只有内容真的装不下才滚动。 -->
+        <ScrollViewer x:Name="HintScroll" VerticalScrollBarVisibility="Auto" VerticalScrollMode="Auto"
+                      HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                      IsTabStop="False">
         <StackPanel Spacing="8">
             <StackPanel Orientation="Horizontal" Spacing="7">
                 <Border Width="20" Height="20" CornerRadius="10" Background="#2416A34A" VerticalAlignment="Center">
@@ -18,13 +37,36 @@
                 </Border>
                 <TextBlock Style="{StaticResource PCMigTextHintTitle}" Text="提示" VerticalAlignment="Center"/>
             </StackPanel>
-            <TextBlock Style="{StaticResource PCMigTextHintBody}" Text="就绪"/>
+
+            <!-- 运行/流程状态（OperationalStatus；为空时显示"就绪"） -->
+            <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap"
+                       x:Name="HintOperationalText" Text="就绪"/>
+
+            <!-- 当前对象（CurrentObjectStatus；引擎真值，为空则折叠） -->
+            <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap" MaxLines="3"
+                       TextTrimming="CharacterEllipsis" Visibility="Collapsed"
+                       x:Name="HintObjectText"/>
+
+            <!-- 用户操作引导（UserHint；为空则折叠） -->
+            <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap" MaxLines="4"
+                       TextTrimming="CharacterEllipsis" Visibility="Collapsed"
+                       x:Name="HintUserText"/>
+
+            <!-- 错误摘要（ErrorSummary；为空则折叠） -->
+            <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap" MaxLines="4"
+                       TextTrimming="CharacterEllipsis" Visibility="Collapsed"
+                       Foreground="{StaticResource WarningBrush}"
+                       x:Name="HintErrorText"/>
+
             <StackPanel Orientation="Horizontal" Spacing="7">
-                <FontIcon Glyph="&#xE73E;" FontSize="15" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center"/>
-                <TextBlock Style="{StaticResource PCMigTextHintStatus}" Text="暂无报错" VerticalAlignment="Center"/>
+                <FontIcon Glyph="&#xE73E;" FontSize="15" Foreground="{StaticResource SuccessBrush}"
+                          VerticalAlignment="Center" x:Name="HintStatusIcon"/>
+                <TextBlock Style="{StaticResource PCMigTextHintStatus}" Text="暂无报错" VerticalAlignment="Center"
+                           x:Name="HintStatusText"/>
             </StackPanel>
             <Border Height="1" Background="{StaticResource InsetBorderBrush}" Margin="0,2,0,2"/>
             <TextBlock Style="{StaticResource PCMigTextHintCredit}" Text="由 郑子轩 个人制作"/>
         </StackPanel>
+        </ScrollViewer>
     </Border>
 </UserControl>

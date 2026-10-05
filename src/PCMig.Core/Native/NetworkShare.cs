@@ -104,6 +104,22 @@ public static class NetworkShare
     /// <summary>本机当前是否已有到指定服务器的连接（可复用时不必再握手）。</summary>
     public static bool HasExistingConnection(string host) => ExistingConnectionsTo(host).Count > 0;
 
+    // ---- 缺陷 O-B22c-1（产品诚实性：1219 复用必须可被上层看见）----
+    // 1219/85 冲突时产品会"复用本机现有连接、本次不使用用户输入的凭据"，
+    // 但这条事实过去只写进日志，界面照样显示「已连接 <主机>」——
+    // 用户以为密码输对了，实际那套凭据根本没被使用（B22c run3 实证）。
+    // 这里把该事实暴露给调用方（预检 → 界面），让上层能如实告知。
+    //
+    // [ThreadStatic]：Connect 是同步 P/Invoke 调用，一次预检在同一条线程上完成；
+    // 用线程局部状态避免并发用例互相污染（不用静态共享字段）。
+    [ThreadStatic] private static bool t_lastConnectReusedInput;
+
+    /// <summary>
+    /// 最近一次 <see cref="Connect"/>（同线程）是否走了"复用本机现有连接、未使用输入凭据"分支。
+    /// true = 当前会话不是用用户输入的账号建立的 ⇒ 上层**不得**据此宣称"凭据已通过验证"。
+    /// </summary>
+    public static bool LastConnectReusedExistingConnection => t_lastConnectReusedInput;
+
     // ---- 失败提示去重（v0.3.8，缺陷 5）----
     // 生产事故日志里 "连接 \Szlt500781IPC$ 失败: Win32Error=67" 在几分钟内反复出现
     // （预检一次 + 传输一次 + 直连回退各打一遍），用户以为"出了很多不同的错"。
@@ -175,6 +191,7 @@ public static class NetworkShare
         var ipc = $@"\\{host}\IPC$";
         var explicitCreds = !string.IsNullOrEmpty(user);
         var hostToken = CoreDiagnostics.Sink.Token(host);
+        t_lastConnectReusedInput = false; // O-B22c-1：本次调用尚未复用（每次 Connect 独立判定）
 
         // ★ D6.1 §16 观察点 ★ 只记"用哪套凭据语义"，**绝不**记用户名/口令（连长度都不记）。
         PublishSession(NetEvents.SmbSessionConnectStarted, ipc, hostToken, explicitCreds,
@@ -201,6 +218,7 @@ public static class NetworkShare
                 log?.Warning("凭据与现有连接冲突（{Code}）——复用现有连接（本次未使用输入的凭据）。如需强制改用输入的凭据：先 net use \\\\{Host}\\ /delete 再重试", err, host);
                 PublishSession(NetEvents.SmbSessionReused, ipc, hostToken, explicitCreds,
                     reused: true, win32: err, reason: "credential-conflict-reuse", level: DiagnosticLevel.Information);
+                t_lastConnectReusedInput = true; // O-B22c-1：显式凭据被忽略，上层必须如实告知
                 return new ShareSession(null);
             }
             // 无现存连接却报冲突（残留句柄）→ 清理后重试一次
@@ -247,9 +265,11 @@ public static class NetworkShare
                 // v0.3.8（缺陷 5）：错误 67 说清"接下来会怎么做、凭据语义有没有变"，
                 // 生产事故日志里只有 "Win32Error=67 找不到网络名"，看不出这是"不影响迁移、将改直连共享"。
                 ERROR_BAD_NET_NAME => "找不到网络名（对方不导出 IPC$ 管理共享；精简/第三方 SMB 服务常见，NAS 也常见）。" +
-                    @"这**不等于**迁移会失败：PCMig 接着会改为【直连你要迁移的数据共享】（例如 \" + host + @"d$）建立会话，" +
+                    $"这不等于迁移会失败：PCMig 接着会改为【直连你要迁移的数据共享】（例如 \\\\{host}\\d$）建立会话，" +
                     "仍然使用你输入的这一组账号密码；区别只是不再先建立 IPC$ 会话——" +
-                    "因此“实际用哪套凭据”以数据共享那次连接为准（若本机已有到该机的其他连接且凭据不同，会出现 1219 冲突）",
+                    "因此“实际用哪套凭据”以数据共享那次连接为准（若本机已有到该机的其他连接且凭据不同，会出现 1219 冲突）。" +
+                    "下一步：若随后仍连不上，说明对方确实没有可用的数据共享或凭据不对——请在②区「共享名」手动输入对方开放的共享（例如 d）再点「＋添加共享」，" +
+                    "或核对①里的用户名/密码是不是旧电脑上的那组账号。",
                 ERROR_EXTENDED_ERROR => "网络扩展错误（可能 SMB 协议协商失败）",
                 _ => new Win32Exception(err).Message
             };

@@ -478,7 +478,7 @@ public sealed class D4RuleEngineTests
     public void RegistryDispatchesByStableEventCodeAndRejectsDuplicates()
     {
         var registry = RuleRegistry.CreateDefault();
-        Assert.Equal(7, registry.Count);   // 5 条首批 + FILE_LOCKED + PREVIOUS_SESSION_UNCLEAN
+        Assert.Equal(8, registry.Count);   // 5 条首批 + FILE_LOCKED + PREVIOUS_SESSION_UNCLEAN + ACTION_FULFILLMENT_FAILED(§6)
         Assert.Contains(registry.ForEventName(PersistenceEvents.WriteFailed.Name), r => r.RuleId == "PERSISTENCE_WRITE_FAILED");
         Assert.Empty(registry.ForEventName("NO.SUCH.EVENT"));
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Numerics;
 using Microsoft.UI.Composition;
@@ -230,6 +230,92 @@ internal static class MotionDirector
         {
             t.TranslateX = 0;
             t.TranslateY = 0;
+        }
+        element.Opacity = 1.0;
+    }
+
+    // ── 提示卡逐行入场（UI Closure 2026-10-05 返修；**post-layout Translation**） ──────
+    //
+    // 为什么单独抽这一条：ShellHintCard 旧实现直接写 `Visual.Offset`，而 Offset 是
+    // "Visual 相对父 Visual 的位置属性"——对一个已被 StackPanel 排好位置的 TextBlock 强行赋值，
+    // 会覆盖掉 XAML 布局算出的 Y 位置，多个文本行于是全部塌向父容器原点（真机表现为
+    // "文字全堆到卡片顶部、互相重叠、内容越多越乱"）。
+    //
+    // 正确通道是 **Translation**：先用 ElementCompositionPreview.SetIsTranslationEnabled 打开，
+    // 再动画 Translation——它是 render-time 的 post-layout 附加位移，XAML 布局位置**不受影响**。
+    // （本类已有的整页 Push / Utility Panel 走的就是这条通道，此处复用同一语义，不再另发明。）
+
+    private const string HintLineDurationKey = "PCMigMotionHintLineDuration";
+    private const string HintLineOffsetKey = "PCMigMotionHintLineOffset";
+
+    /// <summary>
+    /// 单行文本入场：Translation Y 由 <c>+offset → 0</c>、Opacity <c>0 → 1</c>（时长/位移取自 Motion.xaml Token）。
+    /// 只作用于传入的那一个元素；重复调用会**接管**（先 StopAnimation）而不是叠加多份动画。
+    /// 系统关闭动画时不做任何位移动画，直接吸附终态（Translation=0 / Opacity=1）。
+    /// </summary>
+    public static void PlayLineEntrance(FrameworkElement? element)
+    {
+        if (element is null) return;
+
+        if (!SystemAnimationsEnabled)
+        {
+            ResetLineEntrance(element);
+            return;
+        }
+
+        try
+        {
+            ElementCompositionPreview.SetIsTranslationEnabled(element, true);
+            var visual = ElementCompositionPreview.GetElementVisual(element);
+            var compositor = visual.Compositor;
+
+            var span = GetDuration(HintLineDurationKey, 0.17).TimeSpan;
+            if (span <= TimeSpan.Zero) span = TimeSpan.FromMilliseconds(170);
+            var offset = (float)GetDouble(HintLineOffsetKey, 6.0);
+
+            // 接管旧动画：同一元素上绝不允许多个入场动画并行（否则会出现半途重启的跳变）。
+            visual.StopAnimation("Translation");
+            visual.StopAnimation("Opacity");
+
+            var easing = compositor.CreateCubicBezierEasingFunction(
+                new Vector2(0.10f, 0.90f), new Vector2(0.20f, 1.00f));
+
+            var slide = compositor.CreateVector3KeyFrameAnimation();
+            slide.InsertKeyFrame(0f, new Vector3(0f, offset, 0f));
+            slide.InsertKeyFrame(1f, Vector3.Zero, easing);
+            slide.Duration = span;
+
+            var fade = compositor.CreateScalarKeyFrameAnimation();
+            fade.InsertKeyFrame(0f, 0f);
+            fade.InsertKeyFrame(1f, 1f, easing);
+            fade.Duration = span;
+
+            visual.StartAnimation("Translation", slide);
+            visual.StartAnimation("Opacity", fade);
+        }
+        catch (Exception ex)
+        {
+            // 入场动效是纯装饰（PMML-R8）：失败也只能落到可见终态，绝不能留在半透明或半位移上。
+            Debug.WriteLine($"[Motion] hint line entrance failed: {ex.Message}");
+            ResetLineEntrance(element);
+        }
+    }
+
+    /// <summary>把单行文本吸附到静止终态：Translation 归零、Opacity 恰为 1。可安全重复调用。</summary>
+    public static void ResetLineEntrance(FrameworkElement? element)
+    {
+        if (element is null) return;
+        try
+        {
+            var visual = ElementCompositionPreview.GetElementVisual(element);
+            visual.StopAnimation("Translation");
+            visual.StopAnimation("Opacity");
+            visual.Properties.InsertVector3("Translation", Vector3.Zero);
+            visual.Opacity = 1f;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Motion] hint line reset skipped: {ex.Message}");
         }
         element.Opacity = 1.0;
     }

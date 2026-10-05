@@ -50,4 +50,10 @@
   <x:Double x:Key="PCMigMotionPressedSinkButton">0.6</x:Double>
   <!-- §31 迁移中的 Progress Sweep（只在已完成 Fill 区内扫过） -->
   <Duration x:Key="PCMigMotionProgressSweepDuration">0:0:1.60</Duration>
+  <!-- ★ 提示卡逐行入场（UI Closure 2026-10-05 返修）★ 单行文本"轻微上浮 + 淡入"，
+       走 Composition 的 **Translation**（post-layout 附加位移，不碰 XAML 布局坐标）。
+       调用点不得写死毫秒 / 位移：ShellHintCard → MotionDirector.PlayLineEntrance() 读这两个键。
+       ⚠ 禁止改回 Visual.Offset —— Offset 是布局位置属性，会把已排好版的行塌向父容器原点。 -->
+  <Duration x:Key="PCMigMotionHintLineDuration">0:0:0.17</Duration>
+  <x:Double x:Key="PCMigMotionHintLineOffset">6</x:Double>
 </ResourceDictionary>

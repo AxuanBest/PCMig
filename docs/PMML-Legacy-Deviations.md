@@ -17,7 +17,7 @@
 | **L-04** | **Step Card 选中描边不可见**：代码设了 `AccentEdgeBrush`，但宿主 `BorderThickness="0"` ⇒ 描边被丢弃；同语义 `SelectedNavigationSurface` 反而是 `1` 且**零引用** | `Presentation/StepNavigation.cs:116`・`Views/StepNavigationControl.xaml:79`・`Materials.xaml:179` | ESR/交互 | 二选一收敛（属 UI 行为变更，需授权） |
 | **L-05** | **注释与实现不符**：注释称"旧页上移淡出、新页自下方进入淡入"，实际 **Opacity 恒 1、整页视口高度 Push** | 注释 `Themes/Motion.xaml:14-15`；实现 `Presentation/MotionDirector.cs` | 文档一致性 | 改注释（零视觉影响） |
 | **L-06** | **死代码 + 过期注释**：`PreparePageEntrance` / `PreparePanelEntrance` / `PlayPanelExit` 无调用点，但 3 处 XAML 注释仍声称在运行 | `MotionDirector.cs:119-137,142-157,165-218`；`ChangelogPanel.xaml:5-7`、`DeveloperTuningPanel.xaml:16-18`、4 个 Step 页注释 | 维护性 | 删死代码或改注释（需授权） |
-| **L-07** | **无消费者 Token ⇒ 声称的动效不存在**：`DurationNormal(0.20)`、`DurationSlow(0.26)`、`EaseStandard`、`DialogScaleStart(0.98)`、`ProgressSweepDuration(1.60)` | `Themes/Motion.xaml` | Motion | 删除或真正接线（需授权） |
+| **L-07** | **无消费者 Token ⇒ 声称的动效不存在**：`DurationNormal(0.20)`、`DurationSlow(0.26)`、`EaseStandard`、`DialogScaleStart(0.98)`；~~`ProgressSweepDuration(1.60)`~~ **已于 2026-10-05 接线**（`ProgressMotionDriver.ResolveSweepSeconds()` 读 Token，兜底常量同值） | `Themes/Motion.xaml`；`Presentation/ProgressMotionDriver.cs` | Motion | 其余仍删除或真正接线（需授权） |
 | **L-08** | **缓动四族并存**：`(0.10,0.90)/(0.20,1.00)`、`(0.16,1.0)/(0.30,1.0)`、手写 `EaseOutCubic`、`CubicEase` | `MotionDirector.cs:370,565`・`InteractionFeedback.cs:300`・`FluidZoomTransitionCoordinator.cs:578-582`・`PcmigComboBoxRoll.xaml:219,229` | Motion | 收敛为 `standard`/`exit` 两键 |
 | **L-09** | **零引用资源**：24 项（A 审计口径；C 审计按页面引用口径为 23 项） | 清单见 `A-materials-tokens.md` 附录 A；例：`PCMigRadiusStepCard/Button/Inset`、`PCMigTitleBarGhostButton`、`PCMigToggle`、`Views/PCMigSurface.xaml` 整套控件 | Token/维护性 | 逐项决定删除或接线 |
 | **L-10** | **Backdrop 两条路线参数不同源**：Acrylic 显式 `TintOpacity 0.02 / Luminosity 0.00`，Mica 回退用**系统默认** | `BackdropSpike.cs:189-192` vs `:264-266`；`MainWindow.xaml:8` | DAM | 统一参数来源 |
@@ -27,6 +27,8 @@
 | **L-14** | **Opacity 双轨**：仅 4 个 `Ambient*Opacity` Token；控件态/装饰/动效 Opacity 全硬编码；`Motion.xaml` 内 0 个 Opacity 键 | `Colors.xaml:6`；`Controls.xaml:168/171/174`・`Step1ConnectPage.xaml:34-37`・`MotionDirector.cs:234/479/615/621/640` | Token | 未来提取 Token |
 | **L-15** | **硬编码替代 token**：Step4 日志面板用字面量 `#F21A2033`/`#33FFFFFF`，而同值 token `PCMigSemanticDarkMaterial` 零引用 | `Step4ResultPage.xaml:225`；`Materials.xaml:29` | DAM/Token | 改用 token |
 | **L-16** | **PMML 相关注释过期**：`PcmigComboBoxRollStyle` 注释称"那两个 ComboBox"，实际**只有 1 个消费点**（ThreadsCombo） | `Step2SelectDataPage.xaml:390-391` | 文档一致性 | 改注释 |
+| **L-17** | **圆角字面量散落**（2026-10-05 审计新增）：17 个 XAML 文件共 **50 处 `CornerRadius=`**，其中 **33 处为字面量**（16×7、10×8、17×4、18×3、12×3、15×2、11/9/7/3/2 各 1、`12,12,0,0`×1），与新增的 §19.1 八档体系不符。**本轮已收敛三条链**（ComboBox 收起态 / Popup 浮层 / TaskPicker 三段），其余留待单独授权清理 | `grep -rn 'CornerRadius="' src/PCMig.WinUI`（逐处见 `PMML-Implementation-Audit.md` 附录 A §19.1） | Token/ESR | 逐处归入 §19.1 八档后删除字面量 |
+| **L-18** | **三个圆角 Token 仍零引用**：`PCMigRadiusStepCard(16)`、`PCMigRadiusButton(12)`、`PCMigRadiusInset(13)`（本轮新增的 `PCMigRadiusOverlay` / `PCMigRadiusListItem` **已有消费点**，不再是零引用） | `Themes/Materials.xaml:162/163/164`（定义）；除注释 `:206` 外无消费点（L-09 的子集） | Token | 接线或删除（见 L-09） |
 
 ---
 
@@ -37,7 +39,7 @@
 | **G-01** | **Dark 主题零覆盖** | `ThemeDictionaries` 全仓 **0 处**；`RequestedTheme` 仅在 `TextInputTemplates.xaml:150-152` 强制 Light；34 个颜色键只按浅色定义 | 同一 Surface Family + 不同 Theme 参数（**PMML-R9**）；本轮不补 |
 | **G-02** | **Reduced Motion 只覆盖一半** | **存在**：`MotionDirector.SystemAnimationsEnabled` 读 `UISettings.AnimationsEnabled`（`MotionDirector.cs:56-79`）；**缺口**：XAML Storyboard 与 `BrushTransition`/`ScalarTransition` 无闸门（`StepNavigationControl.xaml:82,102,114`）；无 `ReduceMotion`/`AdvancedEffectsEnabled`/应用内开关 | `Translation ↓`・`Scale ↓/disabled`・`Opacity retained`・`Functional state unchanged`（**PMML-R8**）；本轮不重构 |
 | **G-03** | **Shadow 无数值** | `ThemeShadow` 三键零参数（`Materials.xaml:148`），blur/opacity/offset 由框架决定 | 只按 Low/Medium/High 命名语义冻结 |
-| **G-04** | **Dialog / Progress Sweep 动效不存在** | `DialogScaleStart`、`ProgressSweepDuration` 无消费者（`Motion.xaml`） | 未来若要实现，必须走 OACT / PMML State Transition |
+| **G-04** | **Dialog 动效不存在**（Progress Sweep 已于 2026-10-05 实现） | `DialogScaleStart` 仍无消费者（`Motion.xaml`）；`ProgressSweepDuration(1.60)` **已接线** —— `PCMigMotionProgressSweepDuration` → `ProgressMotionDriver.SweepSeconds`（见 Audit「Progress 族 UI Closure 更新」） | Dialog 若要实现必须走 OACT / PMML State Transition |
 | **G-05** | **Step Card 零反馈根因未完全定位** | 子代理 C 自述未定位（与 L-04 相关但不完全等价） | 登记待查 |
 | **G-06** | **未做真机视觉实测** | 本轮为**纯代码审计**（用户口径：不重新设计、不改 UI）；`PcmigComboBoxRoll.xaml`（330 行）仅抽样取证 | 如需视觉冻结证据，另开授权轮 |
 | **G-07** | **字体/字号体系未逐页 Token 化核对** | Typography 逐页计数见 `C-surfaces-controls.md` §C；存在页面直接写字号的情况待核 | 未来纳入 `PMML.Typography.*` |

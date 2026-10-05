@@ -20,12 +20,20 @@ public enum ExpectationKind
     Failure = 4,
 }
 
-/// <summary>一条期望：等哪个稳定事件、属于哪一类、允许多久。</summary>
+/// <summary>
+/// 一条期望：等哪个稳定事件、属于哪一类、允许多久。
+///
+/// ★ FIX BATCH 3 ★ <paramref name="DeadlineBreachIsFailure"/>：这条期望是不是**信任关键**的
+/// —— 即"超期"到底意味着"还没等到"（普通 ExternalWait）还是"用户要求了业务动作、但业务效果
+/// 从未达成"（信任缺口）。后者必须让诊断降级、开出事件卡，不能再以"还在等"糊过去。
+/// 默认 false ⇒ 既有契约字面量不受影响。
+/// </summary>
 public sealed record ExpectedStep(
     string ExpectationId,
     ExpectationKind Kind,
     IReadOnlyList<string> ExpectedEventNames,
-    string Description);
+    string Description,
+    bool DeadlineBreachIsFailure = false);
 
 /// <summary>
 /// 一个动作的反馈契约（**只描述"应当观察到什么"**，不能执行命令、不能改任何业务状态）。
@@ -47,7 +55,8 @@ public sealed record FeedbackContract(
 ///   · 绝不用"统一 100ms 判所有操作失败"（合作式暂停要等对象边界，可能几分钟；
 ///     robocopy 的 /R /W 退避本身就要几十秒）；
 ///   · ExternalWait 的默认预算刻意放得很宽（分钟级），且**只报告"还没观察到"**，
-///     不报告"失败了"；
+///     不报告"失败了"——**除非**该步骤被标为 <c>DeadlineBreachIsFailure</c>（信任关键步骤：
+///     超期即"用户要求了业务动作、业务效果从未达成"，必须判失败，见 FIX BATCH 3 §6）；
 ///   · 具体毫秒值是**候选配置**，未经真实延迟分布校准前不宣称 SLA。
 /// </summary>
 public sealed class FeedbackContractRegistry
@@ -131,21 +140,34 @@ public sealed class FeedbackContractRegistry
             DeferredTimeoutMs: 20_000,
             ExternalWaitTimeoutMs: 300_000),
 
-        new FeedbackContract("pause.v1", "Pause", 1,
-            new[] { UiEvents.ActionCompleted.Name, UiEvents.ActionFaulted.Name },
+        // ★ FIX BATCH 3 ★ pause.v1 → pause.v2：
+        //   v1 只表达"请求被写下 + 边界到达"，且外部等待预算 3_600_000 ms（1 小时）⇒
+        //   "请求受理成功、引擎从未停住"这条真实故障在诊断里永远是"还在等"，健康 verdict 仍是 healthy。
+        //   v2 把**业务效果**写成可判定的期望：兑现判据 = 引擎真的停住（TRN-011/TRN-013），
+        //   失败终点 = 引擎自报停不住（TRN-023），期限 = 引擎硬失败 SLA + 诊断宽限（同一个 ActionSla 真值）。
+        //   R-002：TRN-012 PauseBoundaryReached 全仓没有发射点（死事件），不再作为兑现判据。
+        new FeedbackContract("pause.v2", "Pause", 2,
+            new[] { UiEvents.ActionCompleted.Name, UiEvents.ActionRejected.Name, UiEvents.ActionFaulted.Name },
             new[]
             {
-                // ★ 合作式暂停的期望是"请求被写下 + 边界到达"，**不是**"进程立刻停" ★
+                // ① 受理：请求文件确实写下去了。**它成立绝不等于暂停已生效。**
                 new ExpectedStep("pause.immediate", ExpectationKind.Immediate,
                     new[] { TransferEvents.PauseRequestWriteResult.Name }, "暂停请求文件写入结果"),
+                // ② 兑现：引擎真的把 worker 停住（这才是"已暂停"）。
                 new ExpectedStep("pause.external", ExpectationKind.ExternalWait,
-                    new[] { TransferEvents.PauseBoundaryReached.Name, TransferEvents.Paused.Name,
-                            TransferEvents.JobRunCompleted.Name },
-                    "到达对象边界并暂停（最后一个对象自然完成也算合法终点）"),
+                    new[] { TransferEvents.PauseObserved.Name, TransferEvents.Paused.Name },
+                    "引擎真的停住（达成暂停）",
+                    DeadlineBreachIsFailure: true),
+                // ③ 失败终点：引擎在 SLA 内停不住并如实自报 —— 一出现就是失败结论。
+                new ExpectedStep("pause.failure", ExpectationKind.Failure,
+                    new[] { TransferEvents.PauseFailed.Name },
+                    "引擎在硬失败 SLA 内停不住（业务效果未达成）"),
             },
             ImmediateTimeoutMs: 2_000,
-            DeferredTimeoutMs: 20_000,
-            ExternalWaitTimeoutMs: 3_600_000),
+            // 档位排序（External ≥ Deferred ≥ Immediate）必须成立：暂停没有 deferred 步骤，
+            // 这个值只是天花板，取在兑现期限之内（旧值 20_000 > 12_000 会破坏排序不变式）。
+            DeferredTimeoutMs: 10_000,
+            ExternalWaitTimeoutMs: ActionSla.PauseFulfillmentDeadlineMs),
 
         new FeedbackContract("stop.v1", "Stop", 1,
             new[] { UiEvents.ActionCompleted.Name, UiEvents.ActionFaulted.Name },

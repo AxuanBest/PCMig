@@ -108,35 +108,60 @@ public readonly record struct ResponsiveLayout(
         _ => 110,
     };
 
-    /// <summary>底栏进度轨道宽（Wide 档 = 320，与现状一致）；Compact 也不能让进度条消失（§36）。</summary>
+    /// <summary>底栏进度轨道的**最小宽**（FIX BATCH 5：Wide = 160、Normal = 120、Compact = 96；与 MainWindow.xaml 的 MinWidth 逐字一致）。
+    /// 进度轨道所在的是底栏唯一的弹性列（第 2 列 <c>*</c>），所以运行时它通常比这个值更宽：
+    /// canonical 1424 下约 280 DIP，Wide 档下界 1320 下约 176，Compact 下界 960 下约 134。
+    /// 这里给的是**下限**，保底不让进度条在窄档位消失（§36）。
+    /// 之所以改成下限而不是固定宽：把中段隔离列归零后，固定宽之和在 Wide 档的非 canonical 宽度（如 1342）会溢出，
+    /// 最右的"恢复"按钮被窗口裁掉（UIA 实测 w=62 而非 124，违反 §8「窗口宽度固定时按钮永远在可视范围」）。
+    /// 弹性列让轨道吸收余量，任何宽度都不再溢出，且右端动作区左边界 X 仍与文本内容无关（验收：漂移 ≤1 px）。</summary>
     public double FooterProgressWidth => Mode switch
     {
-        LayoutMode.Wide => 320,
-        LayoutMode.Normal => 200,
-        _ => 140,
+        LayoutMode.Wide => 160,
+        LayoutMode.Normal => 120,
+        _ => 96,
     };
 
+    /// <summary>FIX BATCH 5（§8）：底栏四块数字区的**保留宽**。
+    /// 这些值在运行过程中会在很宽的区间里变化（"9 KB/s" ↔ "112.17 MB/s"、"—" ↔ "1 小时 23 分"、
+    /// "0 B / 190.2 GiB" ↔ "190.2 GiB / 190.2 GiB"）。若列宽由内容驱动（原先的 Auto），
+    /// 右侧四个动作按钮会被文本宽度一路向右推（真机 P1/P2-A/B/F、OPEN-RISK R-010）。
+    /// 固定保留宽 = 该档位文本宽度上限 + 省略号余量；文字超长只在自己的格子里被 CharacterEllipsis 截断，
+    /// 因此按钮左边界 X 与文本内容无关（验收口径 ≤1 px）。
+    /// 这些宽度**不参与密度缩放**：数字字号是样式里的固定 FontSize，宽度若随密度缩小会出现比文字还窄的格子。</summary>
+    // PHASE D 校正（2026-10-05）：MainWindow.xaml 的 FooterPercentText / FooterEtaText 用的是**固定
+    //   Width**（68 / 112，来源是 UI Closure 的可读性调整），而这两个 token 原先声明 48 / 100 ⇒
+    //   声明值与实际渲染长期不一致（token 从未被写回控件，等于死代码）。本轮把数值对齐到 XAML 实际值，
+    //   让"声明 == 渲染"重新成立；**不改底栏视觉**（用户未报告底栏宽度问题，不扩大修改面）。
+    public double FooterPercentWidth => Mode switch { LayoutMode.Wide => 68, LayoutMode.Normal => 60, _ => 52 };
+
+    /// <inheritdoc cref="FooterPercentWidth"/>
+    public double FooterBytesWidth => Mode switch { LayoutMode.Wide => 150, LayoutMode.Normal => 116, _ => 90 };
+
+    /// <inheritdoc cref="FooterPercentWidth"/>
+    public double FooterSpeedWidth => Mode switch { LayoutMode.Wide => 100, LayoutMode.Normal => 84, _ => 72 };
+
+    /// <inheritdoc cref="FooterPercentWidth"/>
+    // PHASE D 校正（2026-10-05）：同 FooterPercentWidth —— 对齐 MainWindow.xaml 的实际固定宽 112。
+    public double FooterEtaWidth => Mode switch { LayoutMode.Wide => 112, LayoutMode.Normal => 96, _ => 84 };
+
+    /// <summary>FIX BATCH 5（§8）：**单个**动作按钮的保留宽。四个按钮各自定宽 ⇒ 文案变长变短
+    /// （"暂停" ↔ "正在暂停…" ↔ "重试暂停"）都不会改变动作区整块的左边界 X。
+    /// 改前按钮是内容定宽（MinWidth = 0），"正在暂停…" 比 "暂停" 宽约 50 DIP，会把整块向左撑 —— 直接违反
+    /// §8「Pause/Resume 切换不改变 Action 区 X 坐标」。</summary>
+    public double FooterActionWidth => Mode switch { LayoutMode.Wide => 124, LayoutMode.Normal => 104, _ => 96 };
+
+    /// <summary>FIX BATCH 5：网络指示块的保留宽（Wide/Normal 有，Compact 为 0 并整块隐藏）。
+    /// 它不是动作按钮，因此允许在窄档位隐藏；四个动作按钮**绝不**允许用 Visibility 消失（§8）。</summary>
+    public double FooterNetWidth => Mode switch { LayoutMode.Wide => 54, LayoutMode.Normal => 44, _ => 0 };
+
     /// <summary>
-    /// 底栏中段隔离列宽：Canonical 视口（≥1424 DIP）保持实测疏密 80；越窄越让位给内容，
-    /// 优先保证右端四个动作按钮不被裁（§36）。在各档位边界处**连续**（1320 → 0、1120 → 20、960 → 0），
-    /// 因此不存在"某一档突然少 80 DIP"的跳变（§5）。
+    /// 底栏中段隔离列宽（FIX BATCH 5：恒 0）。改前这一列在 Canonical 视口给 80 DIP 的"疏密"，
+    /// 越窄越让位（1320 → 0、1120 → 20、960 → 0）。现在弹性全部交给**进度轨道所在的第 2 列**（<c>*</c>）：
+    /// 那块空白由它一次性吸收，右端动作区因此被钉在窗口右边缘，按钮左边界 X 只由左侧固定保留宽决定。
+    /// 保留这个 token 是为了让 ShellResponsiveLayout 的赋值链不出现"某一项突然消失"的分支差异。
     /// </summary>
-    public double FooterSpacerWidth => Mode switch
-    {
-        // Wide：1320 → 0，1424(Canonical) → 80
-        // 断点常量定义在 ResponsiveLayoutController 上，record 内必须限定名访问（否则 CS0103）。
-        LayoutMode.Wide => Half(80 * Ratio(WindowWidth, ResponsiveLayoutController.WideBreakpoint, CanonicalWidth)),
-        // Normal：1120 → 20，1320 → 0
-        LayoutMode.Normal => Half(20 * Ratio(
-            ResponsiveLayoutController.WideBreakpoint - WindowWidth,
-            0,
-            ResponsiveLayoutController.WideBreakpoint - ResponsiveLayoutController.NormalBreakpoint)),
-        // Compact：960 → 0，1120 → 20
-        _ => Half(20 * Ratio(
-            WindowWidth - ResponsiveLayoutController.MinimumClientWidth,
-            0,
-            ResponsiveLayoutController.NormalBreakpoint - ResponsiveLayoutController.MinimumClientWidth)),
-    };
+    public double FooterSpacerWidth => 0;
 
     /// <summary>底栏四动作按钮内边距（Wide 档 = 12,6，与现状一致）。</summary>
     public double FooterActionPaddingX => Half(12 * Shrink(WeightControl));
@@ -240,10 +265,6 @@ public readonly record struct ResponsiveLayout(
 
     /// <summary>0.5 DIP 网格取整：避免半像素抖动，同时保住"连续收紧"（§5）。</summary>
     internal static double Half(double value) => Math.Round(value * 2, MidpointRounding.AwayFromZero) / 2;
-
-    /// <summary>把 value 在 [from, to] 上归一化到 0–1（用于"边界处连续"的插值 Token）。</summary>
-    private static double Ratio(double value, double from, double to) =>
-        to > from ? Math.Clamp((value - from) / (to - from), 0, 1) : 0;
 }
 
 /// <summary>
@@ -327,7 +348,9 @@ public static class ResponsiveLayoutController
         var railGapBase = mode switch { LayoutMode.Wide => 18, LayoutMode.Normal => 14, _ => 10 };
         var workspaceTopGapBase = mode switch { LayoutMode.Wide => 16, LayoutMode.Normal => 10, _ => 8 };
         var headerGapBase = mode switch { LayoutMode.Wide => 14, LayoutMode.Normal => 12, _ => 10 };
-        var bottomBarGapBase = mode switch { LayoutMode.Wide => 44, LayoutMode.Normal => 22, _ => 12 };
+        // FIX BATCH 5（§8）：底栏列距从 44/22/12 收紧到 18/14/12 —— 每列内容改为"保留宽"后，
+        // 列距只需提供视觉分隔；收下来的宽度全部让给进度轨道与四个动作按钮（见 FooterProgressWidth 等）。
+        var bottomBarGapBase = mode switch { LayoutMode.Wide => 18, LayoutMode.Normal => 14, _ => 12 };
 
         var uFactor = ResponsiveLayoutController.UniformScaleMode
             ? ResponsiveLayoutController.CalculateUniformScale(

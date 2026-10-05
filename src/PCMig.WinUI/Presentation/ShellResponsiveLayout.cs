@@ -165,14 +165,32 @@ public static class ShellResponsiveLayout
         if (root.FindName("BottomBarGrid") is Grid bottomBarGrid)
         {
             bottomBarGrid.ColumnSpacing = layout.BottomBarGap;
-            // 第 6 列是中段隔离列：窄于 Canonical 时让位给内容，优先保住右端四动作按钮不被裁。
+            // 第 6 列是中段隔离列：FIX BATCH 5 起恒为 0（弹性全部交给第 7 列的 `*`），
+            // 右端动作区因此被钉在窗口右边缘，按钮左边界 X 只由左侧各保留宽决定（§8 验收 ≤1 px）。
             if (bottomBarGrid.ColumnDefinitions.Count > 5)
             {
                 bottomBarGrid.ColumnDefinitions[5].Width = new GridLength(layout.FooterSpacerWidth);
             }
         }
 
-        if (root.FindName("FooterProgressHost") is Grid progressHost) progressHost.Width = layout.FooterProgressWidth;
+        // FIX BATCH 5（§8）：进度轨道只设**最小宽**，实际宽度由它所在的弹性列（第 2 列 *）决定 ——
+        // 这样轨道总是填满可用宽度，且任何窗口宽度下都不会把右端动作区挤出可视范围。
+        if (root.FindName("FooterProgressHost") is Grid progressHost) progressHost.MinWidth = layout.FooterProgressWidth;
+
+        // FIX BATCH 5（§8）：四块数字区的保留宽。文案变化（"9 KB/s" ↔ "112.17 MB/s"、"—" ↔ "1 小时 23 分"）
+        // 只在自己格子里被 CharacterEllipsis 截断，不会把右侧动作区推走。
+        if (root.FindName("FooterPercentText") is TextBlock percentText) percentText.Width = layout.FooterPercentWidth;
+        if (root.FindName("FooterBytesText") is TextBlock bytesText) bytesText.Width = layout.FooterBytesWidth;
+        if (root.FindName("FooterSpeedText") is TextBlock speedText) speedText.Width = layout.FooterSpeedWidth;
+        if (root.FindName("FooterEtaText") is TextBlock etaText) etaText.Width = layout.FooterEtaWidth;
+
+        // 网络指示块：Wide/Normal 占保留宽，Compact（FooterNetWidth = 0）整块隐藏。
+        // 它不是动作按钮 —— 四个动作按钮**绝不**允许用 Visibility 消失（§8）。
+        if (root.FindName("FooterNetPanel") is StackPanel netPanel)
+        {
+            netPanel.Width = layout.FooterNetWidth;
+            netPanel.Visibility = layout.FooterNetWidth > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
 
         if (root.FindName("FooterRatePrimary") is StackPanel ratePrimary) ratePrimary.Spacing = layout.FooterRateGap;
         if (root.FindName("FooterRateSecondary") is StackPanel rateSecondary) rateSecondary.Spacing = layout.FooterRateGap;
@@ -182,6 +200,7 @@ public static class ShellResponsiveLayout
             if (root.FindName(name) is not Button action) continue;
             action.Padding = new Thickness(
                 layout.FooterActionPaddingX, layout.FooterActionPaddingY, layout.FooterActionPaddingX, layout.FooterActionPaddingY);
+            action.Width = layout.FooterActionWidth;   // FIX BATCH 5：固定保留宽 ⇒ 文案变长不改变动作区 X
             action.MinWidth = 0;            // 内容定宽：Compact 下不被系统最小宽顶出去
             action.MinHeight = layout.ButtonHeight;
         }

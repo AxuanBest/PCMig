@@ -45,6 +45,15 @@ public static class ControlIds
     public const string Step1ShareList = "Step1.ShareList";
     public const string Step1EmptySharesHint = "Step1.EmptySharesHint";
 
+    /// <summary>
+    /// Step 1 的**连接/添加共享结果状态行**（缺陷 A-02 / A-03 引入的可见反馈面）。
+    /// ★ B-FIX-BATCH 补登记（本批）★：XAML 早已带上这个 AutomationId（三 VM 用例
+    /// `valueNotEmpty id=Step1.StatusText` 一直在用它读连接结论），但它没进稳定 ID 表
+    /// ⇒ D6.3 的 AutomationId 双向闭合契约测试判失败（"稳定 ID 表不再是唯一事实源"）。
+    /// 它同时也是 O-B22c-1 修复后承载"凭据未被证实 / 凭据被复用"结论的控件，必须登记。
+    /// </summary>
+    public const string Step1StatusText = "Step1.StatusText";
+
     // Step 2 选择数据与目标（D6.1 §12 补齐）
     public const string Step2Prepare = "Step2.Prepare";
     public const string Step2Start = "Step2.Start";

@@ -46,6 +46,23 @@ public sealed record ExpectationTimeout(
     bool EvidenceComplete,
     long LossEpoch);
 
+/// <summary>
+/// ★ FIX BATCH 3 / §6 ★ **动作未兑现**的判定结果。
+///
+/// 它与 <see cref="ExpectationTimeout"/> 是两件事，绝不能混：
+///   · Timeout  = "还没有观察到"（事实：等的东西没来；可能只是慢）；
+///   · Failure  = "用户要求了业务动作、请求也已受理，但**业务效果从未达成**"
+///                （引擎自己承认停不住，或承诺的期限已过）。
+/// 后者必须让健康 verdict 降级、开出事件卡——这正是真机事故里"8/8 次暂停点击、0 次引擎确认、
+/// 事件卡 0、健康 healthy"缺的那条通路。
+/// </summary>
+public sealed record ExpectationFailure(
+    PendingExpectation Expectation,
+    ExpectedStep Step,
+    EventRef TriggerRef,
+    string TriggerEventName,
+    long ObservedAfterMs);
+
 /// <summary>跟踪器统计（有界性与落后都要可见）。</summary>
 public readonly record struct ExpectationTrackerStats(
     long Begun,
@@ -55,7 +72,8 @@ public readonly record struct ExpectationTrackerStats(
     long ClosedByTerminal,
     long DroppedByCap,
     int Pending,
-    long UnsupportedVersionSkipped);
+    long UnsupportedVersionSkipped,
+    long ClosedByFailure = 0);
 
 /// <summary>
 /// 待满足期望跟踪器（方案 §10）。
@@ -67,6 +85,8 @@ public readonly record struct ExpectationTrackerStats(
 ///     不认识任何业务对象，也**不会**去改 CanResume/暂停状态；
 ///   · 超时只产出 <see cref="ExpectationTimeout"/>，**由规则决定**怎么落成事件卡
 ///     （事实与结论分离）；
+///   · ★ FIX BATCH 3 ★ **受理 ≠ 兑现**：Failure 类步骤命中即"业务效果未达成"⇒
+///     关闭期望为失败并产出 <see cref="ExpectationFailure"/>（走 <see cref="OnFailure"/>）；
 ///   · 采集有损时超时结论必须降级（由规则侧的 RequiresCompleteEvidence 机制保证）。
 /// </summary>
 public sealed class PendingExpectationTracker
@@ -96,6 +116,7 @@ public sealed class PendingExpectationTracker
     private long _timedOut;
     private long _closedByRejection;
     private long _closedByTerminal;
+    private long _closedByFailure;
     private long _droppedByCap;
     private long _unsupportedVersionSkipped;
 
@@ -130,17 +151,44 @@ public sealed class PendingExpectationTracker
     /// </summary>
     public Action<string>? OnFault { get; set; }
 
+    /// <summary>
+    /// ★ FIX BATCH 3 / §6 ★ "动作未兑现"的回声通道（由 runtime 接进健康 verdict + 事件卡）。
+    ///
+    /// 与 <see cref="OnFault"/> 的区别：OnFault 是**跟踪器自己坏了**；这里是**产品没兑现承诺**
+    /// —— 跟踪器工作完全正常，是它**如实报告**了"用户要求的效果没有发生"。
+    /// 回调只在锁外派发，且绝不级联抛出。
+    /// </summary>
+    public Action<ExpectationFailure>? OnFailure { get; set; }
+
     /// <summary>观察一个事件（由 analyzer 收件箱调用；**绝不抛**）。</summary>
     public void Observe(in DiagnosticEvent evt)
     {
+        List<ExpectationFailure>? fired = null;
         try
         {
-            lock (_gate) ObserveCore(in evt);
+            lock (_gate) ObserveCore(in evt, ref fired);
         }
         catch (Exception ex)
         {
             // 跟踪失败绝不影响诊断管线与业务 —— 但必须留痕，绝不静默。
             ReportFault("tracker-observe:" + ex.GetType().Name);
+        }
+
+        // ★ 回调在锁外派发 ★（与 Tick 同一纪律：不把锁借给外部代码）。
+        if (fired is not null)
+            foreach (var failure in fired) DispatchFailure(failure);
+    }
+
+    /// <summary>派发一次"未兑现"（**绝不抛**：健康通道自己坏掉时不在这里级联）。</summary>
+    private void DispatchFailure(ExpectationFailure failure)
+    {
+        try
+        {
+            OnFailure?.Invoke(failure);
+        }
+        catch (Exception)
+        {
+            // 健康通道自身异常：不再级联。
         }
     }
 
@@ -160,7 +208,7 @@ public sealed class PendingExpectationTracker
         }
     }
 
-    private void ObserveCore(in DiagnosticEvent evt)
+    private void ObserveCore(in DiagnosticEvent evt, ref List<ExpectationFailure>? fired)
     {
         // ★ D6.3 §6.5 ★ 版本门与规则引擎**同一条**：不受支持的版本只配被保存，
         //   不配被当前契约解释。少了这道门，一个 `eventVersion=999` 的
@@ -239,30 +287,54 @@ public sealed class PendingExpectationTracker
                 return;
             }
 
-            SatisfySteps(pending, in evt, name);
+            SatisfySteps(pending, in evt, name, ref fired);
+            // ★ FIX BATCH 3 ★ 兑现失败（例如 TRN-023 PauseFailed 带了 actionId ⇒ UI 自己转发）
+            //   必须**先收集再移除**：在遍历期间改 _pending 会让枚举器失效。
+            if (pending.IsClosed) _pending.Remove(currentAction);
             return;
         }
 
         // ─────────── ③ 不带 actionId 的业务事件：按事件名满足仍然打开的期望 ───────────
         if (_pending.Count == 0 || !_stepEventNames.Contains(name)) return;
-        foreach (var pending in _pending.Values)
+        List<Guid>? failed = null;
+        foreach (var (actionId, pending) in _pending)
         {
             if (pending.IsClosed) continue;
-            SatisfySteps(pending, in evt, name);
+            SatisfySteps(pending, in evt, name, ref fired);
+            if (pending.IsClosed) (failed ??= new List<Guid>()).Add(actionId);
         }
+        if (failed is not null)
+            foreach (var id in failed) _pending.Remove(id);
     }
 
     /// <summary>
     /// 用事件满足待定期望里"指名了该事件"的步骤。
-    /// 只增 <see cref="PendingExpectation.Satisfied"/> 与计数，**不改 _pending 结构**（调用方持锁）。
+    /// 只增 <see cref="PendingExpectation.Satisfied"/> 与计数（调用方持锁、负责移除）。
+    ///
+    /// ★ FIX BATCH 3 / §6 ★ <see cref="ExpectationKind.Failure"/> 类步骤是**失败终点**：
+    /// 它命中意味着"业务效果从未达成"被引擎自己证实 ⇒ 立即把该期望**关成失败**
+    /// （而不是像普通步骤那样记一笔"满足"）。调用方随后把它从 _pending 移除。
     /// </summary>
-    private void SatisfySteps(PendingExpectation pending, in DiagnosticEvent evt, string name)
+    private void SatisfySteps(
+        PendingExpectation pending, in DiagnosticEvent evt, string name, ref List<ExpectationFailure>? fired)
     {
         if (!_contracts.TryGet(pending.ActionKind, out var contractForSteps)) return;
         foreach (var step in contractForSteps.Steps)
         {
             if (pending.Satisfied.ContainsKey(step.ExpectationId)) continue;
             if (!step.ExpectedEventNames.Contains(name, StringComparer.Ordinal)) continue;
+
+            if (step.Kind == ExpectationKind.Failure)
+            {
+                pending.IsClosed = true;
+                pending.CloseReason = "failed:" + step.ExpectationId;
+                _closedByFailure++;
+                (fired ??= new List<ExpectationFailure>()).Add(new ExpectationFailure(
+                    pending, step, evt.Ref, name,
+                    DiagnosticClock.TicksToMs(evt.MonotonicTimestamp - pending.OpenedMonotonic)));
+                return;
+            }
+
             pending.Satisfied[step.ExpectationId] = evt.Ref;
             _satisfied++;
         }
@@ -291,6 +363,11 @@ public sealed class PendingExpectationTracker
                 foreach (var step in contract.Steps)
                 {
                     if (step.Kind == ExpectationKind.Optional) continue;
+                    // ★ FIX BATCH 3 ★ 失败终点步骤"没发生"是**正常**的（没有失败当然没有失败事件）：
+                    //   它不得参与超时判定，否则每次暂停都会多出一条纯噪音的"缺反馈"。
+                    //   它的**相反**情形（该失败却没等到失败事件）由 pause.external 的
+                    //   DeadlineBreachIsFailure 超时来表达。
+                    if (step.Kind == ExpectationKind.Failure) continue;
                     if (pending.Satisfied.ContainsKey(step.ExpectationId)) continue;
                     if (pending.TimedOut.Contains(step.ExpectationId)) continue;
 
@@ -338,7 +415,7 @@ public sealed class PendingExpectationTracker
         {
             return new ExpectationTrackerStats(
                 _begun, _satisfied, _timedOut, _closedByRejection, _closedByTerminal, _droppedByCap, _pending.Count,
-                _unsupportedVersionSkipped);
+                _unsupportedVersionSkipped, _closedByFailure);
         }
     }
 }
