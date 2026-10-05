@@ -75,7 +75,9 @@ public class Batch5UiLayoutContractTests
 
         // 弹性列自己**不能**再放元素：它的宽度全部用于承载进度轨道（第 2 列由 FooterProgressHost 拉伸填满）。
         Assert.DoesNotContain("Grid.Column=\"6\"", xaml);
-        Assert.Contains("Grid.Column=\"2\" MinWidth=\"160\" Height=\"12\"", xaml);
+        // ★ R33 口径更新 ★ 底栏轨道槽高改由 Compact token 提供（14），不再是字面量 12。
+        //   断言从"字面量 12"改为"槽高必须来自 token"，这比原来更严（禁止再散写数字）。
+        Assert.Contains("Grid.Column=\"2\" MinWidth=\"0\" Height=\"{StaticResource PCMigImmersiveProgressCompactHostHeight}\"", xaml);
     }
 
     // ── UI-03：四动作按钮固定宽，且**绝不**用 Visibility 让列宽塌缩 ────────────────
@@ -98,26 +100,45 @@ public class Batch5UiLayoutContractTests
         Assert.Contains("action.Width = layout.FooterActionWidth;", responsive);
     }
 
-    // ── UI-04：顶栏与底栏共用同一对轨道/填充样式（不再是 ProgressBar 控件）────────────
-    //   ★ 口径更新（2026-10-04，非放宽）★ 原断言 ProgressBar + PCMigProgressBar 样式。
-    //   真机/VM 实测：WinUI 3 的 ProgressBar **不**按 DeterminateRoot/ProgressBarIndicator 驱动
-    //   自定义模板的填充宽度（UIA RangeValue=47.29% 而进度条区域逐像素零差异，填充恒为 0）。
-    //   ⇒ 两条进度条改为「轨道 Border + 填充 Grid(Rectangle)」，填充宽度由唯一写入者按真值驱动。
-    //   本条断言：两端共用同一样式对，且填充是强调色渐变的圆角矩形（视觉可像素验证）。
+    // ── UI-04：顶栏与底栏共用同一套进度视觉语言 ───────────────────────────────────
+    //   ★ 口径演进（2026-10-04 → Round-3 视觉纠偏，非放宽）★
+    //     第一版：ProgressBar 控件（真机证明 WinUI 3 不按 DeterminateRoot 驱动填充宽度 ⇒ 填充恒 0）。
+    //     第二版：「轨道 Border + 填充 Grid(Rectangle)」，填充宽度由唯一写入者按真值驱动。
+    //     ★ 第三版（R33 Hero / Compact Material Family）★ 用户真机判词明确指出两根条属于两种材质语言：
+    //       Hero = Immersive Renderer，Footer = 旧静态蓝 Rectangle（"直角条"）。
+    //       现在**两条都**是 controls:ImmersiveTransferProgress（Hero / Compact 变体），共用 Capsule /
+    //       Track-Space Chroma / Head 体积光场与**同一个 VisualProgress**。
+    //       本条断言：两端都是同一控件族，且旧写法（Border 轨道 / Grid 填充 / 圆角矩形）在**两处都已不在**。
     [Fact]
     public void UI04_TopAndFooterProgressBarsShareOneStyle()
     {
         var footer = ReadRepoFile("src", "PCMig.WinUI", "MainWindow.xaml");
         var step3 = ReadRepoFile("src", "PCMig.WinUI", "Views", "Step3ProgressPage.xaml");
 
-        Assert.Contains("<Border Style=\"{StaticResource PCMigProgressTrack}\"/>", footer);
-        Assert.Contains("x:Name=\"FooterProgressFill\" Style=\"{StaticResource PCMigProgressFill}\"", footer);
-        Assert.Contains("<Border Style=\"{StaticResource PCMigProgressTrack}\"/>", step3);
-        Assert.Contains("x:Name=\"TotalProgressFill\" Style=\"{StaticResource PCMigProgressFill}\"", step3);
+        // 底栏：Compact 变体的 Immersive 控件（不再是 Border 轨道 + Grid 填充 + 静态圆角矩形）
+        Assert.Contains("<controls:ImmersiveTransferProgress x:Name=\"FooterImmersiveProgress\" Variant=\"Compact\"", footer);
+        Assert.Contains("Height=\"{StaticResource PCMigImmersiveProgressCompactHostHeight}\"", footer);
+        Assert.DoesNotContain("x:Name=\"FooterProgressFill\"", footer);
+        Assert.DoesNotContain("RadiusX=\"4\" RadiusY=\"4\" Fill=\"{StaticResource AccentGradientBrush}\"", footer);
+        Assert.DoesNotContain("<Border Style=\"{StaticResource PCMigProgressTrack}\"/>", footer);
 
-        // 填充是圆角矩形 + 强调色渐变（与轨道圆角一致）
-        Assert.Contains("RadiusX=\"6\" RadiusY=\"6\" Fill=\"{StaticResource AccentGradientBrush}\"", footer);
-        Assert.Contains("RadiusX=\"6\" RadiusY=\"6\" Fill=\"{StaticResource AccentGradientBrush}\"", step3);
+        // ★ Round-3 PHASE E（§7/§23）口径更新 ★ Step3 主进度条已换成 PCMig Immersive Transfer Progress。
+        //   为什么是"更新"而不是"放宽"：同一条进度条上**视觉拥有者必须唯一**，所以这里不只断言新控件在，
+        //   还断言旧写法（轨道 Border / 填充 Grid / 圆角矩形）已经**彻底不在**——叠层即两道 Push Band 打架。
+        Assert.Contains("<controls:ImmersiveTransferProgress x:Name=\"TotalImmersiveProgress\"", step3);
+        Assert.Contains("Height=\"{StaticResource PCMigImmersiveProgressHostHeight}\"", step3);
+        Assert.DoesNotContain("x:Name=\"TotalProgressFill\"", step3);
+        Assert.DoesNotContain("Style=\"{StaticResource PCMigProgressFill}\"", step3);
+        Assert.DoesNotContain("<Border Style=\"{StaticResource PCMigProgressTrack}\"/>", step3);
+
+        // 尺寸与几何都必须来自 token（PMML-R14/R22/R33）：Hero 16/12/6，Compact 14/10/5，两者半径都 = 厚度/2。
+        var materials = ReadRepoFile("src", "PCMig.WinUI", "Themes", "Materials.xaml");
+        Assert.Contains("x:Key=\"PCMigImmersiveProgressHostHeight\">16<", materials);
+        Assert.Contains("x:Key=\"PCMigImmersiveProgressThickness\">12<", materials);
+        Assert.Contains("x:Key=\"PCMigImmersiveProgressRadius\">6<", materials);
+        Assert.Contains("x:Key=\"PCMigImmersiveProgressCompactHostHeight\">12<", materials);
+        Assert.Contains("x:Key=\"PCMigImmersiveProgressCompactThickness\">10<", materials);
+        Assert.Contains("x:Key=\"PCMigImmersiveProgressCompactRadius\">5<", materials);
     }
 
     // ── UI-05：填充占满轨道高度、由**唯一写入者**驱动、且没有任何动画推进它 ──────────
@@ -131,23 +152,41 @@ public class Batch5UiLayoutContractTests
         var trackStart = controls.IndexOf("x:Key=\"PCMigProgressTrack\"", StringComparison.Ordinal);
         Assert.True(trackStart > 0, "必须存在 PCMigProgressTrack 样式");
         var track = controls[trackStart..controls.IndexOf("</Style>", trackStart, StringComparison.Ordinal)];
-        Assert.Contains("<Setter Property=\"CornerRadius\" Value=\"6\"/>", track);
+        Assert.Contains("<Setter Property=\"CornerRadius\" Value=\"{StaticResource PCMigProgressRadius}\"/>", track);
         Assert.Contains("Value=\"{StaticResource ProgressTrackBrush}\"", track);    // 复用既有 token（PMML-R14）
+        // ★ Round-2（§3.5）★ 视觉厚度独立成 token 并垂直居中（不得用 12 DIP 满高充数、不得靠加粗制造运动感）
+        Assert.Contains("<Setter Property=\"Height\" Value=\"{StaticResource PCMigProgressVisualThickness}\"/>", track);
+        Assert.Contains("<Setter Property=\"VerticalAlignment\" Value=\"Center\"/>", track);
 
         var fillStart = controls.IndexOf("x:Key=\"PCMigProgressFill\"", StringComparison.Ordinal);
         Assert.True(fillStart > 0, "必须存在 PCMigProgressFill 样式");
         var fill = controls[fillStart..controls.IndexOf("</Style>", fillStart, StringComparison.Ordinal)];
-        Assert.Contains("<Setter Property=\"VerticalAlignment\" Value=\"Stretch\"/>", fill);   // 填充高度 = 轨道高度（不再是细线）
+        Assert.Contains("<Setter Property=\"VerticalAlignment\" Value=\"Center\"/>", fill);    // 视觉厚度内垂直居中（Round-2 §3.5）
+        Assert.Contains("<Setter Property=\"Height\" Value=\"{StaticResource PCMigProgressVisualThickness}\"/>", fill);   // 填充厚度 = 轨道视觉厚度
         Assert.Contains("<Setter Property=\"HorizontalAlignment\" Value=\"Left\"/>", fill);
         Assert.Contains("<Setter Property=\"Width\" Value=\"0\"/>", fill);
         Assert.Contains("IsHitTestVisible", fill);
 
-        // 唯一写入者：宽度 = 轨道实际宽度 × 百分比（没有任何动画/计时器推进它）
+        // 唯一写入者（底栏）：把**同一个** VisualProgress 百分比写给 Compact 控件（不再换算像素宽度）
+        //   ★ R33 口径更新 ★ 底栏改用 ImmersiveTransferProgress(Compact) 后，"宽度"这个概念已不在底栏存在；
+        //   唯一写入者仍然只有 UpdateFooterProgressFill，但它只写 Value + ProgressState。
         Assert.Contains("UpdateFooterProgressFill", main);
         Assert.Contains("FooterProgressHost.SizeChanged += (_, _) => UpdateFooterProgressFill();", main);
-        Assert.Contains("Math.Round(trackWidth * clamped / 100.0, 1)", main);
-        Assert.Contains("UpdateTotalProgressFill", step3Code);
-        Assert.Contains("TotalProgressHost.SizeChanged += (_, _) => UpdateTotalProgressFill();", step3Code);
+        Assert.Contains("FooterImmersiveProgress.Value = clamped;", main);
+        Assert.DoesNotContain("Math.Round(trackWidth * clamped / 100.0, 1)", main);
+
+        // ★ Round-3 PHASE E（§16/§23、PMML-R23）★ 主进度条的唯一写入者仍是 UpdateTotalProgressFill，
+        //   但它现在只写一个**百分比**（与大号百分比、字节数同源 = 同一个 VisualProgress），
+        //   像素几何与光学层全部由控件自持；本页对已冻结的旧驱动必须零引用（§7 旧视觉路线下线）。
+        Assert.Contains("private void UpdateTotalProgressFill()", step3Code);
+        Assert.Contains("immersive.Value = percent;", step3Code);
+        Assert.Contains("immersive.ProgressState = MapProgressState(", step3Code);
+        Assert.DoesNotContain("ProgressMotionDriver", step3Code);
+        Assert.DoesNotContain("SetTargetFromTimeline", step3Code);
+        // 旧 XAML 元素 TotalProgressFill 已不存在于本页（注意方法名 UpdateTotalProgressFill 含同名前缀，
+        //   所以要按"元素用法"断言：`TotalProgressFill.` / `(TotalProgressFill,`）。
+        Assert.DoesNotContain("TotalProgressFill.", step3Code);
+        Assert.DoesNotContain("(TotalProgressFill,", step3Code);
 
         // 动画只能装饰、绝不能成为进度真值的来源（§8 + PMML-R8）：样式里不许有任何时间线。
         foreach (var block in new[] { track, fill })
@@ -191,12 +230,14 @@ public class Batch5UiLayoutContractTests
     // PHASE D 口径校正（2026-10-05）：原先逐个锁死魔法行高数字（24/18/28/52）。返修方案 §4 明确
     // 要求"不得继续堆 magic LineHeight"：TextBlock.LineHeight 默认 0 = 按字体度量自动算行盒，写死
     // 数字既可能与真实字体度量不符（把墨迹顶到行盒上沿 ⇒ 视觉上"顶部被削一条"），又在 DPI 缩放
-    // 变化时失效。四张统计卡的大号数值（PCMigTextStatValue）现在不再声明 LineHeight —— 见 UI07b；
-    // 其余三处保持既有显式行高与亚像素取整（本轮未改其视觉）。
+    // 变化时失效。四张统计卡的大号数值（PCMigTextStatValue）现在不再声明 LineHeight —— 见 UI07b。
+    // ★ Round-2 §5 追加 ★ 40px 的 PCMigTextTotalPercent 也**移出**本列表：它的 LineHeight=60 正是
+    // "顶部摘要三组不共面"的 XAML 根因（40px 字形的 60 DIP 行盒 vs 同行两个 Bottom 对齐的小字号）。
+    // 该样式现在必须**不带**显式行高 —— 由 Step3SummaryAlignmentTests.PercentBytesStateCentersAligned 锁死。
+    // 其余两处底栏数字保持既有显式行高与亚像素取整（本轮未改其视觉）。
     [Theory]
     [InlineData("PCMigTextFooterPercent", 26)]
     [InlineData("PCMigTextFooterValue", 20)]
-    [InlineData("PCMigTextTotalPercent", 60)]
     public void UI07_NumericStylesDeclareLineHeight(string styleKey, int lineHeight)
     {
         var typography = ReadRepoFile("src", "PCMig.WinUI", "Themes", "Typography.xaml");
@@ -250,8 +291,14 @@ public class Batch5UiLayoutContractTests
             Assert.Contains(token, controller);
         }
 
-        Assert.Contains("public double FooterSpacerWidth => 0;", controller);
-        Assert.Contains("LayoutMode.Wide => 160", controller);       // 进度轨道**最小宽**（弹性列会拉得更宽）
+Assert.Contains("public double FooterSpacerWidth => 0;", controller);
+        // ★ 2026-10-06（用户方案第三步）★ 进度宿主改为**无硬下限**：原来的 Wide=160 比星号列在
+        //   canonical 1424 下实际可用的约 138 DIP 还宽 22 DIP ⇒ 宿主越出槽位、右端胶囊圆弧被裁成直角。
+        //   这里保留的**行为断言**是"进度轨道占用弹性列、自身不再要求固定宽"；只把"硬下限 160"这一
+        //   实现细节换成"无硬下限"，不是删断言换绿灯。
+        Assert.Contains("public double FooterProgressWidth => 0d;", controller);
+        Assert.DoesNotContain("LayoutMode.Wide => 160", controller);
+        Assert.Contains("LayoutMode.Wide => 18", controller);        // 与 XAML 里的 ColumnSpacing 一致
         Assert.Contains("LayoutMode.Wide => 18", controller);        // 与 XAML 里的 ColumnSpacing 一致
     }
 

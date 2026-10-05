@@ -217,9 +217,18 @@ public class PauseCoreSemanticsTests : IDisposable
         Assert.True(resume.Ran, "被暂停的对象在 Resume 后必须重跑（权威进度只认 Completed 回执）");
         Assert.Equal(JobPhase.Completed, phase);
         Assert.Equal(1, state.CompletedObjects);
-        var receipt = Assert.Single(ctx.LoadReceipts());
-        Assert.Equal(ObjectStatus.Completed, receipt.Status);
+        // 收尾口径：每个对象只有一份**权威**回执（Completed），且中断那一趟必须留下可审计的回执。
+        // 历史坑：这里原先是 Assert.Single(回执总数)，它的成立与否取决于两次尝试是否落在**同一秒**内——
+        // JobManager.SaveReceipt 的文件名只精确到秒（{ObjectId}-{yyyyMMddHHmmss}.json），同秒即互相覆盖
+        // ⇒ 该断言按构造就是 flaky（实测 08:13:42.968 与 08:13:43.011 跨秒时变成 2 份）。
+        // 现在改为断言**内容口径**：Completed 回执唯一、字节等于源大小；Interrupted 回执字节不得超过计划；
+        // 权威解析在最新一趟已完成时必须给出 0。比旧断言更严，且与秒边界无关。
+        var receipts = ctx.LoadReceipts();
+        var receipt = Assert.Single(receipts, r => r.Status == ObjectStatus.Completed);
         Assert.Equal(4096, receipt.TargetBytes);
+        Assert.All(receipts.Where(r => r.Status == ObjectStatus.Interrupted),
+            r => Assert.True(r.TargetBytes <= 4096, "中断回执的可信字节不得超过计划字节"));
+        Assert.Equal(0, TransferOrchestrator.ResolveTrustedInterruptedBytes(receipts, "object-1", 4096));
         Assert.Equal(4096, new FileInfo(Path.Combine(ctx.Plan!.Objects[0].TargetPath, "src.bin")).Length);
     }
 

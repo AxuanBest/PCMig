@@ -100,16 +100,25 @@ public class ShellHintCardMotionContractTests
         Assert.DoesNotContain("Storyboard", card);   // 本卡不再有任何 Storyboard 高度动画
     }
 
-    // ── 6. MaxHeight 必须等于真实物理上界，不得被"下界 160"反向抬高（返修第四根因）──
+    // ── 6.（Round-2 §4 口径）卡片是**固定尺寸**：高度只在 token 与真实可用高之间取小，──────────
+    //      不存在 MaxHeight/MinHeight 自适应，也不存在"下界反向抬高上界"的问题（旧写法已整体删除）。
     [Fact]
-    public void HintCard_MaxHeightNeverExceedsRealCeiling()
+    public void HintCard_FixedHeightNeverExceedsAvailableCeiling()
     {
         var card = StripComments(ReadRepoFile("src", "PCMig.WinUI", "Views", "ShellHintCard.xaml.cs"));
 
-        Assert.Contains("HintCardSurface.MaxHeight = safeCeiling;", card);
-        // 160 只作为**理想最小高度**，且必须被 ceiling 夹住。
-        Assert.Contains("HintCardSurface.MinHeight = Math.Min(IdealMinSurfaceHeight, safeCeiling);", card);
-        // 旧的"反向突破"写法必须消失。
+        // 固定 token 高：未测量到可用空间时也不能把卡片压成 0 高。
+        Assert.Contains("HintCardSurface.Height = fixedHeight;", card);
+        // 唯一"断点换档"：可用高 < token 才夹高；可用高 ≥ token 一律用 token。
+        Assert.Contains("HintCardSurface.Height = availableHeight >= fixedHeight ? fixedHeight : availableHeight;", card);
+        // token 读取 + 兜底常量（与 Materials.xaml 同源）。
+        Assert.Contains("PCMigHintCardHeight", card);
+        Assert.Contains("FallbackFixedSurfaceHeight = 176d", card);
+
+        // 旧实现的两套自适应约束必须彻底消失。
+        Assert.DoesNotContain("MaxHeight =", card);
+        Assert.DoesNotContain("MinHeight =", card);
+        Assert.DoesNotContain("IdealMinSurfaceHeight", card);
         Assert.DoesNotContain("maxHeight < 160d ? 160d : maxHeight", card);
         Assert.DoesNotContain("if (target < 160d) target = 160d;", card);
     }

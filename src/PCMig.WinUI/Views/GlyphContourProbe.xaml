@@ -1,0 +1,36 @@
+<UserControl
+    x:Class="PCMig.WinUI.Views.GlyphContourProbe"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        ★ PHASE 5B / 用户 2026-10-05 追加纠正：Glyph Contour（字形顶部轮廓）专项探针 ★
+
+        用户的新证据推翻了"顶部留白不够 / LineHeight 不够 / 整体下移"这条旧主线：
+        问题是**字形顶部轮廓本身被拍平**（数字 2 与字母 G 的顶部弧线变成水平线），
+        属于 glyph ink rendering，不是外层容器裁切。
+
+        已用 WPF 字体枚举 + 逐列墨迹轮廓测量确定的文字层事实（本机 Windows）：
+          · Microsoft YaHei UI 只注册三个字面：290 = MSYHL.TTC / 400 = MSYH.TTC / 700 = MSYHBD.TTC；
+            **没有 SemiBold(600)**。
+          · 请求 SemiBold(600) 时被向上取整命中 **700 (Bold)**。
+          · 20 px 下 '2' 的顶部墨迹跨度（topRange，即顶部弧线覆盖多少行像素）：
+              Normal(400) = 12 行   ← 弧度保留
+              SemiBold(600)→700 = 2 行   ← 弧度被压成一条水平线 ★这就是"被横着削平"
+              'G'：400 = 7 行 / 600→700 = 5 行
+          · 同样字形在 200 px 下：400 = 147 行 / 700 = 139 行 ⇒ 字体本身弧度完好，
+            问题只在**低字号的栅格化**。
+
+        因此本探针把"字重"作为唯一自变量，在同一屏、同一进程、同一 DPI 下渲染同一批字形，
+        每格上方带一条洋红基准线，供逐列 top-profile 像素分析：
+          顶部跨度大 + 首行墨迹窄  ⇒ 弧度保留
+          顶部跨度小 + 首行墨迹宽  ⇒ 被拍平
+
+        本组件不参与业务：无 ViewModel、无事件订阅、不写状态；只在
+        Environment.GetEnvironmentVariable("PCMIG_GLYPH_PROBE") == "1" 时被 MainWindow 挂载。
+    -->
+    <ScrollViewer Background="#FF0B0E13" RequestedTheme="Dark"
+                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel x:Name="ProbeRoot" Padding="24" Spacing="14"/>
+    </ScrollViewer>
+</UserControl>

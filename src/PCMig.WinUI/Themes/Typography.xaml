@@ -66,15 +66,47 @@
   <!-- Step 3 进度页 -->
   <!-- FIX BATCH 5（§8 Typography）：大号百分比（40 Bold）与统计值（20 SemiBold）给显式行高，
        保证墨迹不裁顶/不裁底；UseLayoutRounding 让亚像素对齐稳定（大数字换位时不抖）。 -->
-  <Style x:Key="PCMigTextTotalPercent" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="40"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/><Setter Property="LineHeight" Value="60"/><Setter Property="UseLayoutRounding" Value="True"/></Style>
+  <!-- ★ Round-2 2026-10-05（用户指令 §5）★ 大号总百分比**去掉显式 LineHeight=60**：
+       旧值让 40px 字形的行盒变成 60 DIP，而同一行里的字节数与状态句是小字号 + Bottom 对齐
+       ⇒ 三者重心不可能重合（用户标注截图"顶部摘要三组不共面"的 XAML 根因）。
+       现在：自然行高（LineHeight 默认 0 = 按字体度量自动）+ 调用点三者都 VerticalAlignment="Center"，
+       整行由 MinHeight=52 提供稳定基准。若 PHASE 5 的字体探针证明 40px 需要额外余量，
+       再按探针结果引入 Typography token（不得为了"看起来居中"随手加数字）。 -->
+  <Style x:Key="PCMigTextTotalPercent" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="40"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/><Setter Property="UseLayoutRounding" Value="True"/></Style>
   <!-- PHASE D（§4 Metric Typography）：四张统计卡的大号数值不再堆显式 LineHeight。
        理由：TextBlock.LineHeight 默认 0＝按字体度量自动算行盒；写死的 32（FontSize 20）是魔法数字，
        既可能与真实字体度量不符（把墨迹顶到行盒上沿，视觉上"顶部被削一条"），又在 DPI 缩放变化时失效。
        改为 LineStackingStrategy=MaxHeight（行盒 = 字体行高，未设 LineHeight 即纯字体度量）
        + VerticalAlignment=Center，并由外层 MetricValueHost 的 MinHeight/Padding 保证几何高度稳定
        （见 Step3ProgressPage.xaml 的 *ValueHost）。
-       UseLayoutRounding 保持 True：本轮在 100% DPI 真机未观察到裁切，无证据证明它有害，不擅自移除。 -->
-  <Style x:Key="PCMigTextStatValue" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="20"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/><Setter Property="LineStackingStrategy" Value="MaxHeight"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+       PHASE 5 隔离探针（2026-10-05）分类结论（更正上一轮"保持 True"的口头结论——本样式实际从未设置 UseLayoutRounding）：
+        ① 字体事实：本机 Microsoft YaHei UI / Microsoft YaHei 只暴露 Light(290)/Normal(400)/Bold(700) 三个字面；
+        ② 但 WPF FormattedText.BuildGeometry 显示六种字重的墨迹盒完全相同
+           （FontSize 20：inkTop 4.854 / inkBottom 22.823 / 自然行高 25.4）⇒ 字重不改变墨迹盒；
+        ③ 隔离探针六变体（YaHei UI±SemiBold/Normal、系统字体、Segoe UI Variable、生产样式）anyClipped 全为 False，
+           生产变体（本样式 + Grid{MinHeight=34,Padding=0,3,0,3}）净空最大（9~10 物理像素）；
+        ④ 离屏 DPI 矩阵 96/120/144/168/192（=100/125/150/175/200%）下 UseLayoutRounding 开与关净空完全相同（8.0~8.57 DIP）。
+        ⇒ 外层容器没有裁切任何像素；用户看到的"顶部被横着削平"因此只可能来自**字形墨迹本身的顶部轮廓**。
+
+        PHASE 5B 真机字形轮廓探针（2026-10-05，Views\GlyphContourProbe.xaml.cs，PCMIG_GLYPH_PROBE=1）：
+        用"逐列第一条墨迹行"量化字形顶部弧度，字段 topRange = 顶部墨迹跨多少行像素（越大＝弧线越完整），
+        firstRowRatio = 最顶那一行覆盖的墨迹列占比（越大＝顶部越像一条水平切线）。真机（96 DPI，Microsoft YaHei UI，FontSize 20）实测：
+                     '2' topRange / ratio      'G' topRange / ratio      'S' topRange / ratio
+          Normal(400)       13 / 0.5000              5 / 0.5000              3 / 0.5556
+          Medium(500)       13 / 0.5000              5 / 0.5000              3 / 0.5556
+          SemiBold(600)     12 / 0.6000              5 / 0.5385              3 / 0.6667
+          Bold(700)         12 / 0.7000              4 / 0.6154              2 / 0.8000
+        · 同一批字形的顶部轮廓随字重单调变平：Normal < SemiBold < Bold；
+        · 本样式原来的 FontWeight="SemiBold" 经真机对照实测 topRange=12 / ratio=0.6000，
+          与探针 W600 行**逐字段完全相同** ⇒ 生产卡渲染的就是 SemiBold 那一档；
+        · 对照字号 96：'2' 的 topRange 达 64~68（ratio 0.24~0.27）⇒ 字体轮廓本身完好，
+          顶部变平是**低字号栅格化**把弧顶吸附到少数像素行，与父级裁切无关；
+        · 故将 FontWeight 由 SemiBold 改为 Normal：这是本机 YaHei UI 下顶部轮廓最完整的一档
+          （预期 topRange 12→13、ratio 0.6000→0.5000）。注意这是**渐进改善**（约 1 行像素跨度、
+          顶行占比降 10 个百分点），不是"从削平变回圆弧"的戏剧性变化——字号仍是 20 DIP，物理约束不变。
+        · Medium(500) 与 Normal(400) 真机实测完全相同（该族无 500 字面），故取 Normal 以避免歧义。
+        · 本样式继续保持不设置 UseLayoutRounding（继承基样式；探针已证其开/关无差异）。 -->
+  <Style x:Key="PCMigTextStatValue" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="20"/><Setter Property="FontWeight" Value="Normal"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/><Setter Property="LineStackingStrategy" Value="MaxHeight"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
   <!-- Step 4 结果页（深色日志面板：固定浅色字，不跟随主题） -->
   <Style x:Key="PCMigTextLogHeader" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#E6ECFF"/></Style>
   <Style x:Key="PCMigTextLogTagInfo" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#7BD88F"/><Setter Property="VerticalAlignment" Value="Center"/></Style>

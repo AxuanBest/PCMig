@@ -11,17 +11,27 @@
 
 ## 0. 一分钟现状
 
+> **注意**：下表是**第 3 轮（Round-2 返修）结束时的最新事实**（2026-10-05 13:4x）。第 1 轮与第 2 轮的历史快照见 §1。
+> **Round-2 的完整报告**：`docs\UI-CLOSURE-ROUND2-REPORT-20261005.md`（含 A 视频证伪 / B 根因 / C 文件 / D 测试 / E 真机证据 / F 未关闭项）。
+
 | 项 | 值 |
 |---|---|
 | 权威工作区 | `E:\Project\deepseek work\PCMig`（分支 `feature/winui-v0.5.0`） |
-| HEAD | `d1aefb2fb8b36b135cf136afc71532c3450226a8`（**本会话没有产生任何 commit**） |
-| 工作树 | `git status --porcelain=v1` = **82 条**（55 modified + 27 untracked）—— 含**上一轮遗留**的 51+ 与**本会话新增**的改动 |
-| 本会话新增改动 | **28 个仓库文件**（21 个已跟踪文件被改 + 7 个新文件），逐条见 §3 |
+| HEAD | `862b0917f408c009bd4b9dbf61e0d8bcb0af0742`（用户已授权本地提交；**未 push / 未 tag / 未发版**） |
+| 工作树 | Round-2 的改动**全部未提交**（等返修验收后的再次明确授权） |
 | 构建 | `dotnet build PCMig.sln -c Release` ⇒ **成功 / 0 error / 3 warning**（= 基线 `Views\PCMigSurface.xaml:53/54/56` WMC1506） |
-| 测试 | `PCMig.Core.Tests` **468 / 468 通过**；`PCMig.Diagnostics.Tests` 本轮**未重跑**（最近记录 382/382） |
-| 运行中程序 | `PCMig.WinUI.exe` **PID 227500**（标题 `PCMig 迁移工具 · v0.5.0`），停在正常初始页 Step1 |
-| 发布状态 | **未 commit / 未 push / 未 tag / 未发版**。本会话产出的是**待人工验收的候选版** |
-| 桌面交付 | `D:\Users\User\Desktop\新建文件夹 (4)\` 下 4 项（见 §6） |
+| 测试 | `PCMig.Core.Tests` **518 / 518 通过**；`PCMig.Diagnostics.Tests` **382 / 382 通过** |
+| Round-2 范围 | PHASE 1 真值连续性 / PHASE 2 呈现协调 / PHASE 3 提示卡固定高 / PHASE 4 顶部摘要共面 / PHASE 5B Metric 字形顶部 —— **全部施工完毕** |
+| 真机验收结论 | PHASE 1–4 = **VERIFIED FIXED**；PHASE 5B = **CODE FIXED**（有真机轮廓 A/B 数据，但生产卡本体截图像素证据因 `RenderTargetBitmap × Translation` 不兼容而缺失） |
+| 仍未关闭 | 5 项 `CODE FIXED / NOT VISUALLY VERIFIED`：生产统计卡本体 PNG、提示卡四通道满载溢出、顶部双行状态句、Metric 五档 DPI 真机截图（本机单屏 96 DPI 不可行）、视觉厚度 7 vs 8 DIP 定档 |
+| 发布状态 | **未 push / 未 tag / 未发版**；Round-2 改动未 commit |
+| 关键新增文件 | `Presentation\ProgressPresentationCoordinator.cs`、`Views\MetricTypographyProbe.*`、`Views\GlyphContourProbe.*`、`tests\...\StatValueWeightContractTests.cs` 等（见 Round-2 报告 §C） |
+| 关键新增 token | `PCMigProgressVisualThickness = 8`、`PCMigProgressRadius = 4`、`PCMigHintCardHeight = 176` |
+| 关键生产修复 | ① Stop/Pause/Resume 显示高水位（`ContinuationDisplayState`）② 数字与条共用 VisualPercent ③ 提示卡固定 176 DIP ④ 顶部摘要三列 Center + 去 `LineHeight=60` ⑤ `PCMigTextStatValue` 字重 `SemiBold → Normal` |
+
+---
+
+## 0.1 历史快照（第 1 / 2 轮，2026-10-05 01:49 → 03:15）
 
 ---
 
@@ -223,3 +233,95 @@
 - **新增文件**需手工删除：`src\PCMig.WinUI\Presentation\ProgressMotionDriver.cs`、`docs\UI-CLOSURE-REPORT-20261005.md`、`docs\UI-CLOSURE-ISSUES-20261005.md`、`docs\工作交接-20261005-UI-Closure.md`（+ 本文件）；
 - **装饰层可软关闭**：把 `MainWindow.xaml.cs` / `Step3ProgressPage.xaml.cs` 里的 `new ProgressMotionDriver(...)` 置空即可（它不持有任何业务引用，业务真值路径不受影响）；
 - **二进制**：`E:\PCMigLab\Staging\final-candidate-backup-20261005-0152\`（第 1 轮备份）；`E:\PCMigLab\Staging\PCMig-v0.5.0-这一版源码-20261005\`（源码包 staging，可重新压缩）。
+
+---
+
+## 9. Round-2 返修交接（2026-10-05，第三轮）
+
+### 9.1 这一轮依据什么
+用户 Round-2 Fix Plan（§12 视频 `20261005-0330-07.1223683.mp4`：98.67 s / 1422x880 / 30 fps + 标注截图）。该视频**证伪**了上一轮多处 "FIXED" 标签，并且是本轮的**最高权威证据**。五个 PHASE 必须**按顺序**做（不许一次性并行全上）。
+
+### 9.2 施工顺序与结论
+
+| PHASE | 内容 | 结论 |
+|---|---|---|
+| 1 | 真值连续性：`ContinuationDisplayState`（显示高水位，仅呈现层）+ Pause/Stop/Resume 捕获与追赶 | **VERIFIED FIXED**（真机 job `JOB-20261005-131031-919e`：Stop 前 9.2%，Stop 后恒 99.9%/41.96 GB，30+16 个样本零倒退；`UnexpectedProgressRegression` 条目 = 0） |
+| 2 | 呈现：`ProgressPresentationCoordinator`（唯一 VisualPercent 时间线，滞后但绝不超过真值）+ 80 ms 节拍 + 数字与条同源 + 重定向从当前视觉起步 + 自适应时长 | **VERIFIED FIXED**（帧序列：不同前沿位置 16→163，单帧最大跳 146→24 px；探针证明 `visual < confirmed`、`uiPercent` 与 `timeline visual` 同步） |
+| 3 | 提示卡**固定高度**：token `PCMigHintCardHeight = 176`、五行 Grid（唯一可变行 `Height="*"`）、四通道 MaxLines、滚动条 `Auto→Hidden` | **VERIFIED FIXED**（短/长/运行中三态 `HintScroll y=889 h=57` 完全一致，且与几何推算吻合） |
+| 4 | 顶部摘要三列共面：删 `PCMigTextTotalPercent` 的 `LineHeight=60`、三列 `VerticalAlignment="Center"`、`MinHeight=52`、状态句 `MaxLines=2` | **VERIFIED FIXED**（宽窗 centerY 301.5/301.0/301.0、窄窗 378.0/377.0/378.0，maxΔ ≤ 1.0 DIP ≤ 2） |
+| 5B | Metric 字形顶部：真机逐列首墨迹轮廓测量 → 定性为**低字号栅格化** → `PCMigTextStatValue` 字重 `SemiBold → Normal` | **CODE FIXED**（改前与探针 `SemiBold(600)` 逐字段相同，改后与 `Normal(400)` 逐字段相同；但生产卡本体截图缺失） |
+
+### 9.3 下一会话接手要点（重要，容易踩）
+1. **本机屏幕捕获不可靠**：`SetForegroundWindow` / `SetWindowPos(HWND_TOPMOST)` / `PrintWindow` 三条路都拿不到 WinUI 3 窗口真实画面（窗口状态全部正常、位置 `26,26 1440x900`、未 cloaked、`GetForegroundWindow` 也返回它，但读到的像素是浏览器）。**唯一成功方法**是 `New-Object -ComObject Shell.Application; $shell.MinimizeAll()` 后恢复目标窗口，且必须带 `SELFCHECK maxLuma` 自检；未自检的截图会产出"全部 topRange=0"的假数据（本轮已踩）。
+2. **`RenderTargetBitmap` 不能用**：与 `Translation`（含 MotionDirector 入场动画）不兼容，对 `StatCard0..3` / `StatCardsGrid` / 四个 `ValueText` 全部抛 `ArgumentException: The specified property was not found or cannot be animated. Context: Translation`。应用内导出探针 `PCMIG_STATCARD_EXPORT` 已落地但不出图。
+3. **窗口原点每次都变**（见过 `26,26` / `104,104` / `208,208` / `234,234` / `466,417` / `492,560` …），一律当次 UIA 读取。
+4. **`ensure-step3.ps1` 必须先跑**：会按 aid 关掉「发现未完成任务」对话框（`PrimaryButton` = 继续旧任务 / `SecondaryButton` = **新建任务** / `CloseButton` = 取消）。选错会让 Session 绑到旧 job，`StateLineText` 变成「尚未开始迁移…」而统计卡全为零。
+5. **本机吞吐 2.7–5 GB/s**：42 GB 数据集约 4–10 s 跑完，中间态窗口很窄；用**时间触发**（`-PauseAfterSec`）而不是等百分比。
+6. **PS 5.1 陷阱**：`$Matches` 是全局变量、`$host`/`$W`/`$X` 保留、`New-Object` 解析不了 WPF 多参构造（须落 C# 内联 `Add-Type`）、`@($a - 5, $b - 5)` 会被解析成数组减法、`ScrollPattern.Scroll()` 报错（用 `SetScrollPercent`）。
+
+### 9.4 回退
+- Round-2 改动**全部未提交** ⇒ 按文件清单 `git checkout -- <文件>` 可整体回退；新增文件需手工删（`ProgressPresentationCoordinator.cs`、`MetricTypographyProbe.*`、`GlyphContourProbe.*`、`StatValueWeightContractTests.cs`、`ContinuationDisplayStateTests.cs`、`ProgressPresentationCoordinatorTests.cs`、`ShellHintCardLayoutTests.cs`、`Step3SummaryAlignmentTests.cs`）。
+- 已提交的检查点是 `862b091`（**只读基线**，禁止 `reset --hard` / `checkout .` / `restore .` / `clean -fd`）。
+- 探针可软关闭：`PCMIG_PROGRESS_DEBUG`、`PCMIG_PROGRESS_TRACE`、`PCMIG_METRIC_PROBE`、`PCMIG_GLYPH_PROBE`、`PCMIG_STATCARD_EXPORT` 都是**只读环境变量**，不设即无任何行为；装饰层异常一律被 `try/catch` 隔离，绝不影响进度真值。
+
+---
+
+## 10. Round-3 交接（2026-10-05，第四轮：真值修复 + 官方进度视觉语言）
+
+### 10.1 这一轮依据什么
+
+用户 Round-3 执行书（基于用户提供的视频 `harmony_progress_roundcap_pushband.mp4` 作**新视觉基线** + Round-2 视频 `20261005-0330-07.1223683.mp4` 证伪了多处 "FIXED"）。核心指令：**停止打磨旧 `ProgressMotionDriver` / Sweep / 8 粒子方案**，新建正式控件 **PCMig Immersive Transfer Progress**，作为 PCMig 0.5.x 的**官方进度视觉语言**；并先"把真值修对，再重建想要的进度条"。**用户视觉验收是唯一判据**——"旧条真的在动""distinctEdges 很大""代码里调用了 Composition 动画"一律不算通过。
+
+### 10.2 施工顺序与结论（A → E）
+
+| PHASE | 内容 | 结论 |
+|---|---|---|
+| A | **P0 真值修复**：`MarkInterrupted` 不再实测目标长度、可信打断 checkpoint、`/Z` 预分配不采信目标长度、`/Z` 入账失败回冲、前跳守卫 `UnexpectedProgressLeapForward` | **VERIFIED FIXED**（真机 `JOB-20261005-150633-13d0`：Pause 冻 19.0%/8 GB → Resume 爬 71.3% → Stop 冻 72.6%/30.48 GB 10 个样本 → Stop 后 Resume 仍冻 72.6% 12 个样本直到真值追上；该任务日志 `99.9` 出现 0 次、前跳字节 0） |
+| B | **呈现层**：`ProgressPresentationCoordinator` 由"每目标一段动画"改为**连续指数状态滤波**（`k=10`，`dt ≤ 1/30 s`，目标变化只改目标） | **VERIFIED FIXED**（测试 + 真机单调追赶；`TargetChangeDoesNotRestartMotionSpeed` 锁定不再重启速度） |
+| C | **新控件骨架**：`Microsoft.Graphics.Win2D` **1.4.0**（固定版本）+ `Controls\ImmersiveProgress\` 7 文件 + Track/Fill/Head + Automation + 主题 Token + 11 个颜色 | **CODE FIXED**（构建 0 error；本体像素证据见 D） |
+| D | **光学系统**：Head Halo / 两层 Push Band（`sin(t·π/2)` 连续减速）/ 固定粒子池 + 胶囊夹取 / Band↔粒子局域耦合 / Ripple 节流 / EffectsQuality 三档 | **CODE FIXED / 部分真机验证**（13 条判据中 ①~③⑤⑦⑨⑩⑪⑫⑬ 有 `timeline.csv` 证据；Band↔粒子耦合与三档 EffectsQuality 的**视觉**对照仍为 OPEN） |
+| E | **Step3 生产集成**：旧 `TotalProgressHost` + Border + Fill **整体替换**为新控件；主百分比/字节/Head 同源；状态机接线；生产路径 `ProgressMotionDriver` 引用数 = 0 | **VERIFIED FIXED**（真机：Pause 冻 4.662%、Stop 冻 57.63%、Resume 从 57.63% 单调到 72.451%、Completed 100% + `42 GB / 42 GB`；`headX = visual% × 1010` 全样本成立；`ProgressBar` 语义 + `迁移总进度 100.0%`） |
+
+### 10.3 本轮的真值修复要点（最容易被后人改回去的地方）
+
+1. **`/Z` 与 `/J` 会把目标文件预分配到最终长度** ⇒ 这些通道上 `FileInfo.Length` **永远不能**当作已确认字节。唯一例外是 `/MT` 的 Bulk 通道（那里目标长度是唯一证据，禁掉它会退化成 UI-02 的"暂停后 0 B"假归零）。这条口径由 `ResolveResumeBaselineForPass(PassKind, measured, trusted, objectMayPreallocate)` 表达，**不要简化成一个 bool**。
+2. **`MarkInterrupted` 写入的 `TargetBytes`** 语义是"截至被打断时刻的可信已确认字节"，**不是**目标逻辑长度。旧实现在这里无条件 `MeasureTarget()`，于是把"真拷了 30 GB、长度已预分配 42 GB"记成 42 GB ⇒ 被 `RunningPercentCeiling=99.9` 夹成 **99.9% 污染**。
+3. **回执文件名只精确到秒**（`{ObjectId}-{yyyyMMddHHmmss}.json`）⇒ 同一对象的多次尝试可能留下多份。权威解析必须**与文件枚举顺序无关**：`ResolveTrustedInterruptedBytes(receipts, objectId, plannedBytes)` 取「最新一次尝试的状态（先 `CompletedUtc` 再 `Attempt`）+ 所有 Interrupted 的最大值」，并按计划夹取。
+4. **显示高水位只属于呈现层**：`ContinuationDisplayState` 只保护"已经显示过的值不倒退"，**绝不允许**写回 committed，也绝不允许去保护一个被污染的 99.9%。
+
+### 10.4 下一会话接手要点（Round-3 新增，务必先读）
+
+1. **Win2D 的 `CanvasAnimatedControl.Update/Draw` 跑在游戏循环线程**，不是 UI 线程。在该线程读 DependencyProperty / `Application.Current.Resources` / `MotionDirector.SystemAnimationsEnabled` 会让应用以 `0xc000027b`（`RPC_E_WRONG_THREAD`，WER 报 `combase.dll`）**直接崩掉**（本轮已踩）。正解：UI 线程把值 + 调色板发布成**不可变快照**，渲染线程只读快照字段。
+2. **离屏逐像素自检必须在暂停画布之后做**（`CanvasAnimatedControl.Paused = true` → `Task.Delay(180)` → 绘制 → 还原）：同一批画刷被渲染线程就地改写，Win2D 画刷**不是线程安全的**，否则离屏目标会全透明。
+3. **Win2D 没有托管参考程序集**，API 形状只能靠编译器错误确证。已知坑：`CanvasLinearGradientBrush.Stops` 是**只读属性**（整体赋值报 `CS0200`），但返回列表的**索引器可写**，且其 `Count` 是**方法组**不是属性；`DrawCircle` **没有**弧线重载；`CanvasPathBuilder.AddArc` **只有**"终点 + 半径 + 旋转 + `CanvasSweepDirection` + `CanvasArcSize`"这一种重载；`Colors` 在 WinUI 3 属 **`Microsoft.UI`** 命名空间（要 `using Microsoft.UI;`）；WinUI 3 的 `IRangeValueProvider` **没有** `RangeValueChanged` 事件（用 `RaisePropertyChangedEvent(RangeValuePatternIdentifiers.ValueProperty, old, new)`）。
+4. **探针挂在环境变量上**：`PCMIG_IMMERSIVE_PROBE=1` ⇒ `MainWindow` 直接换成 `Views\ImmersiveProgressVisualProbe`（确定性序列 + Holding/Pause/Resume，输出 `frames\` 与 `timeline.csv`）；`PCMIG_IMMERSIVE_PROBE_DIR` 指定输出目录（采集脚本 `immersive-static-capture.ps1` 硬编码为 `E:\PCMigLab\Staging\phI-static\probe`）；`PCMIG_IMMERSIVE_SELFTEST=1` 追加离屏逐像素自检。**探针 AutomationId 写在 code-behind**（`AssignProbeAutomationIds()`），因为 `Diagnostics\ControlIds.cs` 是**生产**锚点登记表，`D63AutomationIdBindingTests` 会检查 XAML 字面量必须 ⊆ 该表且前缀受控。
+5. **`ensure-step3.ps1` 已过时**：它轮询的是已被替换掉的 `TotalProgressHost` ⇒ 现在报 `NOT-READY`；新控件在 UIA 里是 `ControlType.ProgressBar`、aid `TotalImmersiveProgress`。同理 `capture-progress-frames.ps1` 的 aid 回退会**静默选中底栏轻量条** ⇒ 取 ROI 必须显式按 `TotalImmersiveProgress`，否则取证对象是错的（本轮已踩）。
+6. **屏幕像素归因必须使用同一次运行的 UIA 原点**：我把上一轮窗口原点套到新一轮截图上，曾误判"轨道渲染成浅灰蓝"（真值：轨道 `#28446A`@α=0x6C 叠在页面 `#0B0E13` ⇒ `#172538`，与屏上 `#172333` 一致；填充不透明 `#368BF8` 与屏上逐字节相同）。同类错配还产生过"填充延伸到 640 DIP"的假结论。
+7. **PowerShell 老坑复现**：`$host` 是**只读自动变量**（当数值变量用会把脚本刷成一片报错并污染统计）；pwsh 里 `Set-Location` 之后 `[IO.File]::ReadAllText('相对路径')` 仍按**进程 CWD** 解析 ⇒ 文件 API 一律绝对路径；中文 `.ps1` 必须 UTF-8 **带 BOM**（`[IO.File]::WriteAllText($p,$t,[Text.UTF8Encoding]::new($true))`），否则 `powershell.exe` 5.1 报 `Unexpected token '}'`；`uia-lib.ps1` 的 `Invoke-RgClick` 参数口径是「元素, 点击次数」，**不是 aid 名**。
+8. **断言不许命中自己的注释**：`Assert.DoesNotContain("ProgressMotionDriver", step3Code)` 会被注释里的类名命中（先例：`HintCard.SizeChanged`）；`Assert.DoesNotContain("TotalProgressFill", …)` 会被方法名 `UpdateTotalProgressFill` 命中 ⇒ 断言要按"元素用法"（`TotalProgressFill.` / `(TotalProgressFill,`）或先改写注释。
+
+### 10.5 回退
+
+- Round-3 改动**全部未提交**（HEAD 仍是只读检查点 `862b091`）⇒ 按文件清单 `git checkout -- <文件>` 可整体回退；新增文件需手工删：
+  `src\PCMig.WinUI\Controls\ImmersiveProgress\`（7 文件）、`src\PCMig.WinUI\Presentation\ProgressPresentationCoordinator.cs`、`src\PCMig.WinUI\Views\ImmersiveProgressVisualProbe.xaml(.cs)`、`tests\PCMig.Core.Tests\{ReceiptAuthorityResolutionTests,InterruptedProgressTruthTests,ProgressPresentationCoordinatorTests,ImmersiveProgressParticleBoundsTests,ImmersiveProgressAnimationStateTests}.cs`、`docs\UI-CLOSURE-ROUND2-REPORT-20261005.md`。
+- **Core 真值修复不可单独回退**：`TransferOrchestrator.cs` 的 `MarkInterrupted` / `ResolveResumeBaselineForPass` / `ResolveTrustedInterruptedBytes` / `MeasureSettledTarget` 是一组自洽口径，单删任一条会把 99.9% 污染放回来。
+- **软关闭新控件**（不动真值）：把 `Views\Step3ProgressPage.xaml` 里的 `<controls:ImmersiveTransferProgress …/>` 换回任意占位元素即可；`ImmersiveTransferProgress` 不持有任何业务引用，只接受 `Value / Maximum / ProgressState / EffectsQuality / ReducedMotion`。
+- 探针与调试开关同样是**只读环境变量**：`PCMIG_IMMERSIVE_PROBE`、`PCMIG_IMMERSIVE_PROBE_DIR`、`PCMIG_IMMERSIVE_SELFTEST`、`PCMIG_PROGRESS_DEBUG`、`PCMIG_PROGRESS_TRACE`、`PCMIG_METRIC_PROBE`、`PCMIG_GLYPH_PROBE`、`PCMIG_STATCARD_EXPORT` 不设即无行为。
+- 基线检查点 `862b091`：**只读**，禁止 `reset --hard` / `checkout .` / `restore .` / `clean -fd` / `push` / `tag` / `release` / `rebase` / `amend`。
+
+### 10.6 九个真机场景证据（PHASE G 进度，2026-10-05 21:10）
+
+| 场景（执行书 §31） | 真机证据 | 状态 |
+|---|---|---|
+| A 正常运行 | `JOB-20261005-162434-c672`（Step3 生产页，57.63%→72.451% 单调无倒退）；`JOB-20261005-210348-316a` 68 条 `ProgressTruthTransition`：0.002% → 15.16% → 21:05:37 99.9%（`committed=45 097 156 608`＝计划，`RunningPercentCeiling` 合法） | **VERIFIED FIXED** |
+| B 20~70% 暂停 | 同一 42 GB 任务在 **22.258% / 59.8% / 70.186% / 88.289%** 四处暂停，各点显示冻结、不归零、不跳 99.9；PHASE E 另在 4.662% 连采 8 次逐字相同（`mode=Frozen reason=phase-Paused headX=47.1`） | **VERIFIED FIXED** |
+| C Resume 不回退 | 同一任务 4 次 Resume：`rawRegressionBytes` 1.8 GB / 1.46 GB / 4.73 GB 的**在飞估算回落被显示层高水位吸收**（`21:04:29.020` 20 ms 内恢复到 59.8%），随后单调追赶；`rawForwardLeapBytes` 全程 0 | **VERIFIED FIXED** |
+| D 20~70% Stop | PHASE E Step3 Stop 于 **57.63%** 连采 8 次逐字相同（`mode=Frozen reason=phase-Interrupted state=Interrupted headX=582.1`），像素剖面 `hero-stopped` 581 DIP ≙ 57.5% | **VERIFIED FIXED** |
+| E Stop 后 Resume | PHASE E：从 57.63% 起 58.688→72.451 单调；`continuation=CatchingUp highWaterBytes=32726056960` 直到 `truth-caught-up` 才清除 | **VERIFIED FIXED** |
+| F 大文件预分配 | `JOB-20261005-210348-316a` 大文件通道 = **`/MT + /J`**（`mayPreallocate=true`，选项回显无 `/Z`）：续传基线 `measuredTargetBytes=0`、可信字节全部来自 `trustedReceiptBytes`，在飞来源**始终 `WorkerIoCounters`、从未 `TargetStat`**；`/Z` 通道由门禁 `JOB-20261005-150633-13d0` 覆盖（`phase=Interrupted committed=32 726 056 960` ≠ 42 GiB 预分配长度，全天该任务 `99.9` 出现 0 次） | **VERIFIED FIXED** |
+| G 网络停顿（Holding） | 目前只有**探针级**证据：确定性 Holding 1.6 s 内 `headX` 20 个值渐近收敛后停住、同期 `bandPhase` 56 个值、`bandOpacity` 0→1 ⇒ Head 静止而活动继续 | **CODE FIXED / NOT VISUALLY VERIFIED** |
+| H Failed | 目前只有**探针级**证据：`failed` 段尾 `vis=0 band=0 p=0 r=0`（装饰全停、Head 保留最后可信值） | **CODE FIXED / NOT VISUALLY VERIFIED** |
+| I Completed | 生产两次：`JOB-20261005-162434-c672`（100.0% / 42 GB / 42 GB / `state=Completed`）与 `JOB-20261005-210348-316a`（`21:05:40.188 newPercent=100 committed=45 097 836 544`）；Running 期上限恒为 99.9 | **VERIFIED FIXED** |
+
+**PHASE G 仍缺的三项**：① 生产场景 **G Holding**（真机网络停顿）与 **H Failed**（真机失败收尾）的端到端取证；② 运行期 **30 s 性能采样**（CPU/GPU/分配/帧率，High/Balanced/Reduced 三档）；③ 交付视频。三项都需要再跑一次真机任务，**需用户授权后执行**（当前应用由用户自己操作中，不抢占）。
+**判据口径备忘**：同源判据一律写作 `headX ≈ visualPercent% × hostWidth`（`headX` 与 `progressWidth` 按构造恒等，拿 `visualPercent% × progressWidth` 比会得假警报）；`pw/headX` 来自最后绘制帧、`visualPercent` 是写入时刻的协调器值，**允许落后一帧**。粒子越界判据对 `progressWidth=0`（0% 无填充胶囊）的行必须单独处理——已修：无胶囊时活跃粒子数为 0。

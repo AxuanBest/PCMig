@@ -329,8 +329,9 @@ public class ProgressTruthModelTests : IDisposable
         Assert.Contains("SpeedBytesPerSecond", step3);
         Assert.Contains("EtaSeconds", step3);
         // 禁止任何一处再自行算百分比/字节（旧实现：Percent 一处、ProgressText 另一处 ⇒ 真值分裂）
-        // ★ 口径更新（2026-10-04，非放宽）★ 进度填充已从 ProgressBar 改为唯一写入者直接设宽度，
-        //   因此这里改为断言"填充宽度只能从真值百分比换算"，禁止任何一处再从 Session.Percent 自算。
+        // ★ 口径更新（2026-10-04 → Round-3 视觉纠偏 R33，非放宽）★
+        //   进度填充已从 ProgressBar → 唯一写入者像素宽度 → 现在是 ImmersiveTransferProgress（Hero/Compact）。
+        //   因此这里改为断言"两条进度条都只从真值百分比取值"，禁止任何一处再从 Session.Percent 自算像素。
         Assert.DoesNotContain("FooterProgressFill.Width = Session.Percent", footer);
         Assert.DoesNotContain("TotalProgressFill.Width = session.Percent", step3);
         Assert.Contains("UpdateFooterProgressFill", footer);

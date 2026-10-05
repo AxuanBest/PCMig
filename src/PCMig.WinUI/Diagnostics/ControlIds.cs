@@ -63,6 +63,16 @@ public static class ControlIds
     public const string Step2ExistingJobs = "Step2.ExistingJobs";
     public const string Step2BrowseTarget = "Step2.BrowseTarget";
 
+    // Step 3 统计卡数值（Round-2 PHASE 5B 加入，Round-3 PHASE A 补登记）
+    //
+    // 为什么需要：这四张卡原先只有 `x:Name`，而 `x:Name` **不产出 AutomationId** ⇒ 真机 UIA
+    // 枚举不到它们，字形顶部轮廓/排版取证只能靠猜坐标（每次启动窗口原点都变）。
+    // 它们不是点击契约，而是**只读诊断锚点**：外部自动化据此读取真实矩形与文本。
+    public const string Step3StatSpeedValue = "Step3.Stat.Speed.Value";
+    public const string Step3StatEtaValue = "Step3.Stat.Eta.Value";
+    public const string Step3StatObjectValue = "Step3.Stat.Object.Value";
+    public const string Step3StatBytesValue = "Step3.Stat.Bytes.Value";
+
     // Step 4 结果与校验（D6.1 §12 补齐）
     public const string Step4Verify = "Step4.Verify";
     public const string Step4Repair = "Step4.Repair";

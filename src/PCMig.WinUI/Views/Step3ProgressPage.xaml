@@ -1,7 +1,8 @@
 <UserControl
     x:Class="PCMig.WinUI.Views.Step3ProgressPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:PCMig.WinUI.Controls.ImmersiveProgress">
     <!-- 页面入场动画由 Shell 统一播放（方向性，见 Presentation\MotionDirector.cs）。 -->
 
     <!--
@@ -59,23 +60,31 @@
                          ⇒ 状态句（_state.Step3StateText，含"迁移未完整完成…实际完成 X%…"这类长句）
                          即使写了 Wrap 也永不折行，会被右缘裁掉。改为 Auto/Auto/* 三列：
                          前两列几何不变（仍底对齐、间距 12），状态句列拿到真实剩余宽度并可折行。 -->
-                    <Grid ColumnSpacing="12">
+                    <Grid ColumnSpacing="12" MinHeight="52" VerticalAlignment="Center">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" x:Name="TotalPercentText" Style="{StaticResource PCMigTextTotalPercent}" Text=""/>
-                        <TextBlock Grid.Column="1" x:Name="TotalBytesText" Style="{StaticResource PCMigTextFooterValue}" Text="" VerticalAlignment="Bottom" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Grid.Column="2" Style="{StaticResource PCMigTextStepSubtitle}" x:Name="StateLineText" TextWrapping="Wrap" VerticalAlignment="Bottom"/>
+                        <TextBlock Grid.Column="0" x:Name="TotalPercentText" Style="{StaticResource PCMigTextTotalPercent}" Text="" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" x:Name="TotalBytesText" Style="{StaticResource PCMigTextFooterValue}" Text="" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Column="2" Style="{StaticResource PCMigTextStepSubtitle}" x:Name="StateLineText" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                     </Grid>
-                    <!-- FIX BATCH 5（§8）：与底栏共用 PCMigProgressTrack / PCMigProgressFill（填充真实占满 12 DIP 轨道，顶/底视觉一致）。
-                         填充宽度由唯一写入者 PushState → UpdateTotalProgressFill 按真值设置（见 Themes\Controls.xaml 的说明）。 -->
-                    <Grid x:Name="TotalProgressHost" Height="12">
-                        <Border Style="{StaticResource PCMigProgressTrack}"/>
-                        <Grid x:Name="TotalProgressFill" Style="{StaticResource PCMigProgressFill}" Width="Auto" HorizontalAlignment="Stretch">
-                            <Rectangle RadiusX="6" RadiusY="6" Fill="{StaticResource AccentGradientBrush}"/>
-                        </Grid>
+                    <!-- ★ Round-3 PHASE E（§23）★ Step3 主进度条 = PCMig Immersive Transfer Progress（正式视觉语言）。
+                         旧写法（Border PCMigProgressTrack + Grid TotalProgressFill + Rectangle）已整体下线：
+                         生产路径上**一个进度条只能有一个视觉拥有者**，绝不允许旧填充与新 Canvas 叠层。
+                         布局槽高度 = token PCMigImmersiveProgressHostHeight(16)；动态材质厚度 = Thickness(12)、端帽 = Radius(6)，
+                         三者都在 Materials.xaml 里，控件内部不再散写数字。
+                         值只从 code-behind 的唯一写入者 UpdateTotalProgressFill 写入（与左侧大号百分比、字节数同源：
+                         都来自 ProgressPresentationCoordinator 的同一个 VisualProgress，见 PMML-R23）。
+                         底栏也已是**同一控件族的 Compact 变体**（R33 Hero / Compact Material Family）：
+                          它与本 Hero 共用 Capsule 几何、Track-Space Chroma Field、Head 体积光场与同一个 VisualProgress，
+                          只关闭粒子/Ripple 并把 Push Band 降到约 58% —— 避免两道满血 Push Band 互相竞争注意力，
+                          但**不再**是旧的静态蓝 Rectangle（那条路线已退出生产）。 -->
+                    <Grid x:Name="TotalProgressHost" Height="{StaticResource PCMigImmersiveProgressHostHeight}">
+                        <controls:ImmersiveTransferProgress x:Name="TotalImmersiveProgress"
+                                                            Minimum="0" Maximum="100" Value="0"
+                                                            HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
                     </Grid>
                 </StackPanel>
             </Border>
@@ -99,7 +108,7 @@
                              Padding 保证几何高度稳定，不再依赖 TextBlock 的魔法 LineHeight；host 不设 Clip，
                              TextBlock 由样式给 VerticalAlignment=Center 在 host 内垂直居中。 -->
                         <Grid x:Name="SpeedValueHost" MinHeight="34" Padding="0,3,0,3">
-                            <TextBlock x:Name="SpeedValueText" Style="{StaticResource PCMigTextStatValue}" Text="" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="SpeedValueText" AutomationProperties.AutomationId="Step3.Stat.Speed.Value" Style="{StaticResource PCMigTextStatValue}" Text="" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -107,7 +116,7 @@
                     <StackPanel Spacing="4">
                         <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Text="预计剩余"/>
                         <Grid x:Name="EtaValueHost" MinHeight="34" Padding="0,3,0,3">
-                            <TextBlock x:Name="EtaValueText" Style="{StaticResource PCMigTextStatValue}" Text="" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="EtaValueText" AutomationProperties.AutomationId="Step3.Stat.Eta.Value" Style="{StaticResource PCMigTextStatValue}" Text="" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -115,7 +124,7 @@
                     <StackPanel Spacing="4">
                         <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Text="对象进度"/>
                         <Grid x:Name="ObjectValueHost" MinHeight="34" Padding="0,3,0,3">
-                            <TextBlock x:Name="ObjectValueText" Style="{StaticResource PCMigTextStatValue}" Text="" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="ObjectValueText" AutomationProperties.AutomationId="Step3.Stat.Object.Value" Style="{StaticResource PCMigTextStatValue}" Text="" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -123,7 +132,7 @@
                     <StackPanel Spacing="4">
                         <TextBlock x:Name="BytesCardLabel" Style="{StaticResource PCMigTextStepSubtitle}" Text="已传 / 计划"/>
                         <Grid x:Name="BytesValueHost" MinHeight="34" Padding="0,3,0,3">
-                            <TextBlock x:Name="BytesValueText" Style="{StaticResource PCMigTextStatValue}" Text="" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="BytesValueText" AutomationProperties.AutomationId="Step3.Stat.Bytes.Value" Style="{StaticResource PCMigTextStatValue}" Text="" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
                         </Grid>
                     </StackPanel>
                 </Border>

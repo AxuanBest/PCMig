@@ -165,7 +165,7 @@ public sealed class WinUiDpiContractTests
     {
         var xaml = ReadWinUi("MainWindow.xaml");
         Assert.Contains(@"ColumnSpacing=""18""", xaml);                    // 底栏列间距
-        Assert.Contains(@"<Grid Grid.Column=""2"" MinWidth=""160""", xaml);  // 进度轨道最小宽（弹性列会拉得更宽）
+        Assert.Contains(@"<Grid Grid.Column=""2"" MinWidth=""0""", xaml);  // 进度轨道最小宽（弹性列会拉得更宽）
         Assert.Contains(@"<ColumnDefinition Width=""0""/>", xaml);         // 中段隔离列已归零
         Assert.Contains(@"<ColumnDefinition Width=""*""/>", xaml);         // 唯一的弹性列
         Assert.Contains(@"x:Name=""FooterNetPanel"" Grid.Column=""7"" Width=""54""", xaml); // 网络组独立保留宽

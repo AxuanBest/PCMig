@@ -130,33 +130,48 @@ public sealed partial class ShellHintCard : UserControl
     // ────────── UI Closure 2026-10-05（用户指令 UI-07；返修后口径）──────────
 
     /// <summary>
-    /// ★ UI-07（用户指令，返修后口径）★ 下发"卡片最大高度"。调用方（MainWindow.UpdateHintCardBounds）按
-    /// 「侧栏高度 − 步骤导航高度 − 标准段间距（本卡 Margin.Top = 12）」算出，保证卡片顶边永远
-    /// 落在 Step4（步骤导航）底部 + 标准段间距之下 ⇒ 不碰、不压、不穿 Step4。
-    /// 传 0 / NaN / ±∞ / 负数表示"尚未测量到上界"⇒ 不设限（装配早期绝不把卡片压成 0 高）。
+    /// ★ Round-2 2026-10-05（用户指令 §4）★ 下发"可用高度"：提示卡是**固定尺寸**组件。
     ///
-    /// **返修要点（真实安全上界 &gt; 理想最小高度）**：上界就是物理天花板，卡片的 <c>MaxHeight</c>
-    /// 严格等于它，**不得**再被"下界 160"反向抬回 160 —— 真实可用空间只有 130 时把 MaxHeight 设成 160
-    /// 等于自己突破自己（卡片顶进 Step4）。160 只作为**理想最小高度**：仅在空间足够时才生效
-    /// （<c>MinHeight = min(160, ceiling)</c>），空间不足时宁可卡内滚动。
+    /// 用户视频证据：提示卡在 30 s 因 OperationalStatus 长句"变得很高"、37.5 s 又缩回；
+    /// 用户已明确**接受并选择固定尺寸**。因此：
+    ///   · 正常/宽窗口下高度恒为 <see cref="ResolveFixedHeight"/>（PCMigHintCardHeight token，176 DIP）；
+    ///   · 只有物理视口真的更矮时才夹到可用高 —— 这是唯一的"断点换档"；
+    ///   · **内容变化绝不改变外层高度**（本方法只在窗口/侧栏几何变化时被调用，
+    ///     不再存在"内容 → SizeChanged → 高度"的自激链）。
+    ///
+    /// 调用方（<c>MainWindow.UpdateHintCardHeight</c>）按「侧栏高度 − 步骤导航高度 − 标准段间距
+    /// （本卡 Margin.Top = 12）」算出可用空间，保证卡片顶边永远落在 Step4（步骤导航）底部 +
+    /// 标准段间距之下 ⇒ 不碰、不压、不穿 Step4。
+    /// 传 0 / NaN / ±∞ / 负数表示"尚未测量到可用空间"⇒ 用固定 token 高（装配早期绝不把卡片压成 0 高）。
     /// </summary>
-    public void SetMaxSurfaceHeight(double maxHeight)
+    public void SetAvailableHeight(double availableHeight)
     {
-        if (double.IsNaN(maxHeight) || double.IsInfinity(maxHeight) || maxHeight <= 0d)
+        var fixedHeight = ResolveFixedHeight();
+
+        if (double.IsNaN(availableHeight) || double.IsInfinity(availableHeight) || availableHeight <= 0d)
         {
-            HintCardSurface.MaxHeight = double.PositiveInfinity;
-            HintCardSurface.MinHeight = IdealMinSurfaceHeight;
+            HintCardSurface.Height = fixedHeight;
             return;
         }
 
-        var safeCeiling = maxHeight;                                  // 物理天花板：真实可用空间
-        HintCardSurface.MaxHeight = safeCeiling;                       // 绝不抬高（旧实现 max(ceiling,160) 已废弃）
-        HintCardSurface.MinHeight = Math.Min(IdealMinSurfaceHeight, safeCeiling);
-        // 卡片高度保持 Auto：由内容与上面两个约束自然决定，不再用动画去"钉死"一个像素高度。
+        HintCardSurface.Height = availableHeight >= fixedHeight ? fixedHeight : availableHeight;
     }
 
-    /// <summary>理想最小高度：保住"标题行 + 一行状态 + 署名行"（仅在真实空间足够时生效）。</summary>
-    private const double IdealMinSurfaceHeight = 160d;
+    /// <summary>固定高（DIP）：与 XAML 的 <c>Height="{StaticResource PCMigHintCardHeight}"</c> 同一 token 来源。</summary>
+    private static double ResolveFixedHeight()
+    {
+        try
+        {
+            if (Application.Current?.Resources is { } resources
+                && resources.TryGetValue("PCMigHintCardHeight", out var value)
+                && value is double height && height > 0d) return height;
+        }
+        catch { /* 资源不可用时用兜底常量，绝不让提示卡消失 */ }
+        return FallbackFixedSurfaceHeight;
+    }
+
+    /// <summary>token 读取失败时的兜底（与 <c>Materials.xaml</c> 的 PCMigHintCardHeight 当前值保持一致）。</summary>
+    private const double FallbackFixedSurfaceHeight = 176d;
 
     /// <summary>
     /// 通道文本 → 行文本/可见性，并按**语义级策略**决定是否播一次入场动效。

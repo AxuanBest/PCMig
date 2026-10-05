@@ -1,0 +1,27 @@
+<UserControl
+    x:Class="PCMig.WinUI.Views.MetricTypographyProbe"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        ★ PHASE 5 / 用户指令 §6：Metric Typography 隔离探针（临时诊断组件）★
+
+        为什么需要它：用户视频与标注截图反复显示"四张统计卡的大号数值顶部像被削一条"，
+        而此前两轮尝试（① 加显式 LineHeight；② 自然行高 + 外层 MinHeight/Padding host）
+        都"没有任何变化"。方案 §6 明确要求：**不得继续猜**，必须做隔离渲染探针，
+        在同一屏、同一进程、同一 DPI 下把变体 A–F 并排渲染，用像素探针定位
+        "裁切发生在 TextBlock 自身（字体/字重/光栅化）还是父级（Clip/高度/transform）"。
+
+        本组件只在环境变量 PCMIG_METRIC_PROBE=1 时替代主界面（见 MainWindow 构造函数末尾）。
+        正常启动路径完全不受影响 —— 它不参与任何业务逻辑，也不写任何状态。
+
+        判读方法：每张样本卡片上沿都有一条洋红基准线（AutomationId = ProbeLine_<变体>_<序号>），
+        紧贴被测量 Body 的顶部。像素分析里"基准线之下到第一条墨迹行"的距离就是
+        **行盒顶到字形墨迹的净空**；若该净空 ≤ 1 物理像素（或墨迹顶部呈水平平切），
+        就说明这个变体真的被削顶。
+    -->
+    <ScrollViewer Background="#FF0B0E13" RequestedTheme="Dark"
+                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel x:Name="ProbeRoot" Padding="24" Spacing="18"/>
+    </ScrollViewer>
+</UserControl>

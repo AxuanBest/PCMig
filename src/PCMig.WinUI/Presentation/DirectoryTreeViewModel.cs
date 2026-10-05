@@ -98,6 +98,29 @@ public sealed class DirectoryTreeViewModel : ObservableObject
     }
 
     /// <summary>
+    /// ★ 2026-10-05（执行书 §2.2「未选择的共享不得进入 Step 2」）★
+    /// 该共享的根是否已被用户在 Step 2 **实际使用过**（展开过，或已做成精确的子树选择）。
+    ///
+    /// 为什么需要它：本轮要求"Step 1 只选 H，Step 2 顶层就只能有 H"，因此建根不能再无脑接受
+    /// 全部共享；但直接只按 <c>IsSelected</c> 建根会重新引入 A.5 修掉的那个回路 ——
+    /// 用户取消一个子目录 ⇒ 根半选 ⇒ 联动把共享行置 false ⇒ 根被删、精确选择消失。
+    ///
+    /// 判据为什么是 <c>ChildrenLoaded || IsChecked is null</c>：
+    ///   · <c>ChildrenLoaded</c> = 用户真的展开过这棵树（读盘发生过）；
+    ///   · <c>IsChecked is null</c> = 用户做出了"只迁移部分子目录"的精确选择。
+    ///   两者都只有**用户操作**才能达成。故意**不**把"初始同步的勾选态"算进来 ——
+    ///   新建根时 <c>SetCheckedSilent</c> 同样会触发 <c>PropertyChanged</c>，
+    ///   若用它当"用户动过"，那么任何一个根都会立刻被视为已使用，根就永远删不掉了。
+    /// </summary>
+    public bool IsUserEngagedRoot(string uncPath)
+    {
+        if (string.IsNullOrWhiteSpace(uncPath)) return false;
+        var root = RootNodes.FirstOrDefault(r => r.FullPath.Equals(uncPath.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (root is null) return false;
+        return root.ChildrenLoaded || root.IsChecked is null;
+    }
+
+    /// <summary>
     /// 按 UNC 列表重建整棵树（等价于“全部都以勾选态 true 传入”，供 QA/自动化等无共享行的场景使用）。
     /// 已存在的同名根**原样保留**（连同它的展开状态与勾选状态），只补新增、去掉已不在列表里的。
     ///
@@ -309,12 +332,12 @@ public sealed class DirectoryTreeViewModel : ObservableObject
                     row.SetCheckedSilent(inherit);
                     node.Children.Add(row);
                 }
+                // ★ 2026-10-05 紧急修复（用户真机判词：展开 H 只看到一个可勾选的「…」）★
+                //   过去这里往 `Children` 里塞一个 `FullPath = ""` 的"提示 DirNode"，UI 侧把它
+                //   materialize 成一个**可勾选的假节点** —— 这是用户明确要求"不能再出现"的东西。
+                //   提示信息改走既有的 `Notice` 通道：内容不丢，但树里只呈现真实目录 / 真实文件。
                 if (files.Count > shown.Count)
-                    node.Children.Add(new DirNode
-                    {
-                        Name = $"…（共 {files.Count} 个文件，仅显示前 {shown.Count} 个；勾选目录即包含全部）",
-                        FullPath = ""
-                    });
+                    Notice?.Invoke($"目录「{node.Name}」共 {files.Count} 个文件，仅显示前 {shown.Count} 个；勾选该目录即包含其全部文件。");
                 // 目录读不全时如实告知（不静默）：这些位置不会被迁移，与扫描残缺闸门同一口径的事实来源
                 if (denied > 0)
                     Notice?.Invoke($"目录「{node.Name}」有 {denied} 个子项因权限/网络原因无法列出——它们不会被迁移，请在此处确认后再生成计划。");

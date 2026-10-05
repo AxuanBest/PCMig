@@ -350,3 +350,152 @@ PMML 规定的未来行为（本轮不重构）：`Translation ↓`・`Scale ↓
 **Opacity 双轨**【子代理：A 审计】：只有 4 个 `Ambient*Opacity` Token（`Colors.xaml:6`）；控件态/装饰/动效 Opacity **全硬编码**（`Controls.xaml:168/171/174`、`Step1ConnectPage.xaml:34-37`、`MotionDirector.cs:234/479/615/621/640`）；`Motion.xaml` 内 **0 个 Opacity 键** ⇒ **L-14**。
 
 **框架圆角键**：`ControlCornerRadius` / `OverlayCornerRadius` **只被消费、无覆盖**（未在项目内定义）。
+---
+
+## Round-2 增量登记（2026-10-05，PHASE 1–5B）
+
+> 本节只登记 Round-2 新引入的 token / 探针 / 生产改动与其 PMML 归属。**新 Surface 与控件族：无。**
+
+### 新增 Token（均登记于 `src\PCMig.WinUI\Themes\Materials.xaml`，紧随 `PCMigRadiusListItem`）
+
+| Token | 值 | 理由（PMML-R14） | 归属 |
+|---|---|---|---|
+| `PCMigProgressVisualThickness` | `8`（DIP） | 进度轨道的**布局高度**（12 DIP，`Step3ProgressPage.xaml` 的 `TotalProgressHost`）与**视觉厚度**解耦：装饰层（扫描高光/柔光/粒子/标记线）若按 12 DIP 绘制会显得笨重。布局宿主仍 12，track/fill/装饰按 token 绘制并 `VerticalAlignment="Center"`（`DecorationTop = (trackHeight - visualThickness)/2`）。 | B（基础视觉规范） |
+| `PCMigProgressRadius` | `4`（`CornerRadius`） | 与视觉厚度配对：8 DIP 厚 + 4 DIP 端帽半径 = 全圆端帽。此前硬编码 `RadiusX/RadiusY="6"` 是**魔法值**（PMML-R10）。 | B |
+| `PCMigHintCardHeight` | `176`（DIP） | **PMML-R18 固定几何**：提示卡外层高度由 token 决定，内容永不驱动。取值依据：改前"紧凑态"实测内容区 126 DIP + `Padding 32` ≈ 158 DIP，176 留出约 4 行正文余量；五行 Grid 的唯一可变行（`Height="*"`）在水印三态实测为 **57 DIP** 恒定。 | B |
+
+**未新增 Z Token**：`StatCard0..3` 沿用既有 `Translation="0,0,8"`（与 L-11 的"无 Z Token"问题一致，本轮**不扩大**该偏离，仅登记）。
+
+### 新增诊断探针（**非生产 Surface / 非生产控件族**，只在显式环境变量下挂载）
+
+| 探针 | 入口 | 归属 |
+|---|---|---|
+| `Views\GlyphContourProbe.xaml(.cs)` | `PCMIG_GLYPH_PROBE=1` | 诊断专用（对应 PMML-R19 的取证要求）。五字重 × `2 G 5 S 3`、@20 与 @96 对照、四字体族对照、`UseLayoutRounding` 对照、**生产样式对照段**（`Glyph_STYLE_20_*`）。全 ASCII 环境变量、只读、不设即零行为。 |
+| `Views\MetricTypographyProbe.xaml(.cs)` | `PCMIG_METRIC_PROBE=1` | 同上（PHASE 5 六变体 × 七样本 + 洋红基准线）。 |
+| `Step3ProgressPage.TryExportStatCards()` | `PCMIG_STATCARD_EXPORT=<目录>` | 诊断专用，`RenderTargetBitmap` 导出；**已知失效**（与 `Translation` 不兼容，见 Round-2 报告 E5B 限制 2），保留以便后续在无 Translation 的树上复用。 |
+| `ProgressDebugPanel` / `ProgressDebugText`（`Step3ProgressPage.xaml`，默认 `Collapsed`） | `PCMIG_PROGRESS_DEBUG=1` | 诊断覆盖层（对应"动画不得成为业务逻辑依赖" PMML-R8：探针本身异常也不影响真值）。 |
+
+### 生产改动与其规则依据
+
+| 文件 | 改动 | 依据 |
+|---|---|---|
+| `Views\Step3ProgressPage.xaml` | 顶部摘要 `<Grid ColumnSpacing="12" MinHeight="52" VerticalAlignment="Center">`，三列均 `VerticalAlignment="Center"`；`StateLineText` 加 `MaxLines="2"` + `TextTrimming="CharacterEllipsis"`；四个统计值加 `AutomationProperties.AutomationId` | **PMML-R20** 的呈现面共面 + **R17**（关键数值不截断，此处截断的是状态句而非数值） |
+| `Themes\Typography.xaml` | `PCMigTextTotalPercent` **删 `LineHeight="60"`**；`PCMigTextStatValue` **`FontWeight` `SemiBold → Normal`** | **R19**（Magic LineHeight 禁止；字面必须真实存在）+ 顶部共面 |
+| `Views\ShellHintCard.xaml` | 外层 `Height="{StaticResource PCMigHintCardHeight}"`（去 `MaxHeight`/`MinHeight`）；五行 Grid；四通道 `MaxLines`；`VerticalScrollBarVisibility="Auto → Hidden"` | **PMML-R18** |
+| `Views\ShellHintCard.xaml.cs` | 删 `SetMaxSurfaceHeight` + `IdealMinSurfaceHeight`；新增 `SetAvailableHeight` + `ResolveFixedHeight` + `FallbackFixedSurfaceHeight = 176d` | R18（且旧实现会**反向突破真实可用上界**） |
+| `Themes\Controls.xaml` | `PCMigProgressTrack` / `PCMigProgressFill` 按视觉厚度 token 设 `Height` + `VerticalAlignment="Center"`；圆角改 token | R14（优先复用 token）+ R10（去魔法值） |
+| `Presentation\ProgressPresentationCoordinator.cs` | 唯一 VisualPercent 时间线 | **PMML-R20** |
+| `Presentation\MigrationSessionViewModel.cs` | `ContinuationDisplayState` 显示高水位（仅呈现层） | **PMML-R16** |
+
+### PMML Compliance Gate（Round-2）
+
+```
+PMML Compliance
+---------------
+DAM:                        PASS（未新增材质；提示卡/统计卡继续用 SecondarySurface）
+LMDS:                       PASS（未新增 Surface 层）
+DSL-45:                     PASS（未改光源方向）
+ESR:                        PASS（未改浮雕）
+Motion Family:              State（进度呈现为状态驱动；页面导航 DCST 未改）
+TAOP:                       N/A（未新增浮层）
+Typography:                 PASS（R17 关键数值不截断；R19 字面真实存在 + 无 Magic LineHeight）
+Foreground Sharpness:       PASS（R13：装饰层只画在进度轨道内，未覆盖任何文字）
+Light/Dark:                 Known Gap（既有；本轮未触及，见 L-9/L-10）
+Accessibility:              Known Gap（既有；未新增 Reduced Motion 检测）
+Legacy Deviation Introduced: NO
+```
+
+新增规则已写入 `docs\PMML-UI修改硬性规范.md`：**R16 显示真值连续性 / R17 关键数值禁止截断 / R18 固定几何优先 / R19 字体字面必须真实存在 / R20 呈现层单一时间线**，并新增「三之二、真机取证纪律」一节。
+
+---
+
+## Round-3 增量登记（2026-10-05，PHASE A–E：真值修复 + 官方进度视觉语言）
+
+### 一、Core 真值改动（`src\PCMig.Core\Transfer\TransferOrchestrator.cs`）
+
+| 成员 | 真实状态 | 依据 |
+|---|---|---|
+| `MarkInterrupted(ObjectReceipt, PlannedObject, long trustedObjectConfirmedBytes, long trustedAttemptEpoch)` | 不再无条件调用目标实测；写入 `receipt.TargetBytes = ResolveInterruptedConfirmedBytes(可信 checkpoint, 计划字节)` | 真值边界（`/Z` 预分配污染根因） |
+| `ResolveResumeBaselineForPass(PassKind, long measuredTargetBytes, long trustedReceiptBytes, bool objectMayPreallocate)` | 可信回执优先；`objectMayPreallocate == true` ⇒ 永不采信目标长度；仅纯 `Bulk` 才允许实测兜底 | 同上（同时保住"暂停后不假归零"） |
+| `ResolveTrustedInterruptedBytes(IEnumerable<ObjectReceipt>, string objectId, long plannedBytes)` | **与枚举顺序无关**：先按 `CompletedUtc`（同刻比 `Attempt`）取最新一次尝试的状态；最新为 `Interrupted` ⇒ 取所有 Interrupted 的**最大值**再按计划夹取；否则 0 | `PMML-R16`；修掉"回执文件名精确到秒 ⇒ 同对象跨秒留两份、解析靠文件顺序"的旧缺陷 |
+| `ReadTrustedInterruptedReceiptBytes(PlannedObject)` | 委托给上面的纯函数；`count > 1` 时记 Debug 日志 | 同上 |
+| `ResolveLiveTrustedObjectBytes(PlannedObject)` | `_currentPass != PassKind.Bulk` 立即返回采样值；仅 Bulk 允许 `MeasureCurrentTargetBytes` 兜底 | 既不采信 `/Z` 预分配，也不退回 UI-02 假归零 |
+| `MeasureTarget` → `MeasureSettledTarget` | 改名即纪律：只有 Completed / 可实测失败收尾 / Verifier 可调用 | 防调用点混用 |
+| `/Z` 通道失败回冲 | `OnRunnerErrorLine` 里对已入账大文件执行 `-creditedLarge` 回冲（新增 `_creditRetractEpoch`） | 真值不得虚高 |
+| `CreditCurrentLarge()` | 失败路径记 0；否则 `max(_largeFileApproxSize, FileInfo.Length − _largeFileStartLen)` | 同上 |
+| `TraceProgressSnapshot(...)` | `PCMIG_PROGRESS_TRACE=1` 时输出 `raw / committed / inFlight / ioSource / ioConfirmed / epoch / baseline / nowBytes / effBytes / delta / gapMs` | 取证 |
+
+**真机证据（PHASE A 门禁，Job `JOB-20261005-150633-13d0`，42 GB）**：Pause 冻在 `19.0% / 8 GB`（6 次采样）；Resume 正常爬到 `71.3% / 30.04 GB`；Stop 冻在 `72.6% / 30.48 GB`（10 次采样）；Stop 后 Resume 仍冻在 `72.6% / 30.48 GB`（12 次采样）直到引擎真值追上；该任务日志中 `99.9` 出现 0 次、`newPercent` 最大 72.964、`rawForwardLeapBytes` 全程 0。
+
+### 二、呈现层（Presentation）
+
+| 成员 | 真实状态 | 依据 |
+|---|---|---|
+| `Presentation\ProgressPresentationCoordinator.cs`（新） | 连续指数状态滤波：`visual += (target − visual) × (1 − exp(−k·dt))`，`k = 10`，`dt ≤ 1/30 s`，`IsAnimating = 模式非 Frozen 且滞后 > 1e-4`；`CompletedSnapEpsilon = 0.05` | **PMML-R24 / R20** |
+| `Presentation\MigrationSessionViewModel.cs` | `ContinuationDisplayState` 高水位 + 前跳守卫 `TrackRawForwardLeap`（阈值 `+10 pp` 或 `+max(1 GiB, 计划 × 10%)`，含速率豁免 `8 GiB/s`）⇒ `UnexpectedProgressLeapForward`（Error） | **PMML-R16 / R24** |
+| `Views\Step3ProgressPage.xaml.cs` | 呈现节拍 `PresentIntervalMs = 16`；`UpdateTotalProgressFill()` 成为**唯一写入者**；`ProgressMotionDriver` 引用数 **0** | **PMML-R11 / R20 / R23** |
+
+### 三、新控件与 Token（所有值取自代码，可核）
+
+- 控件目录 `src\PCMig.WinUI\Controls\ImmersiveProgress\`（7 文件，见规范附录 B.O）。
+- 依赖：`Microsoft.Graphics.Win2D` **1.4.0**（固定版本，非浮动）；构建输出内 `Microsoft.Graphics.Canvas.dll` + `Microsoft.Graphics.Canvas.Interop.dll` 均已就位（unpackaged / self-contained 依赖完整）。
+- 尺寸 Token（`Themes\Materials.xaml`）：`PCMigImmersiveProgressHostHeight = 16` / `PCMigImmersiveProgressThickness = 12` / `PCMigImmersiveProgressRadius = 6`。
+- 颜色 Token（`Themes\Colors.xaml`，11 个）：`ImmersiveProgressTrackTopBrush #5C31517A` / `TrackBottomBrush #7A243E60` / `TrackEdgeBrush #3D8FB4DC` / `FillTopBrush #FF5AA3FF` / `FillBottomBrush #FF1677F2` / `HeadHaloBrush #FF9CC8FF` / `HeadRimBrush #FFF2F8FF` / `BandOuterBrush #FFB8D8FF` / `BandCoreBrush #FFE8F2FF` / `ParticleBrush #FFDCECFF` / `BorderBrush #3DFFFFFF`。
+- 参数（`ImmersiveProgressParameters.cs`，全部 Token 化）：`BandSigmaX 30` / `BandCoreSigmaX 10` / `BandOuterSigmaY 5.5` / `BandOuterOpacity 0.24` / `BandCoreOpacity 0.20` / `BandCycleSeconds 1.32` / `BandActiveSeconds 0.96` / `BandTravelLength 150` / `HeadHaloLength 48` / `HeadHaloOuterOpacity 0.34` / `HeadHaloLocalLength 20` / `HeadRimThickness 1` / `HeadRimOpacity 0.74` / `ParticlePool 16` / `ParticleActiveHigh 14` / `ParticleActiveBalanced 9` / `ParticleActiveReduced 4` / `ParticleMinRadius 0.55` / `ParticleMaxRadius 1.20` / `ParticleMinLife 0.8` / `ParticleMaxLife 1.35` / `ParticleFollowFactor 0.23` / `ParticleTrailFloor 64` / `ParticleTrailRatio 0.18` / `ParticleHeadGap 6` / `RippleMax 4` / `RippleStartRadius 1.5` / `RippleEndRadius 4.5` / `RippleMinLife 0.18` / `RippleMaxLife 0.26` / `RipplePeakOpacity 0.20` / `RippleCooldownSeconds 0.22` / `BandInfluenceSigma 18` / `ParticleBrightnessGain 0.30` / `ParticleRadiusGain 0.35` / `RippleInfluenceThreshold 0.55` / `VisualK 10` / `MaxStepSeconds 1/30` / `SpawnJitter 0.35` / `HaloFadeSeconds 0.18` / `PauseFadeSeconds 0.28`。
+
+### 四、生产接线（`Views\Step3ProgressPage.xaml`）
+
+- 旧写法（`Height="12"` 的 `TotalProgressHost` + `<Border PCMigProgressTrack>` + `TotalProgressFill` 矩形）**整体替换**为：
+  `<Grid x:Name="TotalProgressHost" Height="{StaticResource PCMigImmersiveProgressHostHeight}">` → `<controls:ImmersiveTransferProgress x:Name="TotalImmersiveProgress" Minimum="0" Maximum="100" Value="0" .../>`
+- `UpdateTotalProgressFill()` 写 `immersive.Value = 呈现百分比` + `immersive.ProgressState = MapProgressState(session.Phase)`；`JobPhase → ImmersiveProgressState` 映射见该方法。
+- 底栏保留轻量条（`FooterProgressHost` 12 / `FooterProgressFill` 半径 4 + `AccentGradientBrush`），不参与新控件。
+
+### 五、测试增量
+
+| 测试 | 条数 | 锁定什么 |
+|---|---|---|
+| `ImmersiveProgressParticleBoundsTests` | 5 | 0% 不许有粒子；窄胶囊（26.233 DIP）不越界；跨进度宽度扫描；不容下时一枚不许有；不允许生时池排空 |
+| `ImmersiveProgressAnimationStateTests` | 10 | Band 静止段不透明度精确 0；周期内单调减速（按周期分段校验）；Ripple ≤ 4 且 Reduced 恒 0；四终态装饰全停；Holding 期 Head 静止而活动继续；Reduced Motion 关闭装饰；恶意 dt 夹取 |
+| `ReceiptAuthorityResolutionTests` | 8 | 回执权威解析与枚举顺序无关、取最大 checkpoint、按计划夹取、最新非 Interrupted ⇒ 0 |
+| `InterruptedProgressTruthTests` | 13 | TEST A/B/C/D/E/F 全链路（`/Z` 预分配、可信 checkpoint、前跳诊断、回滚解释） |
+| `ProgressPresentationCoordinatorTests` | 7 | 无预测、视觉不超真值、重定向不重启速度、文本与条同步、暂停冻结、完成精确 100 |
+| `ContinuationDisplayStateTests` / `ResumeProgressContinuityTests` | 6 / 20 | 显示高水位与续传连续性 |
+
+- 测试基线：`tests\PCMig.Core.Tests` **555/555**（Round-2 基线 518）；`tests\PCMig.Diagnostics.Tests` **382/382**。
+
+### 六、真机证据（Round-3）
+
+| 场景 | 结果 |
+|---|---|
+| Pause（生产 Step3） | 8 次连续采样逐字相同 `visual=4.662% mode=Frozen reason=phase-Paused headX=47.1`（不归零、不跳 99.9） |
+| Stop（生产 Step3） | 8 次连续 `visual=57.63% mode=Frozen reason=phase-Interrupted headX=582.1`（高水位守住） |
+| Resume after Stop | 从 57.63% 起，58.688 → 72.451 单调无倒退，`lag ≤ 1.93 pp` |
+| Completed | `TotalPercentText=100.0%` / `42 GB / 42 GB` / `mode=Completed` / `headX=1010=100%×1010` |
+| 像素几何 | 端头末 3 DIP 高度 12→10→8→6 px（圆弧）；端头外 14+ 列 luma 195~240（Halo）；中段实高 12 px（= 12 DIP token） |
+| 可访问语义 | `type=ControlType.ProgressBar aid=[TotalImmersiveProgress] name=[迁移总进度 100.0%]` |
+| 控静态对照 | 探针页 15 元素 + 345 行 `timeline.csv`：判据 ①②③⑤⑦⑨⑩⑪⑫⑬ 全部通过；⑨ 修前 20 行越界 → 修后 **0 行** |
+
+### PMML Compliance Gate（Round-3）
+
+```
+PMML Compliance
+---------------
+DAM:                        PASS（未新增材质族；新控件表面走 Theme Resource）
+LMDS:                       PASS（进度槽属于页内 L2 内容层，未自创层级）
+DSL-45:                     PASS（填充渐变自上而下，与单一光源方向一致）
+ESR:                        PASS（未改浮雕）
+Motion Family:              State（进度为状态驱动；页面导航 DCST 未改）
+TAOP:                       N/A（未新增浮层）
+Typography:                 PASS（R17：主百分比/字节文本仍不截断）
+Foreground Sharpness:       PASS（R13：9 层全部裁剪在 Fill 胶囊内，不覆盖文字）
+Light/Dark:                 PASS / Known Gap（颜色全部走 Theme Resource；浅色主题下的对比度仍为既有 Known Gap）
+Accessibility:              PASS（新增 ProgressBar/RangeValue 语义；Reduced Motion 已接线，见规范附录 B.K/B.M）
+Legacy Deviation Introduced: NO
+ProgressHead(Fact/Activity):PASS（Head 只走事实；Holding 期 Head 静止而 Push Band 继续，见真机 holding 段）
+Lighting(Geometry Stable):  PASS（几何稳定 / 光照动态；无液面扰动）
+SameSource(VisualProgress): PASS（headX = visual% × 1010 全样本成立；文本与条同刻一致）
+```
+
+- 本轮新增规则已写入 `docs\PMML-UI修改硬性规范.md`：**R21 进度头只代表已确认事实 / R22 几何稳定光照动态 / R23 同源 / R24 视觉只许落后 / R25 同时最多一条 Push Band / R26 粒子属于进度空间且固定池 / R27 局域光学耦合与稀疏 Ripple / R28 Renderer 与业务层隔离 / R29 Reduced Effects 不改业务 / R30 真机验收七项**。
+- 正式章节已写入 `docs\PCMig-Visual-Motion-Language.md` **附录 B：PCMig Immersive Transfer Progress（A~O）**。
+- 旧路线（`ProgressMotionDriver` + Sweep + 8 粒子）按执行书 §7 **冻结**：只许下线/删除，不得再扩展；生产路径对它的引用数已为 0。

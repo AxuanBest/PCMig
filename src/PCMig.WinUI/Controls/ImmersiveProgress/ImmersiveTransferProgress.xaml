@@ -1,0 +1,14 @@
+<UserControl
+    x:Class="PCMig.WinUI.Controls.ImmersiveProgress.ImmersiveTransferProgress"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    IsTabStop="False">
+  <!--
+    ★ Round-3（执行书 §12 / §13）★ PCMig Immersive Transfer Progress。
+    这里只放一个"宿主"，真正的绘制面（Win2D CanvasAnimatedControl）在代码里创建：
+      · 避免 XAML 编译器解析 Win2D 元数据（unpackaged + self-contained 下更稳）；
+      · 绘制后端只有一个 owner（本控件），画布生命周期与控件一致。
+    纯视觉控件：不承载可点击目标，故 IsTabStop=False（§24 的可访问性由 AutomationPeer 提供）。
+  -->
+  <Grid x:Name="Host" Background="Transparent"/>
+</UserControl>

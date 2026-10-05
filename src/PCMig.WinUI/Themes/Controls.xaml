@@ -166,20 +166,28 @@
        3) 因此改成**由唯一写入者按真值直接设置填充宽度**：`MainWindow.xaml.cs::UpdateFooterProgressFill`
           与 `Step3ProgressPage.xaml.cs::UpdateTotalProgressFill`，宽度 = 百分比 × 轨道实际宽度。
           轨道/填充是普通元素，视觉完全确定、可像素验证。
-       · 轨道 = 既有 ProgressTrackBrush，圆角 6（复用既有资源，PMML-R14）；
-       · 填充 = 既有 AccentGradientBrush（与全局 45° 光源一致），VerticalAlignment=Stretch
-         ⇒ 填充高度 = 轨道高度，不再被框架压成细线；
+       · 轨道 = 既有 ProgressTrackBrush，圆角 token（复用既有资源，PMML-R14）；
+       · 填充 = 既有 AccentGradientBrush（与全局 45° 光源一致）；
+       · **Round-2（2026-10-05，§3.5）**：轨道/填充的**视觉厚度**改为
+         PCMigProgressVisualThickness（8 DIP）+ PCMigProgressRadius（4 = 厚度/2），
+         在 12 DIP 的布局 host 内 VerticalAlignment=Center。
+         改前是 VerticalAlignment=Stretch ⇒ 填充高度 = 12 DIP 轨道高，用户看到的就是"条变粗了"；
+         现在布局高（12）与视觉厚（8）分离，能单独调视觉而不动几何。
        · **没有任何动画**推进宽度或 Value —— 宽度只由真值驱动，动画只能装饰（§8 / PMML-R8）；
        · 未做「前沿高光 / subtle glow」：当前没有可用的裁剪原语（Grid/Border 默认不裁剪子元素），
          强行加高光会在 0% 时漏出一小段亮条；如需该装饰请在授权下另行引入 Composition 裁剪。
-       PMML 归属：LMDS L3 内的进度指示；材质/光源/圆角全部复用既有 token，未引入新 token。 -->
+       PMML 归属：LMDS L3 内的进度指示；材质/光源/圆角全部复用既有 token，本轮新增
+       PCMigProgressVisualThickness / PCMigProgressRadius 两个几何 token（已在 Materials.xaml 登记理由）。 -->
   <Style x:Key="PCMigProgressTrack" TargetType="Border">
-    <Setter Property="CornerRadius" Value="6"/>
+    <Setter Property="Height" Value="{StaticResource PCMigProgressVisualThickness}"/>
+    <Setter Property="VerticalAlignment" Value="Center"/>
+    <Setter Property="CornerRadius" Value="{StaticResource PCMigProgressRadius}"/>
     <Setter Property="Background" Value="{StaticResource ProgressTrackBrush}"/>
   </Style>
   <Style x:Key="PCMigProgressFill" TargetType="Grid">
     <Setter Property="HorizontalAlignment" Value="Left"/>
-    <Setter Property="VerticalAlignment" Value="Stretch"/>
+    <Setter Property="VerticalAlignment" Value="Center"/>
+    <Setter Property="Height" Value="{StaticResource PCMigProgressVisualThickness}"/>
     <Setter Property="Width" Value="0"/>
     <Setter Property="IsHitTestVisible" Value="False"/>
   </Style>

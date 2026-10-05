@@ -169,6 +169,48 @@
        系统默认 OverlayCornerRadius(8)，与 PMML 输入族 14 不统一（用户人工标注项）。 -->
   <CornerRadius x:Key="PCMigRadiusOverlay">16</CornerRadius>
   <CornerRadius x:Key="PCMigRadiusListItem">10</CornerRadius>
+  <!-- Round-2（2026-10-05，§3.5）：进度条**视觉厚度**与布局高度解耦。
+       视频复核的原话是"最明显的变化只是进度条变粗了"——因为 12 DIP 的布局轨道被 track/fill
+       满高占满，fill 直接拿轨道高度当视觉厚度。现在拆成两层：
+         · 布局：`ProgressHost` 仍 12 DIP（占位与点击/测量均不变，顶栏与底栏共用）；
+         · 视觉：track/fill 厚度 = PCMigProgressVisualThickness（8 DIP），在 host 内垂直居中；
+           端帽圆角 = thickness/2 = PCMigProgressRadius（4）。
+       理由（PMML-R14）：厚度与圆角必须单一来源，今后 A/B 调参只改这两个数字；
+       不允许再用"加粗"替代"运动可见性"。 -->
+  <x:Double x:Key="PCMigProgressVisualThickness">8</x:Double>
+  <CornerRadius x:Key="PCMigProgressRadius">4</CornerRadius>
+  <!-- Round-2（2026-10-05，§4）：提示卡**固定高度** token。
+       用户视频证据：提示卡在 30 s 因 OperationalStatus 长句"变得很高"、37.5 s 又缩回；用户已明确
+       接受并选择固定尺寸。所以卡高不再由内容决定：
+         · 正常/宽窗口 = 176 DIP（含 Padding 上下 16 + 五行结构：标题 / 内容视口(*) / 状态 / 分隔线 / 署名）；
+         · 只有物理视口真的更矮时才夹到可用高（唯一"断点换档"，由 ShellHintCard.SetAvailableHeight 判定）；
+         · 内容变化永不改变外层高度；溢出只发生在 Row1 内容视口内部。
+       取值依据：改前"紧凑态"实测内容区 126 DIP + Padding 32 ≈ 158 DIP，176 留出约 4 行正文的余量，
+       同时远小于用户视频里被长句撑出的高度。理由（PMML-R14）：卡高必须单一来源，
+       今后调参只改这一个数字；XAML 与代码兜底常量都引用/比对本 token。 -->
+  <x:Double x:Key="PCMigHintCardHeight">176</x:Double>
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       ★ Round-3（执行书 §10 / §22）★ PCMig Immersive Transfer Progress 的三维尺寸 token。
+       ★ 为什么是这三个数字 ★
+         · HostHeight = 16 DIP = **布局槽**（决定 Step3 里进度条占多高，含上下各 2 DIP 呼吸空间）；
+         · Thickness  = 12 DIP = **真正动态材质**的厚度（用户给的参考视频是 40~46 DIP 的技术 Demo，
+           直接搬进企业办公机的 Step3 会喧宾夺主；12 DIP 是"看得出光学层次、又不挤压信息密度"的第一版正式尺寸）；
+         · Radius     = 6 DIP = 端帽圆角（= Thickness/2 ⇒ 细长胶囊，右端永远是 ")" 不是 "|"）。
+       ★ 纪律 ★ 这是第一版正式尺寸，**不再做"7 vs 8"式的旧方案投票**；用户真机验收后若认为 12 太厚或太薄，
+         只允许改这三个 token，**禁止重新改布局结构**。控件内部按 min(token, 实际高度) 取值，
+         因此同一个控件可以在主 Hero 槽与更矮的底栏 Compact 槽复用，而不需要第二份代码。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <x:Double x:Key="PCMigImmersiveProgressHostHeight">16</x:Double>
+  <x:Double x:Key="PCMigImmersiveProgressThickness">12</x:Double>
+  <x:Double x:Key="PCMigImmersiveProgressRadius">6</x:Double>
+  <!-- ★ Round-3 视觉纠偏（R33 Hero / Compact Material Family）★
+       底栏 Compact 变体的几何 token：与 Hero 同族（都是 Radius = Thickness/2 的真胶囊），只是更小更安静。
+       Compact 仍然使用同一个控件、同一个 Track-Space Chroma Field、同一个 Head 体积光场、同一个 VisualProgress；
+       它**只是**关闭粒子与 Ripple、并把 Push Band 强度降到约 Hero 的 58%（见 ImmersiveProgressParameters.CompactBandScale）。
+       ★ 纪律 ★ 底栏**不再**使用旧的 Border + Rectangle(RadiusX=4) 路线 —— 那条路线已退出生产。 -->
+  <x:Double x:Key="PCMigImmersiveProgressCompactHostHeight">12</x:Double>
+  <x:Double x:Key="PCMigImmersiveProgressCompactThickness">10</x:Double>
+  <x:Double x:Key="PCMigImmersiveProgressCompactRadius">5</x:Double>
   <!-- V5 Elevation：**ThemeShadow 必须配 Translation Z 才真的投影**（Z 不动 = 截图里看不到景深）。
        V4：面板/卡片描边改用高光渐变；**V4b（本轮）**：卡片/面板顶部再叠一条 2 DIP 的横向白色亮线
        （`TopSheenLip`），因为实测"整圈描边渐变"在卡片顶边**没有产生亮度尖峰**，而参考图顶边有 +16 亮度尖线。 -->

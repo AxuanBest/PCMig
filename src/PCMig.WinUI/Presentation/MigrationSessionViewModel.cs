@@ -452,13 +452,30 @@ public sealed class MigrationSessionViewModel : ObservableObject
     ///   ⑥<see cref="DirectoryTreeViewModel.SyncRoots(IEnumerable{ShareRootSpec})"/> 删根 ⇒ 用户刚做的精确选择随之消失。
     /// 现在根的存在只由“共享是否还在共享列表里”决定，勾选态（全勾/半勾/全不勾）只由 <c>IsChecked</c> 表达
     /// ——与旧 WPF 一致（旧 `DirTree` 只在连接时构建一次，`Gui\MainViewModel.cs:461-475` / `:576-589`）。
-    /// 副作用（预期）：未勾选的共享同样会以“全不勾”出现在 Step 2 目录树中。
+    /// 副作用（本轮已按用户要求关闭）：~~未勾选的共享同样会以“全不勾”出现在 Step 2 目录树中~~。
+    ///
+    /// ★ 2026-10-05（执行书 §2.2）★ 用户明确要求：**Step 1 只选 H，Step 2 顶层就只能有 H；
+    /// 未选择的共享不得进入 Step 2**。因此建根条件由"共享是否在列表里"收紧为
+    /// "**当前已勾选** 或 **该根已被用户在 Step 2 实际使用过**"：
+    ///   · 前者满足"只选 H 就只显示 H"；
+    ///   · 后者保住 A.5 修掉的防回路语义（用户取消一个子目录 ⇒ 根半选 ⇒ 共享行被联动置 false，
+    ///     此时根**必须**保留，否则用户刚做的精确选择会连同整棵根一起消失）——
+    ///     详见 <see cref="DirectoryTreeViewModel.IsUserEngagedRoot"/> 的判据说明。
     /// </summary>
     public void SyncTreeRootsFromShares()
     {
         var conn = _connection;
         if (conn is null) return;
-        Tree.SyncRoots(conn.Shares.Select(s => new ShareRootSpec(s.UncPath, s.IsSelected)));
+
+        // ★ 2026-10-05（执行书 §2.2）★ 只把"当前勾选"或"已被用户在 Step 2 实际使用过"的共享建根。
+        //   注意仍要传 `s.IsSelected` 作为根的初始勾选态（未勾选却保留的根以"全不勾"呈现，
+        //   与旧 WPF 一致），勾选态的跟随规则由 SyncRoots 内部处理。
+        var specs = conn.Shares
+            .Where(s => !string.IsNullOrWhiteSpace(s.UncPath))
+            .Where(s => s.IsSelected || Tree.IsUserEngagedRoot(s.UncPath))
+            .Select(s => new ShareRootSpec(s.UncPath, s.IsSelected))
+            .ToList();
+        Tree.SyncRoots(specs);
     }
 
     /// <summary>
@@ -907,26 +924,55 @@ public sealed class MigrationSessionViewModel : ObservableObject
     public ProgressTruthSnapshot? LastTruth { get => _lastTruth; private set => Set(ref _lastTruth, value); }
 
     /// <summary>
-    /// ★ UI Closure 2026-10-05（§2 P0）★ **UI 显示真值**（顶栏/底栏/百分比/字节的唯一来源）。
-    /// 与 <see cref="LastTruth"/> 的唯一区别：暂停 → 恢复的正常 catch-up 期内可能被
-    /// <see cref="ResumeDisplayFloor"/> 抬到"用户已看到的显示分子"（raw 追上后自动解除）；
+    /// ★ Round-2 2026-10-05（§2.1）★ **UI 显示真值**（顶栏/底栏/百分比/字节的唯一来源）。
+    /// 与 <see cref="LastTruth"/> 的唯一区别：暂停 / 停止 / 恢复的正常连续性窗口内可能被
+    /// <see cref="ContinuationDisplayState"/> 抬到"用户已看到的高水位"（引擎 raw 追上后自动解除）；
     /// <see cref="LastTruth"/> 永远保留引擎 raw 真值供诊断与解释，二者绝不互相污染。
     /// </summary>
     private ProgressTruthSnapshot? _presentationTruth;
     public ProgressTruthSnapshot? PresentationTruth { get => _presentationTruth; private set => Set(ref _presentationTruth, value); }
 
-    // ── ★ UI Closure 2026-10-05（§2 P0）★ Resume 显示连续性 floor（说明见文件末尾 ResumeDisplayFloor）──
-    //   唯一写入者：ApplySnapshot（Apply + 暂停候选值）、ResumeAsync（Arm）、RunTransferCoreAsync（Clear）。
-    private readonly ResumeDisplayFloor _resumeDisplayFloor = new();
-    /// <summary>暂停期间"用户已经看到的最大显示分子"（下一次恢复的 floor 候选；只用引擎真值）。</summary>
-    private long? _pausedDisplayedBytes;
-    /// <summary><see cref="_pausedDisplayedBytes"/> 所属任务（换任务即作废，绝不跨任务抬高显示）。</summary>
-    private string? _pausedDisplayedJobId;
+    // ── ★ Round-2 2026-10-05（§2.1）★ 显示连续性状态机（说明见文件末尾 ContinuationDisplayState）──
+    //   唯一写入者：ApplySnapshot（Apply）、PauseAsync/StopAsync（用户动作**之前**捕获检查点）、
+    //   ResumeAsync（进入追赶）、RunTransferCoreAsync（非恢复的运行 ⇒ Clear）。
+    private readonly ContinuationDisplayState _continuation = new();
+    /// <summary>最近一次快照里的"已完成对象数"（检查点用；只读镜像，**不是**业务权威）。</summary>
+    private int _completedObjectsSeen;
 
-    /// <summary>★ 只读诊断 ★ floor 是否生效（显示值高于引擎 raw 时为 true；日志据此解释）。</summary>
-    public bool ResumeDisplayFloorActive => _resumeDisplayFloor.IsActive;
-    /// <summary>★ 只读诊断 ★ 当前 floor 的字节数。</summary>
-    public long ResumeDisplayFloorBytes => _resumeDisplayFloor.FloorBytes;
+    /// <summary>★ 只读诊断 ★ 显示连续性是否生效（冻结/追赶中 = true；日志据此解释"显示为何高于引擎 raw"）。</summary>
+    public bool ContinuationActive => _continuation.IsActive;
+    /// <summary>★ 只读诊断 ★ 当前高水位（用户已经看到的进度分子）。</summary>
+    public long ContinuationHighWaterBytes => _continuation.HighWaterBytes;
+    /// <summary>★ 只读诊断 ★ 当前连续性模式（Live / Frozen / CatchingUp）。</summary>
+    internal ContinuationMode ContinuationDisplayMode => _continuation.Mode;
+
+    // ── ★ Round-2 2026-10-05（§3.2 / §3.3）★ 进度**呈现**时间线 ──
+    //   唯一写入者：ApplySnapshot（ApplyTruth / Freeze）、PauseAsync·StopAsync（经 CaptureContinuationCheckpoint
+    //   冻结）、ResumeAsync（ResumeLive）、RunTransferCoreAsync（Reset）。
+    //   唯一读取者：Step3ProgressPage / MainWindow 的 80 ms 呈现定时器（AdvancePresentation）——
+    //   大号百分比文本与蓝色进度条都从这里取同一个视觉比例。
+    private readonly ProgressPresentationCoordinator _presentation = new();
+
+    /// <summary>★ 只读 ★ UI 以 10~20 Hz 推进共享呈现时间线并取回视觉百分比（数字与进度条共用的唯一值）。</summary>
+    public double AdvancePresentation(DateTime utcNow) => _presentation.Advance(utcNow);
+
+    /// <summary>★ 只读 ★ 当前视觉百分比（调用 <see cref="AdvancePresentation"/> 之后的值）。</summary>
+    public double PresentationVisualPercent => _presentation.VisualPercent;
+
+    /// <summary>★ 只读 ★ 当前视觉分子（按视觉百分比折算，用于让字节文本与百分比同源）。</summary>
+    public long PresentationVisualBytes => _presentation.VisualBytes;
+
+    /// <summary>★ 只读 ★ 视觉落后"已确认显示真值"的百分点（&gt;0 表示正在追赶，应当逐帧移动）。</summary>
+    public double PresentationLagPercent => _presentation.LagPercent;
+
+    /// <summary>★ 只读 ★ 视觉是否落后于已知真值（落后期间必须"大多数采样帧都在动"，不许长时间静止）。</summary>
+    public bool PresentationIsLagging => _presentation.IsLagging;
+
+    /// <summary>★ 只读诊断 ★ 呈现时间线内部状态描述。</summary>
+    public string PresentationDescribe => _presentation.Describe();
+
+    /// <summary>★ 只读 ★ 最近一次呈现补间的时长（秒）—— 供进度条按**同一曲线**补间，数字与条因此同源同步。</summary>
+    public double PresentationSpanSeconds => _presentation.LastDurationSeconds;
 
     private int _failedObjects;
     public int FailedObjects
@@ -1624,17 +1670,29 @@ public sealed class MigrationSessionViewModel : ObservableObject
         // ★ FIX BATCH 7 ★ 恢复的"起点阶段"必须在**发起恢复时**记下（旧实现是在等待时才判断，
         //   而那时整轮运行可能已经跑完 ⇒ 判据恒 false，一次真实成功的恢复被记成 resume-unsettled）。
         _resumeOriginPhase = Phase;
-        // ★ UI Closure 2026-10-05（§2 P0）★ 恢复前先给**显示连续性**上锁：候选 = 用户已经看到的显示分子
-        //   （暂停期间的最大显示值）。它只抬高 UI 显示，不参与 skip / verify / receipt / success
-        //   （见 ResumeDisplayFloor 的分层纪律）；引擎 raw 追上后自动解除。
-        var floorCandidate = Math.Max(
-            LastTruth?.DisplayedTransferredBytes ?? 0L,
-            _pausedDisplayedJobId is not null && string.Equals(_pausedDisplayedJobId, ctx.JobId, StringComparison.OrdinalIgnoreCase)
-                ? _pausedDisplayedBytes ?? 0L
-                : 0L);
-        if (_resumeDisplayFloor.Arm(ctx.JobId, floorCandidate))
-            _log.Information("Resume 显示连续性 floor 已启用：job={JobId} floorBytes={FloorBytes} —— 仅用于显示，不代表对象已完成（引擎真值追上后自动解除）",
-                ctx.JobId, floorCandidate);
+        // ★ Round-2 2026-10-05（§2.1-6）★ 恢复前把显示连续性切到**追赶**模式：显示停在高水位，
+        //   引擎 raw 追上后自动解除（→ Live）。高水位来源 = 之前的暂停/停止检查点 + 当前显示真值，
+        //   只用引擎真值，绝不凭空造数；它只抬高 UI 显示，不参与 skip / verify / receipt / success。
+        var resumeCandidate = Math.Max(
+            _continuation.HighWaterBytes,
+            Math.Max(LastTruth?.DisplayedTransferredBytes ?? 0L, PresentationTruth?.DisplayedTransferredBytes ?? 0L));
+        if (resumeCandidate > 0)
+        {
+            _continuation.CaptureCheckpoint(ctx.JobId, resumeCandidate,
+                Math.Max(_continuation.HighWaterPercent, Math.Max(LastTruth?.Percent ?? 0d, Percent)),
+                _completedObjectsSeen, "resume-requested");
+        }
+        if (_continuation.BeginCatchUp(ctx.JobId))
+        {
+            _log.Information(
+                "Resume 显示连续性：进入追赶模式 job={JobId} highWaterBytes={Bytes} —— 仅用于显示，不代表对象已完成（引擎真值追上后自动解除）",
+                ctx.JobId, _continuation.HighWaterBytes);
+        }
+        // ★ Round-2（§3.2）★ 呈现时间线解除冻结：视觉**停在原处**（不归零、不重播），
+        //   后续由已确认的显示真值驱动前进；引擎 raw 追上高水位后自然不再滞后。
+        _presentation.ResumeLive(DateTime.UtcNow, "resume-requested");
+        _log.Information("呈现时间线恢复跟随：job={JobId} visualPercent={Visual:0.###}（从用户已看到的进度继续）",
+            ctx.JobId, _presentation.VisualPercent);
         Log("INFO", $"用户确认恢复任务 {ctx.JobId}（{PhaseText}）：已清除暂停请求，沿用 job.json 里的原线程值续传。");
         // ★ FIX BATCH 2 ★ 原地恢复：引擎那一次运行**还活着**（暂停达成于对象边界时，编排器正原地等
         //   请求文件消失）⇒ 请求刚被清除，引擎会在至多一个轮询周期后自己继续。
@@ -1674,6 +1732,9 @@ public sealed class MigrationSessionViewModel : ObservableObject
             // ★ A.5（P1-5）★ 用户即时操作的反馈属"绝对不可被节流延迟的量"：
             //   先 Flush 掉累积的批量行，再写状态（状态句/按钮态在下一帧即变，不等到 50ms 节拍）。
             FlushPendingNow();
+            // ★ Round-2 2026-10-05（§2.1-2）★ 用户点暂停**之前**先捕获显示检查点：必须早于写请求文件，
+            //   否则引擎可能在同一个节拍里把 raw 收尾成 committed-only 值，检查点就会偏低。
+            CaptureContinuationCheckpoint("pause-requested");
             // 重试标记必须**先于**写请求文件设置：引擎的 PauseRequestedAt 由它自己在本轮尝试里打时间戳，
             // 只有"重试时点 <= 引擎本轮时间戳"才说明引擎报的是**新一轮**结论（否则会被当成上一轮的旧结论）。
             _pauseRetryAfterUtc = DateTime.UtcNow;
@@ -1711,6 +1772,11 @@ public sealed class MigrationSessionViewModel : ObservableObject
         {
             // ★ A.5（P1-5）★ 停止同属"不可被节流延迟的量"：先 Flush 再写状态。
             FlushPendingNow();
+            // ★ Round-2 2026-10-05（§2.1-4/5）★ 用户点停止**之前**先捕获显示检查点：停止是一次
+            //   "可恢复的中断"，引擎随后会把这一轮收尾成 Interrupted 并从 committed 回执重建真值
+            //   （真机视频证据：24.8% 在点击「停止」后**立刻**掉到 0.0%）——
+            //   检查点让显示冻结在高水位，直到引擎 raw 追上来（绝不改回执、不改 skip/verify）。
+            CaptureContinuationCheckpoint("user-stop");
             // ★ D6.1 §16 ★ 停止请求（意图）——结果由 Core 的 StopObserved 记录。
             PublishRepair(TransferEvents.StopRequested,
                 new TrnPauseObservedPayload("Cancel", null),
@@ -1729,6 +1795,48 @@ public sealed class MigrationSessionViewModel : ObservableObject
             LastStopOutcome = new ActionOutcomeDecision(DiagnosticOutcome.Failed, "stop-request-failed");
         }
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// ★ Round-2 2026-10-05（§2.1-2/4）★ 在**用户动作之前**把"用户此刻已经看到的进度"冻结成检查点。
+    /// 只读显示真值（<see cref="PresentationTruth"/> → <see cref="LastTruth"/>），绝不凭空造数：
+    /// 显示分子 ≤ 0 时什么都不做。它只影响显示连续性，**绝不**写回 committed / 回执 / skip 判定。
+    /// </summary>
+    private void CaptureContinuationCheckpoint(string reason)
+    {
+        try
+        {
+            var displayed = PresentationTruth?.DisplayedTransferredBytes
+                            ?? LastTruth?.DisplayedTransferredBytes
+                            ?? 0L;
+            var percent = PresentationTruth?.Percent ?? LastTruth?.Percent ?? Percent;
+            if (_continuation.CaptureCheckpoint(Ctx?.JobId, displayed, percent, _completedObjectsSeen, reason))
+            {
+                _log.Information(
+                    "显示连续性检查点：reason={Reason} job={JobId} highWaterBytes={Bytes} percent={Percent:0.###} completedObjects={Objects}",
+                    reason, Ctx?.JobId, _continuation.HighWaterBytes, _continuation.HighWaterPercent,
+                    _continuation.HighWaterCompletedObjects);
+            }
+
+            if (reason is "pause-requested" or "user-stop")
+            {
+                // ★ Round-3 PHASE A（§4.5）★ 记下"动作边界基线"：用户点下暂停/停止那一刻的可信分子。
+                //   之后引擎 raw 若在没有可信 I/O 增量支撑下比它高出一大截（P0：/Z 预分配被当成已传
+                //   字节 ⇒ 30 GB → 41.96 GB），必须能报出来 —— 只查倒退是不够的。
+                _continuation.MarkActionCheckpoint(displayed);
+                // ★ Round-2（§3.2）★ 用户按下暂停/停止的**那一刻**视觉就必须冻在他当前看到的值上：
+                //   引擎接着会把相位推到 Paused / Interrupted，并只按"已完成回执"重建分子；
+                //   若不在这一刻冻住，界面就会先掉到 0.0% 再等恢复（用户视频 43.7 s → 44.0 s 的现象）。
+                _presentation.Freeze(percent, DateTime.UtcNow, reason);
+                _log.Information(
+                    "呈现时间线已冻结：reason={Reason} visualPercent={Visual:0.###}（用户已看到的进度保持不变）",
+                    reason, _presentation.VisualPercent);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "显示连续性检查点捕获失败（已吞掉，不影响显示与业务）");
+        }
     }
 
     /// <summary>
@@ -1752,16 +1860,17 @@ public sealed class MigrationSessionViewModel : ObservableObject
             return;
         }
 
-        // ★ UI Closure 2026-10-05（§2 P0）★ **只有"用户发起的恢复"**才允许保留显示连续性 floor：
-        //   重新开始（RunAsync）与修复（RepairAsync）都是新语义，显示连续性不跨"重新开始" ⇒ 显式解除。
+        // ★ Round-2 2026-10-05（§2.1-8）★ **只有"用户发起的恢复"**才保留显示连续性：
+        //   重新开始（RunAsync）与修复（RepairAsync）都是新语义，新任务必须从 0 开始显示 ⇒ 显式解除。
         //   同时把 raw 回退基线复位（换了一轮运行的 raw 序列不可比）。
-        if (!resumeContinuity && _resumeDisplayFloor.Clear("new-run"))
-            _log.Information("Resume 显示连续性 floor 已解除（本轮不是恢复：reason=new-run）");
-        _resumeDisplayFloor.ResetRawTracking(ctx.JobId);
+        if (!resumeContinuity && _continuation.Clear("new-run"))
+            _log.Information("显示连续性已解除（本轮不是恢复：reason=new-run）");
+        _continuation.ResetRawTracking(ctx.JobId);
         if (!resumeContinuity)
         {
-            _pausedDisplayedBytes = null;
-            _pausedDisplayedJobId = null;
+            // ★ Round-2（§3.2 / §2.1-8）★ 全新运行 / 修复 = 新语义 ⇒ 呈现时间线一并归零，
+            //   视觉从 0 开始（这是唯一允许"视觉回退到 0"的路径，且用户明确点了"开始/修复"）。
+            _presentation.Reset(ctx.JobId, "new-run");
         }
 
         // ---- 扫描残缺闸门（v0.3.8）：未确认不允许开跑（Core 的权威判定，不重写规则）----
@@ -2982,13 +3091,15 @@ public sealed class MigrationSessionViewModel : ObservableObject
         // ★ FIX BATCH 4（§7.1）★ 进度真值唯一来源：引擎随快照送来的 ProgressTruthSnapshot。
         //   下面的百分比/字节/速率/ETA 全部由它派生（顶栏与底栏因此天然同源）；Truth 为 null 只出现在
         //   测试或兼容路径，此时按快照原始字段如实显示，绝不自己另算一套。
-        // ★ UI Closure 2026-10-05（§2 P0）★ 真值分工（连续性只在**显示层**，业务权威仍是 Completed 回执）：
+        // ★ Round-2 2026-10-05（§2）★ 真值分工（连续性只在**显示层**，业务权威仍是 Completed 回执）：
         //   · LastTruth       = 引擎 raw 真值（诊断/解释用，永不改写）；
         //   · PresentationTruth = 供 UI 显示的真值（顶栏/底栏/百分比/字节/速率/ETA 的唯一来源）——
-        //     只在"暂停 → 恢复"的正常 catch-up 期被 floor 抬高，引擎 raw 追上 floor 后自动解除
-        //     （原因码见 ResumeDisplayFloor）。
+        //     在"暂停 / 停止 / 恢复"期间被高水位托底（绝不倒退，也绝不被当成对象已完成），
+        //     引擎 raw 追平高水位后自动解除（原因码见 ContinuationDisplayState）。
         var rawTruth = s.Truth;
-        var continuity = _resumeDisplayFloor.Apply(rawTruth, s.Phase, Ctx?.JobId);
+        //  ★ Round-2 2026-10-05（§2.1）★ 连续性状态机：把引擎 raw 真值翻译成"显示用"真值。
+        //    冻结/追赶期内显示停在高水位（raw 追上即自动解除）；只有显式回滚 / 换任务 / 真完成才允许下降。
+        var continuity = _continuation.Apply(rawTruth, s.Phase, Ctx?.JobId);
         RecordProgressTransition(s, rawTruth, continuity);
         LastTruth = rawTruth;
         var displayTruth = continuity.Effective;
@@ -2997,15 +3108,8 @@ public sealed class MigrationSessionViewModel : ObservableObject
         //   真机证据 —— run2 恢复后 raw 重建为 0（committed 回执尚未重建），floor 已把显示真值托在
         //   10.7 GB，但两处消费端仍在读 LastTruth(raw) ⇒ 用户看到 99.9% → 0.0% 的倒退。
         PresentationTruth = displayTruth;
-        // ★ UI Closure 2026-10-05（§2 P0）★ 暂停期间记住"用户已经看到的最大显示分子"——
-        //   它是下一次恢复的 floor 候选（只取引擎真值，绝不凭空造数）。
-        if (s.Phase == JobPhase.Paused)
-        {
-            var pausedDisplayed = displayTruth?.DisplayedTransferredBytes ?? s.CompletedBytes;
-            if (_pausedDisplayedBytes is null || pausedDisplayed > _pausedDisplayedBytes.Value)
-                _pausedDisplayedBytes = pausedDisplayed;
-            _pausedDisplayedJobId = Ctx?.JobId;
-        }
+        // ★ Round-2 2026-10-05（§3.2）★ 推进**呈现**时间线：数字与进度条共用的视觉目标在这里被设定。
+        UpdatePresentationTimeline(s.Phase, displayTruth, s.TotalBytes);
         Percent = displayTruth?.Percent ?? (s.Phase == JobPhase.Completed ? 100.0 : s.Percent);
         var displayedBytes = displayTruth?.DisplayedTransferredBytes ?? s.CompletedBytes;
         var plannedBytes = displayTruth?.PlannedBytes ?? s.TotalBytes;
@@ -3017,6 +3121,8 @@ public sealed class MigrationSessionViewModel : ObservableObject
         var truthEta = displayTruth?.EtaSeconds ?? s.EtaSeconds;
         EngineSpeedText = truthSpeed > 0 ? Format.Speed(truthSpeed) : "—";
         EtaText = double.IsNaN(truthEta) ? "—" : Format.Eta(truthEta);
+        // 检查点用的"已完成对象数"镜像（只读；业务权威仍是 Completed 回执与 s.CompletedObjects）。
+        _completedObjectsSeen = s.CompletedObjects;
         ObjectText = $"{s.CompletedObjects}/{s.TotalObjects}" + (s.FailedObjects > 0 ? $"（失败 {s.FailedObjects}）" : "");
         FailedObjects = s.FailedObjects;
         CurrentObjectPath = s.CurrentObjectPath ?? string.Empty;
@@ -3076,10 +3182,11 @@ public sealed class MigrationSessionViewModel : ObservableObject
         ApplyObjectRowStatus(s);
     }
 
-    // ── ★ UI Closure 2026-10-05（§5 最小可诊断性）★ 进度真值过渡的结构化记录 ──────────────
-    //   纪律：只在"阶段改变 / Pause-Resume / 恢复后前若干样本 / InFlightSource 改变 / AttemptEpoch 改变 /
-    //   RetryState 改变 / progress 向后 / 单次跳变超阈值"时记录（**绝不** 5 Hz 全量写盘）；
-    //   它只记录，绝不改业务行为、绝不改显示值（显示值由 ResumeDisplayFloor 决定）。
+    // ── ★ Round-2 2026-10-05（§5 / §7 最小可诊断性）★ 进度真值过渡的结构化记录 ──────────────
+    //   纪律：只在"阶段改变 / Pause-Stop-Resume / 用户动作边界 / 恢复后前若干样本 / InFlightSource 改变 /
+    //   AttemptEpoch 改变 / RetryState 改变 / progress 向后 / 单次跳变超阈值"时记录
+    //   （**绝不** 5 Hz 全量写盘）；
+    //   它只记录，绝不改业务行为、绝不改显示值（显示值由 ContinuationDisplayState 决定）。
     private JobPhase? _transitionPhase;
     private ProgressTruthSource? _transitionSource;
     private long _transitionEpoch = -1;
@@ -3094,10 +3201,49 @@ public sealed class MigrationSessionViewModel : ObservableObject
         => Math.Max(8L * 1024 * 1024, plannedBytes > 0 ? (long)(plannedBytes * 0.02) : 0L);
 
     /// <summary>
+    /// ★ Round-2 2026-10-05（§3.2）★ 把一拍**显示真值**交给呈现时间线，并按相位决定冻结 / 解冻。
+    /// 本方法只决定"视觉应该画到哪里"，不参与任何业务判定：
+    ///   已确认显示真值（<c>ContinuationDisplayState</c> 的 effective）是视觉的**上限**；
+    ///   视觉落后时由 80 ms 呈现定时器逐帧追平（§3.3 的"大号百分比与进度条同源"）。
+    /// </summary>
+    private void UpdatePresentationTimeline(JobPhase phase, ProgressTruthSnapshot? displayTruth, long fallbackPlannedBytes)
+    {
+        try
+        {
+            var utc = DateTime.UtcNow;
+            var settled = phase is JobPhase.Completed or JobPhase.CompletedWithErrors;
+            var percent = displayTruth?.Percent ?? (settled ? 100d : 0d);
+            var bytes = displayTruth?.DisplayedTransferredBytes ?? 0L;
+            var planned = displayTruth?.PlannedBytes ?? fallbackPlannedBytes;
+
+            _presentation.ApplyTruth(percent, bytes, planned, settled, Ctx?.JobId, utc);
+
+            if (settled)
+            {
+                // 真完成：允许一次到 100% 的收敛补间（只有引擎真的完成才进入这条分支）
+                _presentation.ResumeLive(utc, "settled");
+            }
+            else if (phase == JobPhase.Running)
+            {
+                _presentation.ResumeLive(utc, "running");
+            }
+            else if (phase is not (JobPhase.Created or JobPhase.Planned))
+            {
+                // 暂停 / 停止 / 中断 / 失败 / 待复核 / 校验中：视觉冻结在用户已看到的值上
+                _presentation.Freeze(percent, utc, "phase-" + phase);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "呈现时间线更新失败（已吞掉，不影响进度真值）");
+        }
+    }
+
+    /// <summary>
     /// ★ UI Closure 2026-10-05（§5）★ 把进度过渡写成**结构化单行日志**（落盘走 Serilog；未解释回退同时上
     /// UI 日志面板）。对"未解释的进度回退"给出 <c>UnexpectedProgressRegression</c>（Error 级）。
     /// </summary>
-    private void RecordProgressTransition(ProgressSnapshot s, ProgressTruthSnapshot? rawTruth, ResumeFloorOutcome continuity)
+    private void RecordProgressTransition(ProgressSnapshot s, ProgressTruthSnapshot? rawTruth, ContinuationOutcome continuity)
     {
         try
         {
@@ -3113,10 +3259,16 @@ public sealed class MigrationSessionViewModel : ObservableObject
             var jumped = _transitionDisplayedBytes >= 0
                 && Math.Abs(raw - _transitionDisplayedBytes) >= TransitionJumpThreshold(planned);
             var regressed = continuity.RawRegressionBytes > 0;
-            var resumeWindow = _resumeDisplayFloor.IsActive && _resumeSampleCount < 10;
+            // ★ Round-3 PHASE A（§4.5）★ 无解释"前跳"检测，与回退检测并列（缺一不可）。
+            //   只在用户按下 Pause/Stop 之后才有意义（动作边界基线已设置）；trustedIoDeltaBytes 传 0：
+            //   此刻引擎已停止上报，任何"新增字节"都没有证据支撑 —— 这正是 /Z 预分配污染的签名
+            //   （暂停前 30 GB → 暂停后 41.96 GB）。上一轮的判据只查倒退，于是把它判成了"通过"。
+            //   若该对象确实刚刚完成，本行会与 Completed 回执同时出现，人工核对即可判为误报，不会静默。
+            var leapForward = _continuation.TrackRawForwardLeap(raw, planned, 0L);
+            var resumeWindow = _continuation.IsActive && _resumeSampleCount < 10;
 
             if (phaseChanged || sourceChanged || epochChanged || retryChanged || pauseChanged
-                || jumped || regressed || resumeWindow || continuity.ClearedThisCall)
+                || jumped || regressed || leapForward || resumeWindow || continuity.ClearedThisCall)
             {
                 var jobId = Ctx?.JobId ?? "-";
                 var previousBytes = _transitionDisplayedBytes < 0
@@ -3128,14 +3280,25 @@ public sealed class MigrationSessionViewModel : ObservableObject
                     $"committed={rawTruth?.CommittedBytes ?? -1} inFlight={rawTruth?.InFlightConfirmedBytes ?? -1} " +
                     $"source={rawTruth?.InFlightSource.ToString() ?? "n/a"} object={rawTruth?.CurrentObjectId ?? "-"} " +
                     $"epoch={rawTruth?.AttemptEpoch ?? -1} retry={rawTruth?.RetryState.ToString() ?? "n/a"} " +
-                    $"pause={PauseUiState} floorActive={continuity.FloorActive} floorBytes={continuity.FloorBytes} " +
-                    $"floorCleared={continuity.ClearedThisCall} clearReason={continuity.ClearReason} " +
-                    $"rawRegressionBytes={continuity.RawRegressionBytes} utc={DateTime.UtcNow:O}");
+                    $"pause={PauseUiState} continuation={continuity.Mode} highWaterBytes={continuity.HighWaterBytes} " +
+                    $"continuationCleared={continuity.ClearedThisCall} clearReason={continuity.ClearReason} " +
+                    $"rawRegressionBytes={continuity.RawRegressionBytes} " +
+                    $"rawForwardLeapBytes={_continuation.LastRawForwardLeapBytes} " +
+                    $"rawForwardLeapPercent={_continuation.LastRawForwardLeapPercent:0.###} " +
+                    $"actionCheckpointBytes={_continuation.ForwardLeapBaselineBytes} utc={DateTime.UtcNow:O}");
 
                 if (regressed && !ProgressRegressionExplained(rawTruth, s.Phase, continuity))
                 {
                     _log.Error("UnexpectedProgressRegression（进度出现未解释回退）：{ProgressTransition}", line);
                     Log("ERROR", "进度出现未解释回退（UnexpectedProgressRegression）：" + line);
+                }
+                else if (leapForward)
+                {
+                    // ★ Round-3 PHASE A ★ 无解释前跳：暂停/停止边界之后，引擎 raw 比用户看到的可信量
+                    //   高出一大截，且没有任何可信 I/O 增量支撑。典型成因 = /Z 预分配长度被当成已传字节
+                    //   （P0）。诊断必须显式点出可能成因，避免下一轮又被"零倒退"骗过去。
+                    _log.Error("UnexpectedProgressLeapForward（进度出现无证据前跳，疑似 /Z 预分配污染）：{ProgressTransition}", line);
+                    Log("ERROR", "进度出现无证据前跳（UnexpectedProgressLeapForward，疑似 /Z 预分配污染）：" + line);
                 }
                 else
                 {
@@ -3150,7 +3313,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
             _transitionDisplayedBytes = raw;
             _transitionPercent = percentNow;
             _transitionPause = PauseUiState;
-            _resumeSampleCount = _resumeDisplayFloor.IsActive ? _resumeSampleCount + 1 : 0;
+            _resumeSampleCount = _continuation.IsActive ? _resumeSampleCount + 1 : 0;
         }
         catch (Exception ex)
         {
@@ -3159,7 +3322,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
     }
 
     /// <summary>回退是否有解释：本轮刚解除 floor / 显式回滚或重试轮次 / 停在暂停或中断态。</summary>
-    private static bool ProgressRegressionExplained(ProgressTruthSnapshot? rawTruth, JobPhase phase, ResumeFloorOutcome continuity)
+    private static bool ProgressRegressionExplained(ProgressTruthSnapshot? rawTruth, JobPhase phase, ContinuationOutcome continuity)
         => continuity.ClearedThisCall
            || (rawTruth is not null && rawTruth.RetryState != RetryState.None)
            || phase is JobPhase.Paused or JobPhase.Interrupted or JobPhase.Canceled
@@ -3816,83 +3979,157 @@ public enum PauseUiState
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ★ UI Closure 2026-10-05（§2 P0：暂停 42.9% → 恢复后掉到 ~24.8% → 过一会回 42.9%）★
+// ★ Round-2 2026-10-05（§2 P0）★ 进度显示连续性状态机
+//   （真机视频证据：24.8% 点「停止」→ 立刻 0.0%；暂停 42.9% → 恢复 24.8% → 回 42.9%）★
 // ══════════════════════════════════════════════════════════════════════════════
 /// <summary>
-/// Resume 显示连续性 floor —— **纯逻辑、零 WinUI 依赖**（因此可被
+/// 进度**显示连续性**状态机 —— **纯逻辑、零 WinUI 依赖**（因此可被
 /// <c>tests\PCMig.Core.Tests\PCMig.Core.Tests.csproj</c> 源码链入并直接断言行为，
-/// 见 <c>ResumeProgressContinuityTests</c>）。
+/// 见 <c>ContinuationDisplayStateTests</c> / <c>ResumeProgressContinuityTests</c>）。
 ///
-/// 【它解决什么】用户**已经看到**过的显示进度，在"暂停 → 恢复"的正常 catch-up 期间不得无解释倒退。
-///   真机现场（D6.3 / UI-Closure）：暂停时 42.9% → 点「恢复任务」后立刻掉到 ~24.8% → 过一会又回 42.9%。
-///   根因不在 UI：从"已暂停且这一次运行已收尾"恢复走的是**新一轮 RunAsync**，它只从
-///   <c>Status == Completed</c> 的回执重建权威进度（<c>TransferOrchestrator.RunAsync</c> 的 <c>baseBytes</c>，
-///   <c>state.CompletedBytes = baseBytes</c>），而暂停时用户看到的分子里含 in-flight 已确认字节
-///   （<c>PollProgressAsync</c> 的 <c>state.CompletedBytes = truth.DisplayedTransferredBytes</c>）
-///   ⇒ 新一轮从 committed 起算，显示值先跳到 24.8%，再由 robocopy 续传逐段追回 42.9%。
+/// 【它解决什么】用户**已经看到**过的进度，在任何"可恢复的中断"（暂停 / 停止 / 恢复）期间
+///   不得无解释倒退。Round-2 用户视频证据：
+///   · 43.7 s 显示 24.8%（43.95 GB / 176.9 GB），鼠标在底栏「停止」，点击后 **44.0 s 立刻变成 0.0% / 0 B**；
+///   · 52.0 s 才跳回 24.8%，紧接着 47.3%；54.9 s → 62.3%。
+///   根因不在 UI 控件：Stop → Core 把这一轮收尾成 <c>Interrupted</c>，并从 committed 回执重建真值
+///   （<c>TransferOrchestrator.RunAsync</c> 的 <c>baseBytes</c>），而停止前用户看到的分子里含 in-flight
+///   已确认字节（<c>PollProgressAsync</c> 的 <c>state.CompletedBytes = truth.DisplayedTransferredBytes</c>）
+///   ⇒ raw 一收尾就低于"用户看到的"；旧实现又只在 <c>Paused</c> 态记候选，并把 <c>Interrupted</c>
+///   当成"解除条件" ⇒ 显示被清成 committed-only 值 = 用户看到的 0.0%。
+///
+/// 【三种模式】<see cref="ContinuationMode"/>：
+///   · <c>Live</c>       —— 无冻结：显示完全跟随引擎 raw 真值（正常运行时、以及 raw 追平高水位之后）。
+///   · <c>Frozen</c>     —— 用户暂停/停止之后冻结在高水位：显示 = max(raw, 高水位)，绝不倒退；
+///                        暂停态即使 raw 已等于高水位也**保持冻结**（恢复时 raw 会被重建为更低）。
+///   · <c>CatchingUp</c> —— 用户已点恢复：显示停在高水位，直到引擎 raw 追平 ⇒ 自动转 Live。
 ///
 /// 【分层纪律（绝不可越界）】
 ///   · ① Committed / Durable Progress —— 权威 = Completed Receipt，决定 skip / CompletedObjects / 最终判定；
-///        **绝不经过本类型**（本类型不写回执、不动 job-state、不参与 skip / verify / success）。
-///   · ② Resume Presentation Floor —— 本类型：只抬高 UI 侧显示分子与百分比，**不代表对象已完成**。
-///   · 引擎真值一旦追上 floor（rawDisplayed ≥ floor）即自动解除，显示完全跟随 raw truth。
+///        **绝不经过本类型**（本类型不写回执、不动 job-state、不参与 skip / verify / success，
+///        也绝不把 Interrupted 对象标成 Completed）。
+///   · ② Continuation Display State —— 本类型：只抬高 UI 侧显示分子与百分比，**不代表对象已完成**。
 ///
-/// 【何时解除（都必须带原因，不允许静默倒退）】
-///   job-changed（换了任务）/ explicit-rollback（RetryState.RollingBack）/
-///   phase-&lt;X&gt;（不再是 Running/Paused）/ plan-complete / truth-caught-up。
-///   ★ 注意 ★ RetryState.Retrying **不在**解除清单里：恢复后的正常 catch-up 会短暂进入 Retrying，
-///   那不是"允许显示回退"的语义事件（真机复验 run2 证据，见 Apply）。
+/// 【何时允许显示下降（都必须带原因码）】
+///   job-changed（换任务 ⇒ 新任务从 0 开始）/ explicit-rollback（RetryState.RollingBack）/
+///   phase-Completed|CompletedWithErrors（真结算，跟随 100%）/ truth-caught-up（raw 追平，转 Live）。
+///   ★ 注意 ★ RetryState.Retrying **不是**可解释的回退：恢复后的正常 catch-up 会短暂进入 Retrying
+///   （真机复验 run2 证据）。★ 注意 ★ Interrupted / Failed / AwaitingReview **不是**解除条件 ——
+///   它们正是需要冻结的"可恢复中断"，这就是本轮修的 P0。
 ///
 /// 【它同时负责】raw（引擎真值）样本间的回退检测（<see cref="LastRawRegressionBytes"/>）——
-///   与 floor 无关：即使没有任何 floor，raw 真值倒退也必须被记录（§5）。
+///   与冻结无关：即使从未捕获过高水位，raw 真值倒退也必须被记录（§5 / §7）。
 /// </summary>
-internal sealed class ResumeDisplayFloor
+internal sealed class ContinuationDisplayState
 {
     /// <summary>容差：raw 显示值下降超过这个字节数才算"回退"（避免同一真值的抖动被当成回退）。</summary>
     public const long RegressionToleranceBytes = 1;
 
-    private long _floorBytes;
+    private long _highWaterBytes;
+    private double _highWaterPercent;
+    private int _highWaterCompletedObjects;
     private string? _jobId;
-    private bool _active;
+    private ContinuationMode _mode = ContinuationMode.Live;
     private long? _lastRawDisplayedBytes;
     private string? _lastRawJobId;
 
-    /// <summary>floor 是否生效（只读诊断：UI/日志可据此解释"为什么显示值高于引擎 raw"）。</summary>
-    public bool IsActive => _active;
-    /// <summary>当前 floor 的字节数（只读诊断）。</summary>
-    public long FloorBytes => _floorBytes;
-    /// <summary>floor 绑定的任务 id（只读诊断）。</summary>
+    /// <summary>是否处于冻结/追赶（true = 显示值可能高于引擎 raw；只读诊断）。</summary>
+    public bool IsActive => _mode != ContinuationMode.Live;
+    /// <summary>高水位字节数 = 用户已经看到过的最大进度分子（只读诊断）。</summary>
+    public long HighWaterBytes => _highWaterBytes;
+    /// <summary>高水位百分比（只读诊断）。</summary>
+    public double HighWaterPercent => _highWaterPercent;
+    /// <summary>捕获检查点时的"已完成对象数"（只读诊断：用于解释暂停文案，**不是**业务权威）。</summary>
+    public int HighWaterCompletedObjects => _highWaterCompletedObjects;
+    /// <summary>当前模式。</summary>
+    public ContinuationMode Mode => _mode;
+    /// <summary>高水位绑定的任务 id（只读诊断）。</summary>
     public string? JobId => _jobId;
+    /// <summary>最近一次模式/检查点变更的原因码（诊断用）。</summary>
+    public string LastReason { get; private set; } = string.Empty;
     /// <summary>最近一次解除的原因码（空 = 从未解除）。</summary>
     public string LastClearReason { get; private set; } = string.Empty;
     /// <summary>最近一次 <see cref="Apply"/> 观察到的 raw 回退字节数（0 = 未回退）。</summary>
     public long LastRawRegressionBytes { get; private set; }
 
+    // ── Round-3 PHASE A（2026-10-05，§4.5）：无解释"前跳"检测 ──
+    // 只查倒退是不够的：P0 那个 bug 的表现恰恰相反 —— 暂停瞬间 raw 从 30 GB 跳到 41.96 GB
+    //   （/Z 预分配被当成已传字节），"零倒退"的旧判据反而把它判成通过。所以必须同时检测
+    //   "没有可信 Worker I/O 增量支撑的大幅前跳"。
+    /// <summary>前跳字节容差（避免正常抖动误报）。</summary>
+    public const long ForwardLeapToleranceBytes = 1;
+    /// <summary>前跳百分点阈值（Round-3 §4.5：+10 个百分点）。</summary>
+    public const double ForwardLeapPercentThreshold = 10d;
+    /// <summary>前跳绝对字节下限：<c>max(1 GiB, PlannedBytes * 0.10)</c> 的固定部分。</summary>
+    public const long ForwardLeapFloorBytes = 1L << 30;
+    /// <summary>触发"检查点以来无解释前跳"的判定比例（PlannedBytes 的 10%）。</summary>
+    public const double ForwardLeapPlannedRatio = 0.10d;
     /// <summary>
-    /// 由"用户发起的恢复"标记 floor：候选值 = 暂停时用户**已经看到**的那个显示分子
-    /// （`LastTruth.DisplayedTransferredBytes`）。候选 ≤ 0 时不标记（绝不凭空造一个 floor）。
+    /// 时间豁免用的可解释速率上界。真机实测本机 C:→E: 为 2.7~5 GB/s，
+    /// 取 8 GiB/s 作保守上界：只要"检查点以来的经过时间 × 该上界"能解释掉这段增量，
+    /// 就不算无解释前跳（真机 9.0% → 34.3% / 10.4 GB / ~2.5 s 即属此类真实传输）。
     /// </summary>
-    public bool Arm(string? jobId, long displayedBytes)
+    public const double ForwardLeapRateCeilingBytesPerSecond = 8d * 1024d * 1024d * 1024d;
+
+    private long _forwardLeapBaselineBytes = -1;
+    private DateTime _forwardLeapCheckpointUtc = DateTime.MinValue;
+
+    /// <summary>最近一次判定的无解释前跳字节数（0 = 未前跳；只读诊断）。</summary>
+    public long LastRawForwardLeapBytes { get; private set; }
+    /// <summary>最近一次判定的无解释前跳百分点（0 = 未前跳；只读诊断）。</summary>
+    public double LastRawForwardLeapPercent { get; private set; }
+    /// <summary>动作边界基线（用户点 Pause/Stop 那一刻的可信分子；-1 = 未设置）。</summary>
+    public long ForwardLeapBaselineBytes => _forwardLeapBaselineBytes;
+
+    /// <summary>
+    /// 在**用户动作之前**（Pause / Stop / Resume 的点击路径里）捕获显示检查点：
+    /// 候选 = 用户此刻已经看到的显示分子。候选 ≤ 0 时不标记（绝不凭空造高水位）。
+    /// 只升不降：更低候选不会覆盖已有高水位。返回本次是否发生变化。
+    /// </summary>
+    public bool CaptureCheckpoint(string? jobId, long displayedBytes, double percent, int completedObjects, string reason)
     {
+        LastReason = reason;
         if (displayedBytes <= 0) return false;
-        if (_active && displayedBytes <= _floorBytes && string.Equals(_jobId, jobId, StringComparison.Ordinal))
-            return false;   // 已经有一个更高或相等的 floor：不降低它
-        _floorBytes = displayedBytes;
-        _jobId = jobId;
-        _active = true;
-        LastClearReason = string.Empty;
+        var changed = false;
+        if (displayedBytes > _highWaterBytes) { _highWaterBytes = displayedBytes; changed = true; }
+        if (percent > _highWaterPercent) { _highWaterPercent = percent; changed = true; }
+        if (completedObjects > _highWaterCompletedObjects) { _highWaterCompletedObjects = completedObjects; changed = true; }
+        if (string.IsNullOrEmpty(_jobId)) _jobId = jobId;
+        if (_mode != ContinuationMode.Frozen) { _mode = ContinuationMode.Frozen; changed = true; }
+        if (changed) LastClearReason = string.Empty;
+        return changed;
+    }
+
+    /// <summary>
+    /// 用户已点「恢复任务」⇒ 进入追赶模式：显示停在高水位，直到引擎 raw 追平。
+    /// 没有高水位（≤ 0）时保持 Live（没什么可追赶，绝不凭空托底）。返回是否进入追赶。
+    /// </summary>
+    public bool BeginCatchUp(string? jobId)
+    {
+        if (_highWaterBytes <= 0) return false;
+        if (string.IsNullOrEmpty(_jobId)) _jobId = jobId;
+        _mode = ContinuationMode.CatchingUp;
+        LastReason = "catch-up";
         return true;
     }
 
-    /// <summary>解除 floor（原因码必填）。返回是否真的从"生效"变为"解除"。</summary>
+    /// <summary>解除连续性（原因码必填）。返回是否真的从"生效"变为"解除"。</summary>
     public bool Clear(string reason)
     {
         LastClearReason = reason;
-        if (!_active) return false;
-        _active = false;
-        _floorBytes = 0;
+        LastReason = reason;
+        var wasActive = IsActive;
+        _mode = ContinuationMode.Live;
+        _highWaterBytes = 0;
+        _highWaterPercent = 0;
+        _highWaterCompletedObjects = 0;
         _jobId = null;
-        return true;
+        // Round-3 PHASE A：解除连续性 ⇒ 动作边界基线也必须失效（新任务/新一轮不该继承旧基线，
+        //   否则第一次采样就会被判成"前跳"）。
+        _forwardLeapBaselineBytes = -1;
+        _forwardLeapCheckpointUtc = DateTime.MinValue;
+        LastRawForwardLeapBytes = 0;
+        LastRawForwardLeapPercent = 0d;
+        return wasActive;
     }
 
     /// <summary>把 raw 样本跟踪复位到指定任务（跨任务/重新开始时用），并清掉回退基线。</summary>
@@ -3901,68 +4138,125 @@ internal sealed class ResumeDisplayFloor
         _lastRawDisplayedBytes = null;
         _lastRawJobId = jobId;
         LastRawRegressionBytes = 0;
+        _forwardLeapBaselineBytes = -1;
+        _forwardLeapCheckpointUtc = DateTime.MinValue;
+        LastRawForwardLeapBytes = 0;
+        LastRawForwardLeapPercent = 0d;
     }
 
     /// <summary>
-    /// 把引擎 raw 真值翻译成"显示用"真值：floor 生效且 raw 尚未追上时抬高显示分子；
-    /// 命中任一解除条件则**完全跟随** raw（并回报原因）。
+    /// 把引擎 raw 真值翻译成"显示用"真值：处于冻结/追赶模式且 raw 尚未追平时抬高显示分子；
+    /// 命中任一解除条件则**完全跟随** raw（并回报原因码）。
+    /// 规则顺序（①…⑧）刻意固定，避免"先冻结还是先解除"的歧义；详细理由见类注释。
     /// </summary>
-    public ResumeFloorOutcome Apply(ProgressTruthSnapshot? truth, JobPhase phase, string? currentJobId)
+    public ContinuationOutcome Apply(ProgressTruthSnapshot? truth, JobPhase phase, string? currentJobId)
     {
         LastRawRegressionBytes = TrackRawRegression(truth is null ? null : currentJobId, truth?.DisplayedTransferredBytes);
 
         if (truth is null)
-            return new ResumeFloorOutcome(null, _active, false, string.Empty, LastRawRegressionBytes, 0, _floorBytes);
+            return new ContinuationOutcome(null, _mode, false, string.Empty, LastRawRegressionBytes, 0, _highWaterBytes);
 
         var rawDisplayed = truth.DisplayedTransferredBytes;
-        if (!_active)
-            return new ResumeFloorOutcome(truth, false, false, string.Empty, LastRawRegressionBytes, rawDisplayed, 0);
 
-        // ── 解除条件（任一命中：完全跟随引擎真值，并在日志里给出原因）──
+        // ① 换了任务 ⇒ 旧高水位对新任务毫无意义（新任务显示必须从 0 重新长）。
         if (!string.IsNullOrEmpty(_jobId) && !string.IsNullOrEmpty(currentJobId)
             && !string.Equals(_jobId, currentJobId, StringComparison.OrdinalIgnoreCase))
             return ClearAndFollow(truth, "job-changed");
 
-        // ★ 真机复验返修（2026-10-05 run2）★ 自动重试（RetryState.Retrying）**不再**解除 floor：
-        //   "暂停 → 恢复"的正常 catch-up 期间，引擎重建会推高 AttemptEpoch 并短暂进入 Retrying；
-        //   真机证据：run2 的 20:33:48.498 行被旧代码以 retry-restart 清掉了 floor。§2 只把
-        //   显式 RollingBack / Repair / 换任务 / 明确重新计划列为"允许解释的回退"，自动重试不是。
+        // ② 显式回滚（引擎自己说要退）⇒ 允许显示下降，但必须带原因码（§2.1 第 7 条）。
         if (truth.RetryState == RetryState.RollingBack)
             return ClearAndFollow(truth, "explicit-rollback");
 
-        if (phase is not (JobPhase.Running or JobPhase.Paused))
+        // ③ 真结算 ⇒ 跟随引擎（只有 Completed 才是 100%）。
+        if (phase is JobPhase.Completed or JobPhase.CompletedWithErrors)
             return ClearAndFollow(truth, "phase-" + phase);
+
+        // ④ 正常前进时把高水位往上推（只有 Running/Paused 才算"用户正在看到它涨"）。
+        if (phase is JobPhase.Running or JobPhase.Paused && rawDisplayed > _highWaterBytes)
+            PromoteHighWater(rawDisplayed, truth.Percent, currentJobId);
+
+        // ⑤ 暂停态：冻结（即使 raw 已等于高水位也保持冻结 —— 恢复时 raw 会被重建为更低）。
         if (phase == JobPhase.Paused)
         {
-            // 已经停在暂停态：用户下一刻看到的必须是引擎真值（此刻 raw 一般就等于暂停值）。
-            // floor 保留（等待恢复），但不再抬高本轮显示。
-            return rawDisplayed >= _floorBytes
-                ? ClearAndFollow(truth, "truth-caught-up")
-                : new ResumeFloorOutcome(truth, true, false, string.Empty, LastRawRegressionBytes, rawDisplayed, _floorBytes);
+            if (_mode == ContinuationMode.Live && _highWaterBytes > 0)
+            {
+                _mode = ContinuationMode.Frozen;
+                LastReason = "paused";
+            }
+            return Freeze(truth, rawDisplayed);
         }
 
-        var planned = truth.PlannedBytes;
-        if (planned > 0 && rawDisplayed >= planned)
-            return ClearAndFollow(truth, "plan-complete");
-        if (rawDisplayed >= _floorBytes)
-            return ClearAndFollow(truth, "truth-caught-up");
+        // ⑥ 其它一切相位（Stop 后的 Interrupted / Failed / Canceled / AwaitingReview，
+        //    以及尚未进入传输的 Created/Preflight/Scanning/Planned/Verifying）：一律冻结。
+        //    ★ Round-2 P0 ★ 用户点「停止」后显示必须停在检查点，绝不掉回 committed-only 值；
+        //    真机视频证据：43.7 s 24.8% → 点停止 → 44.0 s 0.0%（旧实现把 Interrupted 当解除条件）。
+        if (phase is not (JobPhase.Running or JobPhase.Paused))
+        {
+            if (_mode == ContinuationMode.Live && _highWaterBytes > 0)
+            {
+                _mode = ContinuationMode.Frozen;
+                LastReason = "phase-" + phase;
+            }
+            return Freeze(truth, rawDisplayed);
+        }
 
-        // ── 抬高显示分子（绝不压低引擎真值：percent 取两者较大）──
-        var lifted = planned > 0 ? Math.Min(_floorBytes, planned) : _floorBytes;
-        var percent = planned > 0
-            ? Math.Min(ProgressTruthSnapshot.RunningPercentCeiling, lifted * 100.0 / planned)
+        // ⑦ Running 且 raw 追平/超过高水位：
+        //    · CatchingUp（Resume 之后的追赶）⇒ 解除，显示完全跟随引擎真值（§2.1「追平后自动解除」）。
+        //    · Frozen（Pause / Stop 之后的冻结）⇒ **不解除**，高水位继续保留。
+        //      ★ Round-2 真机缺陷（run F，2026-10-05 04:38:24.383 → .394）★ 旧写法对 Frozen 也解除，
+        //      于是"Stop 后引擎 raw 先反超（42 GB 在本机 6 秒内传完，raw 直接到 99.9%）再被重建为 0"
+        //      时高水位已经丢成 0（真机日志 highWaterBytes=0），显示就再无托底 ——
+        //      正是用户视频里 24.8% → 0.0% 的路径。
+        //      冻结期显示仍跟随 raw（Freeze 只抬高、不压低，见 4157 行的 lifted <= rawDisplayed 早退），
+        //      所以保留高水位不会让数字"卡住不涨"，只是把托底留给之后的 raw 回落。
+        //    ★ 注意 ★ RetryState.Retrying 不是解除条件：恢复后的正常 catch-up 会短暂进入 Retrying
+        //    （真机复验 run2 证据：旧代码的 retry-restart 曾在 20:33:48.498 清掉 floor）。
+        //    冻结的出口只有：换任务（①）／显式回滚（②）／真结算（③）／Resume 后追平（⑦ CatchingUp）。
+        if (rawDisplayed >= _highWaterBytes)
+        {
+            if (_mode == ContinuationMode.CatchingUp)
+                return ClearAndFollow(truth, "truth-caught-up");
+            return new ContinuationOutcome(truth, _mode, false, string.Empty, LastRawRegressionBytes, rawDisplayed, _highWaterBytes);
+        }
+
+        // ⑧ Running 且 raw 仍低于高水位：Live ⇒ 照常跟随（说明从未冻结）；否则冻结在检查点。
+        return _mode == ContinuationMode.Live
+            ? new ContinuationOutcome(truth, _mode, false, string.Empty, LastRawRegressionBytes, rawDisplayed, _highWaterBytes)
+            : Freeze(truth, rawDisplayed);
+    }
+
+    /// <summary>把高水位推到 raw 当前位置（只由 Running/Paused 的正常前进调用）。</summary>
+    private void PromoteHighWater(long rawDisplayedBytes, double rawPercent, string? currentJobId)
+    {
+        _highWaterBytes = rawDisplayedBytes;
+        if (rawPercent > _highWaterPercent) _highWaterPercent = rawPercent;
+        if (string.IsNullOrEmpty(_jobId)) _jobId = currentJobId;
+    }
+
+    /// <summary>
+    /// 冻结：显示分子取 max(raw, 高水位)。**只抬高显示，不动真值语义** ——
+    /// 返回的 Effective 只供 UI 显示；LastTruth（raw）仍原样保留给诊断（§7）。
+    /// </summary>
+    private ContinuationOutcome Freeze(ProgressTruthSnapshot truth, long rawDisplayed)
+    {
+        var lifted = truth.PlannedBytes > 0 ? Math.Min(_highWaterBytes, truth.PlannedBytes) : _highWaterBytes;
+        if (lifted <= rawDisplayed)
+            return new ContinuationOutcome(truth, _mode, false, string.Empty, LastRawRegressionBytes, rawDisplayed, _highWaterBytes);
+
+        var percent = truth.PlannedBytes > 0
+            ? Math.Min(ProgressTruthSnapshot.RunningPercentCeiling, lifted * 100.0 / truth.PlannedBytes)
             : truth.Percent;
         if (percent < truth.Percent) percent = truth.Percent;
 
         var effective = truth with { DisplayedTransferredBytes = lifted, Percent = percent };
-        return new ResumeFloorOutcome(effective, true, false, string.Empty, LastRawRegressionBytes, rawDisplayed, _floorBytes);
+        return new ContinuationOutcome(effective, _mode, false, string.Empty, LastRawRegressionBytes, rawDisplayed, _highWaterBytes);
     }
 
-    private ResumeFloorOutcome ClearAndFollow(ProgressTruthSnapshot truth, string reason)
+    private ContinuationOutcome ClearAndFollow(ProgressTruthSnapshot truth, string reason)
     {
-        var floor = _floorBytes;
+        var highWater = _highWaterBytes;
         Clear(reason);
-        return new ResumeFloorOutcome(truth, false, true, reason, LastRawRegressionBytes, truth.DisplayedTransferredBytes, floor);
+        return new ContinuationOutcome(truth, ContinuationMode.Live, true, reason, LastRawRegressionBytes, truth.DisplayedTransferredBytes, highWater);
     }
 
     private long TrackRawRegression(string? jobId, long? rawDisplayed)
@@ -3976,17 +4270,101 @@ internal sealed class ResumeDisplayFloor
         var delta = prev.Value - rawDisplayed.Value;
         return delta > RegressionToleranceBytes ? delta : 0;
     }
+
+    /// <summary>
+    /// 记录"动作边界基线"：用户点 Pause / Stop 那一刻**已经看到**的可信分子。
+    /// <para>
+    /// 之后引擎 raw 真值若在没有可信 Worker I/O 增量支撑的情况下比它高出一大截，
+    /// 就是 P0 那个 <c>/Z</c> 预分配污染的签名（暂停前 30 GB → 暂停后 41.96 GB）。
+    /// </para>
+    /// </summary>
+    public void MarkActionCheckpoint(long displayedBytes)
+    {
+        _forwardLeapBaselineBytes = displayedBytes > 0 ? displayedBytes : 0;
+        _forwardLeapCheckpointUtc = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// 判定"检查点以来的无解释前跳"。判定条件（Round-3 §4.5，两条满足其一）：
+    /// <c>leap &gt;= max(1 GiB, PlannedBytes * 10%)</c> 或 <c>leapPercent &gt;= 10</c>。
+    /// <para>
+    /// <paramref name="trustedIoDeltaBytes"/> = 自动作边界以来**引擎自己认可**的可信 I/O 增量；
+    /// 调用方拿不到证据时必须传 0（宁可报出来让人核对，也不静默放过 —— 这就是上一轮"零倒退⇒通过"
+    /// 判据的教训）。返回 true 表示本次判定为无解释前跳。
+    /// </para>
+    /// <para>
+    /// ★ 时间豁免（Round-3 PHASE A 真机校准，已写入 PMML R24 补充）★
+    /// 真机实测：暂停前 9.0% / 3.97 GB → 暂停后 34.3% / 14.4 GB，跨度约 2.5 秒。
+    /// 这 **是真实传输**（本机 C:→E: 实测 2.7~5 GB/s，2.5 秒传 10.4 GB 完全合理），不是污染。
+    /// 因此"比动作检查点高 10 个百分点"绝不能单独定罪：先要扣掉"检查点之后经过的时间里，
+    /// 以本机可解释速率上界最多能传多少"，只有**扣不掉的那部分**才算无解释跳变。
+    /// 而真正的污染签名（72% → 99.9% / 41.96 GB）发生在一瞬间，任何速率都解释不了 ⇒ 仍会被抓住。
+    /// </para>
+    /// </summary>
+    public bool TrackRawForwardLeap(long? rawDisplayed, long plannedBytes, long trustedIoDeltaBytes)
+    {
+        if (rawDisplayed is null || _forwardLeapBaselineBytes < 0)
+        {
+            LastRawForwardLeapBytes = 0;
+            LastRawForwardLeapPercent = 0d;
+            return false;
+        }
+        var credited = Math.Max(0L, trustedIoDeltaBytes);
+        var leap = rawDisplayed.Value - _forwardLeapBaselineBytes - credited;
+        if (leap <= ForwardLeapToleranceBytes)
+        {
+            LastRawForwardLeapBytes = 0;
+            LastRawForwardLeapPercent = 0d;
+            return false;
+        }
+        if (_forwardLeapCheckpointUtc != DateTime.MinValue)
+        {
+            var elapsedSeconds = (DateTime.UtcNow - _forwardLeapCheckpointUtc).TotalSeconds;
+            if (elapsedSeconds > 0d)
+            {
+                var maxPlausible = (long)(elapsedSeconds * ForwardLeapRateCeilingBytesPerSecond);
+                if (leap <= maxPlausible)
+                {
+                    LastRawForwardLeapBytes = 0;
+                    LastRawForwardLeapPercent = 0d;
+                    return false;
+                }
+                leap -= maxPlausible;
+            }
+        }
+        var percent = plannedBytes > 0 ? leap * 100d / plannedBytes : 0d;
+        var floor = Math.Max(ForwardLeapFloorBytes, (long)(plannedBytes * ForwardLeapPlannedRatio));
+        var suspicious = leap >= floor || percent >= ForwardLeapPercentThreshold;
+        LastRawForwardLeapBytes = suspicious ? leap : 0;
+        LastRawForwardLeapPercent = suspicious ? percent : 0d;
+        return suspicious;
+    }
 }
 
 /// <summary>
-/// <see cref="ResumeDisplayFloor.Apply"/> 的判定结果。
-/// <paramref name="Effective"/> = 供 UI 显示的真值（可能被 floor 抬高）；它**不是**业务完成度。
+/// <see cref="ContinuationDisplayState"/> 的三种模式（Round-2 §2.1）。
+/// **显示层专用**，与引擎的 <see cref="JobPhase"/> / <see cref="RetryState"/> 无关。
 /// </summary>
-internal readonly record struct ResumeFloorOutcome(
+internal enum ContinuationMode
+{
+    /// <summary>无冻结：显示完全跟随引擎 raw 真值（正常运行时，以及 raw 追平高水位之后）。</summary>
+    Live = 0,
+    /// <summary>用户暂停/停止之后：显示冻结在检查点高水位，绝不倒退。</summary>
+    Frozen = 1,
+    /// <summary>用户已点恢复：显示停在高水位，直到引擎 raw 追平 ⇒ 自动转 Live。</summary>
+    CatchingUp = 2,
+}
+
+/// <summary>
+/// <see cref="ContinuationDisplayState.Apply"/> 的判定结果。
+/// <paramref name="Effective"/> = 供 UI 显示的真值（可能被高水位抬高）；它**不是**业务完成度。
+/// <paramref name="RawDisplayedBytes"/> = 引擎 raw 真值原样（诊断 / 回退检测用，永不被抬高）。
+/// </summary>
+internal readonly record struct ContinuationOutcome(
     ProgressTruthSnapshot? Effective,
-    bool FloorActive,
+    ContinuationMode Mode,
     bool ClearedThisCall,
     string ClearReason,
     long RawRegressionBytes,
     long RawDisplayedBytes,
-    long FloorBytes);
+    long HighWaterBytes);

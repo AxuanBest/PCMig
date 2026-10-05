@@ -1,0 +1,138 @@
+<UserControl
+    x:Class="PCMig.WinUI.Views.ImmersiveProgressVisualProbe"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:PCMig.WinUI.Controls.ImmersiveProgress">
+
+    <!--
+        ★ Round-3 PHASE D（执行书 §26）★ ImmersiveProgressVisualProbe ★
+        「PCMig Immersive Transfer Progress」的**确定性**真机探针：把执行书要求的固定序列
+        0 → 10 → 24.8 → 47.3 → 62.3 → 75 → 90 → 100（含 Holding / Pause / Resume / Completed / Failed）
+        喂给**同一个** ProgressPresentationCoordinator，并把每一拍写成 timeline.csv。
+
+        为什么必须用探针而不是直接在 Step3 上看：
+          Step3 的真值来自真实迁移，速度与时机不可控（本机 2.7~5 GB/s，42 GB 任务几秒就结束），
+          无法稳定复现"暂停在白分数中间""8 秒没有新字节"这类**验收必需**的场景。
+          探针把"被验收的控件"与"喂给它的真值序列"同时固定下来，于是每条验收判据都能变成
+          一行 CSV 数字，而不是"看起来还行"。
+
+        本组件不参与业务：无 ViewModel、无事件订阅、不写任何业务状态；只在
+        Environment.GetEnvironmentVariable("PCMIG_IMMERSIVE_PROBE") == "1" 时被 MainWindow 挂载。
+
+        ★ 两条纪律（都由测试锁着，改前先读）★
+        ① AutomationId **不在 XAML 里写字面量**，而是在 code-behind 用
+           AutomationProperties.SetAutomationId 赋值 —— 与既有的两个开发探针
+           （Views\GlyphContourProbe.xaml.cs、Views\MetricTypographyProbe.xaml.cs）同一写法。
+           原因：D63 Fixture12 要求"XAML 字面量 AutomationId ⊆ ControlIds 登记表"，
+           而 ControlIds 是**生产**真实点击的稳定 ID 表；开发探针的 ID 不是生产契约，
+           混进去就成了"两套语义共用一张表"（登记表不再是唯一事实源的反面：假承诺）。
+        ② 每个 TextBlock 都必须带 PCMigText* 语义样式（WinUiDpiContractTests
+           .Typography_UsesNamedSemanticStyles 要求 ≥95%）。探针也不例外：字号只许走命名样式，
+           需要等宽/配色时用内联 Foreground / FontFamily 覆盖，不新造字号。
+    -->
+    <ScrollViewer Background="#FF0B0E13" RequestedTheme="Dark"
+                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel x:Name="ProbeRoot" Padding="24" Spacing="16">
+
+            <TextBlock x:Name="ProbeTitle" Style="{StaticResource PCMigTextHintTitle}"
+                       Foreground="#FFF2F6FF"
+                       Text="PCMig Immersive Transfer Progress — 真机探针（确定性序列 + timeline.csv）"/>
+
+            <!-- ① Hero 槽：与 Step3 主进度条同尺寸（宽 1010 DIP × 高 = PCMigImmersiveProgressHostHeight） -->
+            <StackPanel Spacing="6">
+                <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Foreground="#FF9FB6D6"
+                           Text="① Hero 槽（1010 × 16 DIP，确定性序列驱动）"/>
+                <Grid Width="1010" Height="{StaticResource PCMigImmersiveProgressHostHeight}" HorizontalAlignment="Left">
+                    <controls:ImmersiveTransferProgress x:Name="HeroProgress" Value="0" Maximum="100"/>
+                </Grid>
+            </StackPanel>
+
+            <!-- ② 底栏 Compact 槽：同一个控件按更矮的宿主高度复用（验证 min(token, 实际高度)） -->
+            <StackPanel Spacing="6">
+                <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Foreground="#FF9FB6D6"
+                           Text="② Compact 槽（1010 × 12 DIP，静态 62.3%）"/>
+                <Grid Width="1010" Height="12" HorizontalAlignment="Left">
+                    <controls:ImmersiveTransferProgress x:Name="CompactProgress" Value="62.3" Maximum="100"/>
+                </Grid>
+            </StackPanel>
+
+            <!-- ③ 低进度几何：FillWidth < Thickness ⇒ 端帽半径必须折叠，几何不得翻折 -->
+            <StackPanel Spacing="6">
+                <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Foreground="#FF9FB6D6"
+                           Text="③ 低进度几何（0.4% / 1.5% / 100%：端帽半径折叠与满进度）"/>
+                <StackPanel Orientation="Horizontal" Spacing="18">
+                    <Grid Width="240" Height="{StaticResource PCMigImmersiveProgressHostHeight}">
+                        <controls:ImmersiveTransferProgress x:Name="EdgeTiny" Value="0.4" Maximum="100"/>
+                    </Grid>
+                    <Grid Width="240" Height="{StaticResource PCMigImmersiveProgressHostHeight}">
+                        <controls:ImmersiveTransferProgress x:Name="EdgeSmall" Value="1.5" Maximum="100"/>
+                    </Grid>
+                    <Grid Width="240" Height="{StaticResource PCMigImmersiveProgressHostHeight}">
+                        <controls:ImmersiveTransferProgress x:Name="EdgeFull" Value="100" Maximum="100"/>
+                    </Grid>
+                    <!--
+                        表面实验（PHASE D 取证用）：把控件放在一个**暗红**父容器上，且 Value=0（不画填充）。
+                        若控件画布是透明的，这一格应当呈现暗红；若呈现浅色，则 Win2D 交换链不是透明的。
+                        ★ 2026-10-05 结论：本格实测 #1E2A3A，与离屏自检的轨道色一致 ⇒ 控件表面正常，
+                          当轮的"轨道被漂白"读数是**测量错误**（把上一轮的窗口原点套到新一轮截图上）。
+                    -->
+                    <Border x:Name="SurfaceHost" Background="#FF7A1F1F" Width="240"
+                            Height="{StaticResource PCMigImmersiveProgressHostHeight}">
+                        <controls:ImmersiveTransferProgress x:Name="SurfaceTest" Value="0" Maximum="100"/>
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+
+            <!-- ④ 状态机静态对照：Paused / Holding / Warning / Failed 各一个静态实例 -->
+            <StackPanel Spacing="6">
+                <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Foreground="#FF9FB6D6"
+                           Text="④ 状态对照（Paused / Holding / Warning / Failed @ 47.3%）"/>
+                <StackPanel Orientation="Horizontal" Spacing="18">
+                    <Grid Width="240" Height="{StaticResource PCMigImmersiveProgressHostHeight}">
+                        <controls:ImmersiveTransferProgress x:Name="StatePaused" Value="47.3" Maximum="100"
+                                                            ProgressState="Paused"/>
+                    </Grid>
+                    <Grid Width="240" Height="{StaticResource PCMigImmersiveProgressHostHeight}">
+                        <controls:ImmersiveTransferProgress x:Name="StateHolding" Value="47.3" Maximum="100"
+                                                            ProgressState="Holding"/>
+                    </Grid>
+                    <Grid Width="240" Height="{StaticResource PCMigImmersiveProgressHostHeight}">
+                        <controls:ImmersiveTransferProgress x:Name="StateWarning" Value="47.3" Maximum="100"
+                                                            ProgressState="Warning"/>
+                    </Grid>
+                    <Grid Width="240" Height="{StaticResource PCMigImmersiveProgressHostHeight}">
+                        <controls:ImmersiveTransferProgress x:Name="StateFailed" Value="47.3" Maximum="100"
+                                                            ProgressState="Failed"/>
+                    </Grid>
+                </StackPanel>
+            </StackPanel>
+
+            <!-- ⑤ 降级档对照：High / Balanced / Reduced（办公机 / 核显 / 远程会话） -->
+            <StackPanel Spacing="6">
+                <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" Foreground="#FF9FB6D6"
+                           Text="⑤ 效果档对照（High / Balanced / Reduced @ 62.3%）"/>
+                <StackPanel Orientation="Horizontal" Spacing="18">
+                    <Grid Width="240" Height="{StaticResource PCMigImmersiveProgressHostHeight}">
+                        <controls:ImmersiveTransferProgress x:Name="QualityHigh" Value="62.3" Maximum="100"
+                                                            EffectsQuality="High"/>
+                    </Grid>
+                    <Grid Width="240" Height="{StaticResource PCMigImmersiveProgressHostHeight}">
+                        <controls:ImmersiveTransferProgress x:Name="QualityBalanced" Value="62.3" Maximum="100"
+                                                            EffectsQuality="Balanced"/>
+                    </Grid>
+                    <Grid Width="240" Height="{StaticResource PCMigImmersiveProgressHostHeight}">
+                        <controls:ImmersiveTransferProgress x:Name="QualityReduced" Value="62.3" Maximum="100"
+                                                            EffectsQuality="Reduced"/>
+                    </Grid>
+                </StackPanel>
+            </StackPanel>
+
+            <TextBlock x:Name="ProbeStatusText" Style="{StaticResource PCMigTextLogLine}"
+                       Foreground="#FF7CFF9B" FontFamily="Consolas"
+                       Text="PROBE boot"/>
+            <TextBlock x:Name="ProbeDiagText" Style="{StaticResource PCMigTextLogLine}"
+                       Foreground="#FF7CFF9B" FontFamily="Consolas"
+                       Text="—"/>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

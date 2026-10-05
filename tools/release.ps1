@@ -31,9 +31,15 @@ function Patch($rel, $pattern, $del) {
   $t = [IO.File]::ReadAllText($p, $enc)
   $new = [regex]::Replace($t, $pattern, $del)
   if ($new -eq $t) {
-    # 已经是目标版本（重跑/上次中断）就不算错；真正的“没改成功”由后面的声明式自查兜住
-    Write-Output ('   ' + $rel + ' 已是目标版本，跳过')
-    return
+    # 已经是目标版本（重跑/上次中断）就不算错。
+    # ★ 2026-10-06 修复 ★ 但必须先确认文件里**真的**含有目标串：若 <Version> 这类节点根本不存在，
+    #   正则匹配不到 ⇒ $new -eq $t 同样成立，旧写法会把"没改成"静默放过、只打印"已是目标版本"
+    #   （v0.5.0 首发时 PCMig.WinUI.csproj 缺 <Version> 节点，正是这样被跳过、随后自查才报错中止）。
+    if ($t.Contains($del)) {
+      Write-Output ('   ' + $rel + ' 已是目标版本，跳过')
+      return
+    }
+    Abort ('版本号写入失败：' + $rel + ' 里没有可替换的目标（期望出现「' + $del + '」）。请先补上对应节点再发版。')
   }
   [IO.File]::WriteAllText($p, $new, $enc)
   Write-Output ('   已改 ' + $rel)
@@ -94,6 +100,8 @@ $issPath = Join-Path $repo 'installer\pcmig.iss'
 $old = ([regex]::Match([IO.File]::ReadAllText($issPath, (EncOf $issPath)), '#define MyAppVersion "([0-9.]+)"')).Groups[1].Value
 if ($old -eq '') { Abort '读不出 installer\pcmig.iss 里的当前版本号' }
 Patch 'src\PCMig.Gui\PCMig.Gui.csproj' '<Version>[0-9.]+</Version>' ('<Version>' + $Version + '</Version>')
+Patch 'src\PCMig.WinUI\PCMig.WinUI.csproj' '<Version>[0-9.]+</Version>' ('<Version>' + $Version + '</Version>')
+Patch 'src\PCMig.WinUI\MainWindow.xaml' 'Title="PCMig 迁移工具 · v[0-9.]+"' ('Title="PCMig 迁移工具 · v' + $Version + '"')
 Patch 'src\PCMig.Cli\PCMig.Cli.csproj' '<Version>[0-9.]+</Version>' ('<Version>' + $Version + '</Version>')
 Patch 'src\PCMig.Core\PCMig.Core.csproj' '<Version>[0-9.]+</Version>' ('<Version>' + $Version + '</Version>')
 Patch 'src\PCMig.Gui\MainWindow.xaml' 'Title="PCMig 迁移工具 v[0-9.]+"' ('Title="PCMig 迁移工具 v' + $Version + '"')
@@ -104,6 +112,8 @@ Patch 'installer\pcmig.iss' 'VersionInfoVersion=[0-9.]+\.0' ('VersionInfoVersion
 # 注意不能用“文件里不能出现旧版本号”来判——README/文档里出现历史版本号是正常的。
 $expect = @(
   [pscustomobject]@{ F = 'src\PCMig.Gui\PCMig.Gui.csproj'; P = ('<Version>' + $Version + '</Version>') },
+[pscustomobject]@{ F = 'src\PCMig.WinUI\PCMig.WinUI.csproj'; P = ('<Version>' + $Version + '</Version>') },
+  [pscustomobject]@{ F = 'src\PCMig.WinUI\MainWindow.xaml'; P = ('Title="PCMig 迁移工具 · v' + $Version + '"') },
   [pscustomobject]@{ F = 'src\PCMig.Cli\PCMig.Cli.csproj'; P = ('<Version>' + $Version + '</Version>') },
   [pscustomobject]@{ F = 'src\PCMig.Core\PCMig.Core.csproj'; P = ('<Version>' + $Version + '</Version>') },
   [pscustomobject]@{ F = 'src\PCMig.Gui\MainWindow.xaml'; P = ('Title="PCMig 迁移工具 v' + $Version + '"') },
@@ -121,7 +131,40 @@ Write-Output ('   版本号 ' + $old + ' → ' + $Version + '，' + $expect.Coun
 Get-Process PCMig -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 Log '生成 更新日志.txt（记事本可直接打开）'
-python (Join-Path $repo 'tools\md2txt.py')
+# ★ 2026-10-06 修复 ★ 不能直接写 `python`：本机 PATH 上的 python.exe / python3.exe 是
+#   Microsoft Store 的"应用执行别名"存根（C:\Users\User\AppData\Local\Microsoft\WindowsApps\），
+#   调用它只会打印 "Python was not found; run without arguments to install from the Microsoft Store..."
+#   并返回非 0，**却让脚本继续往下跑** —— 结果是 docs\更新日志.txt 根本没被重新生成，
+#   紧随其后的闸门报「更新日志.txt 里没有 vX.Y.Z」而中止（v0.5.0 首发就卡在这里）。
+#   这里按「环境变量 PCMIG_PYTHON → py -3 → 真实 python」顺序解析解释器；都不行就明确中止。
+#   注意：py.exe 本身也在 WindowsApps 目录下，但它是**可用的**启动垫片（实测 `py -3` = Python 3.14.7），
+#   因此只把 python / python3 的 WindowsApps 存根排除掉。
+$pyExe = $null; $pyArg = @()
+$cands = @()
+if ($env:PCMIG_PYTHON) { $cands += ,@($env:PCMIG_PYTHON, @()) }
+$cands += ,@('py', @('-3'))
+$cands += ,@('python', @())
+foreach ($c in $cands) {
+  $exe = $c[0]; $extra = $c[1]
+  if ($exe -like '*\*') {
+    if (-not (Test-Path $exe)) { continue }
+  } else {
+    $cmd = Get-Command $exe -ErrorAction SilentlyContinue
+    if (-not $cmd) { continue }
+    $exe = $cmd.Source
+    if ($exe -like '*\WindowsApps\*' -and $c[0] -ne 'py') { continue }
+  }
+  try {
+    $ver = & $exe @extra --version 2>&1
+    if ($LASTEXITCODE -eq 0 -and (($ver -join ' ') -match 'Python 3')) { $pyExe = $exe; $pyArg = $extra; break }
+  } catch { }
+}
+if (-not $pyExe) {
+  Abort '找不到可用的 Python 3 解释器（PATH 上的 python 是 Microsoft Store 别名存根）。请把环境变量 PCMIG_PYTHON 指向真实 python.exe 后重试。'
+}
+Write-Output ('   使用 Python：' + $pyExe + ' ' + ($pyArg -join ' '))
+& $pyExe @pyArg (Join-Path $repo 'tools\md2txt.py')
+if ($LASTEXITCODE -ne 0) { Abort ('md2txt.py 执行失败（退出码 ' + $LASTEXITCODE + '）—— 更新日志.txt 未重新生成，发版中止。') }
 $txtPath = Join-Path $repo 'docs\更新日志.txt'
 if (-not (Test-Path $txtPath)) { Abort '更新日志.txt 未生成' }
 $bytes = [IO.File]::ReadAllBytes($txtPath)
@@ -129,16 +172,27 @@ if (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) {
 if (([IO.File]::ReadAllText($txtPath, [Text.Encoding]::UTF8)) -notmatch [regex]::Escape($Version)) { Abort ('更新日志.txt 里没有 v' + $Version) }
 
 Log 'publish（CLI + GUI，单文件自包含）'
-Remove-Item (Join-Path $repo 'dist\cli'), (Join-Path $repo 'dist\gui'), (Join-Path $repo 'dist\app') -Recurse -Force -ErrorAction SilentlyContinue
+Log 'publish（WinUI 主界面 + CLI + 经典回退，自包含）'
+Remove-Item (Join-Path $repo 'dist\cli'), (Join-Path $repo 'dist\gui'), (Join-Path $repo 'dist\winui'), (Join-Path $repo 'dist\app') -Recurse -Force -ErrorAction SilentlyContinue
 dotnet publish (Join-Path $repo 'src\PCMig.Cli\PCMig.Cli.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -o (Join-Path $repo 'dist\cli') 2>&1 | Select-String -Pattern 'error|-> ' | Select-Object -First 6
+# ★ v0.5.0（2026-10-06）★ 主界面换成 WinUI 3。
+#   为什么 WinUI 不能像旧 WPF 那样压成单文件：它是 unpackaged + WindowsAppSDK/Win2D 自包含应用，
+#   原生组件（Microsoft.WindowsAppRuntime.* / Microsoft.Graphics.Canvas*.dll / resources.pri 等）
+#   必须与 exe 同目录并存，压成单文件会在启动时解压失败或找不到原生依赖。
+#   ⇒ 整目录 publish 后**整棵树**进包；安装包与 Portable 都以目录形态交付。
+dotnet publish (Join-Path $repo 'src\PCMig.WinUI\PCMig.WinUI.csproj') -c Release -r win-x64 --self-contained true -p:Platform=x64 -o (Join-Path $repo 'dist\winui') 2>&1 | Select-String -Pattern 'error|-> ' | Select-Object -First 6
+if (-not (Test-Path (Join-Path $repo 'dist\winui\PCMig.WinUI.exe'))) { Abort 'WinUI 未产出' }
+# 经典 WPF 界面保留为**回退**（单文件自包含），包内命名 PCMig-classic.exe：
+#   WinUI 在极旧系统/受限显卡上万一起不来，用户仍有可用的经典界面。
 dotnet publish (Join-Path $repo 'src\PCMig.Gui\PCMig.Gui.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IncludeAllContentForSelfExtract=true -o (Join-Path $repo 'dist\gui') 2>&1 | Select-String -Pattern 'error|-> ' | Select-Object -First 6
-if (-not (Test-Path (Join-Path $repo 'dist\gui\PCMig.exe'))) { Abort 'GUI 未产出' }
+if (-not (Test-Path (Join-Path $repo 'dist\gui\PCMig.exe'))) { Abort '经典界面未产出' }
 
 Log '组装 dist\app'
 $app = Join-Path $repo 'dist\app'
 New-Item $app -ItemType Directory | Out-Null
-Copy-Item (Join-Path $repo 'dist\gui\PCMig.exe') (Join-Path $app 'PCMig.exe')
+Copy-Item -Path (Join-Path $repo 'dist\winui\*') -Destination $app -Recurse -Force
 Copy-Item (Join-Path $repo 'dist\cli\pcmig.exe') (Join-Path $app 'pcmig-cli.exe')
+Copy-Item (Join-Path $repo 'dist\gui\PCMig.exe') (Join-Path $app 'PCMig-classic.exe')
 Copy-Item (Join-Path $repo 'matrix') (Join-Path $app 'matrix') -Recurse
 Copy-Item $umPath (Join-Path $app '使用说明.txt')
 Copy-Item $txtPath (Join-Path $app '更新日志.txt')
@@ -152,23 +206,26 @@ if (-not (Test-Path $setup)) { Abort '安装包未生成' }
 
 Log '交付 + 逐文件哈希比对'
 New-Item $delivery -ItemType Directory -Force | Out-Null
-New-Item (Join-Path $delivery 'Portable') -ItemType Directory -Force | Out-Null
-New-Item (Join-Path $delivery 'Portable\matrix') -ItemType Directory -Force | Out-Null
-New-Item (Join-Path $workCopy 'matrix') -ItemType Directory -Force | Out-Null
-Copy-Item $setup (Join-Path $delivery ('PCMigSetup-' + $Version + '.exe')) -Force
-foreach ($f in @('PCMig.exe', 'pcmig-cli.exe', '使用说明.txt', '更新日志.txt')) {
-  Copy-Item (Join-Path $app $f) (Join-Path $delivery ('Portable\' + $f)) -Force
-  Copy-Item (Join-Path $app $f) (Join-Path $workCopy $f) -Force
+# Portable 是发版脚本自己的产物目录：先清空再铺，避免上一版的旧 exe 与新版混在一起。
+# （交付区根目录并列的历史安装包 PCMigSetup-*.exe **不动**，用户要求全量保留。）
+$portable = Join-Path $delivery 'Portable'
+if (Test-Path $portable) { Remove-Item $portable -Recurse -Force }
+New-Item $portable -ItemType Directory -Force | Out-Null
+# Portable 与工作副本都收**整棵 app 树**（WinUI 必须与其原生组件同目录才能启动）
+Get-ChildItem $app -Force | ForEach-Object {
+  Copy-Item $_.FullName $portable -Recurse -Force
+  Copy-Item $_.FullName $workCopy -Recurse -Force
 }
-Copy-Item (Join-Path $app 'matrix\migration-matrix.yaml') (Join-Path $delivery 'Portable\matrix\migration-matrix.yaml') -Force
-Copy-Item (Join-Path $app 'matrix\migration-matrix.yaml') (Join-Path $workCopy 'matrix\migration-matrix.yaml') -Force
-Copy-Item (Join-Path $delivery 'Portable\使用说明.txt') (Join-Path $delivery '使用说明.txt') -Force
-Copy-Item (Join-Path $delivery 'Portable\更新日志.txt') (Join-Path $delivery '更新日志.txt') -Force
+Copy-Item $setup (Join-Path $delivery ('PCMigSetup-' + $Version + '.exe')) -Force
+Copy-Item (Join-Path $portable '使用说明.txt') (Join-Path $delivery '使用说明.txt') -Force
+Copy-Item (Join-Path $portable '更新日志.txt') (Join-Path $delivery '更新日志.txt') -Force
 $pairs = @(
-  [pscustomobject]@{ Src = (Join-Path $app 'PCMig.exe'); Dst = (Join-Path $delivery 'Portable\PCMig.exe') },
-  [pscustomobject]@{ Src = (Join-Path $app 'PCMig.exe'); Dst = (Join-Path $workCopy 'PCMig.exe') },
-  [pscustomobject]@{ Src = (Join-Path $app 'pcmig-cli.exe'); Dst = (Join-Path $delivery 'Portable\pcmig-cli.exe') },
+  [pscustomobject]@{ Src = (Join-Path $app 'PCMig.WinUI.exe'); Dst = (Join-Path $portable 'PCMig.WinUI.exe') },
+  [pscustomobject]@{ Src = (Join-Path $app 'PCMig.WinUI.exe'); Dst = (Join-Path $workCopy 'PCMig.WinUI.exe') },
+  [pscustomobject]@{ Src = (Join-Path $app 'pcmig-cli.exe'); Dst = (Join-Path $portable 'pcmig-cli.exe') },
   [pscustomobject]@{ Src = (Join-Path $app 'pcmig-cli.exe'); Dst = (Join-Path $workCopy 'pcmig-cli.exe') },
+  [pscustomobject]@{ Src = (Join-Path $app 'PCMig-classic.exe'); Dst = (Join-Path $portable 'PCMig-classic.exe') },
+  [pscustomobject]@{ Src = (Join-Path $app 'PCMig-classic.exe'); Dst = (Join-Path $workCopy 'PCMig-classic.exe') },
   [pscustomobject]@{ Src = $setup; Dst = (Join-Path $delivery ('PCMigSetup-' + $Version + '.exe')) },
   [pscustomobject]@{ Src = (Join-Path $app '更新日志.txt'); Dst = (Join-Path $delivery '更新日志.txt') },
   [pscustomobject]@{ Src = (Join-Path $app '使用说明.txt'); Dst = (Join-Path $delivery '使用说明.txt') }
@@ -186,11 +243,22 @@ if ($mirror) {
   Write-Output '   未配置源码镜像（$mirror 为空），跳过镜像步骤'
 }
 
-Log '启动 GUI 自检'
-$pr = Start-Process (Join-Path $workCopy 'PCMig.exe') -PassThru
+Log '启动 WinUI 自检'
+$pr = Start-Process (Join-Path $workCopy 'PCMig.WinUI.exe') -PassThru
 Start-Sleep -Seconds 22
-if ($pr.HasExited) { Abort ('GUI 闪退，退出码 ' + $pr.ExitCode) }
-Write-Output ('   GUI PID=' + $pr.Id + '，标题应为 PCMig 迁移工具 v' + $Version)
+if ($pr.HasExited) { Abort ('WinUI 闪退，退出码 ' + $pr.ExitCode) }
+Write-Output ('   WinUI PID=' + $pr.Id + '，标题应为 PCMig 迁移工具 · v' + $Version)
+
+Log '启动经典回退界面自检'
+$classic = Join-Path $workCopy 'PCMig-classic.exe'
+$pc = Start-Process $classic -PassThru
+Start-Sleep -Seconds 14
+if ($pc.HasExited) {
+  Write-Output ('   注意：经典回退界面自检闪退（退出码 ' + $pc.ExitCode + '）——主界面是 WinUI，此项仅作回退可用性记录')
+} else {
+  Write-Output ('   经典回退界面 PID=' + $pc.Id)
+  Get-Process -Id $pc.Id -ErrorAction SilentlyContinue | Stop-Process -Force
+}
 
 Write-Output ''
 Write-Output ('=== v' + $Version + ' 打包完成，发版后请做这三项验证 ===')

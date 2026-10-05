@@ -13,6 +13,16 @@
     <SelfContained>true</SelfContained>
     <Platforms>x64</Platforms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- ★ v0.5.0 起 ★ 发版脚本 tools\release.ps1 会按 <Version> 写入版本号并做声明式自查，
+         因此该节点**必须存在**。v0.5.0 首次发版时此节点缺失，正则匹配不到 ⇒ 被误判为
+         "已是目标版本"跳过 ⇒ 自查失败中止发版。 -->
+    <Version>0.5.0</Version>
+    <!-- ★ v0.5.0 修复 ★ 应用图标：WinUI 工程此前**没有** <ApplicationIcon>，
+         编译出的 exe 不带图标资源 ⇒ 任务栏 / 资源管理器显示 Windows 的"找不到图标"默认占位。
+         图标与经典桌面工程**同源**（从其 Assets 复制到本工程 Assets\，不改动源文件）。
+         注意：本文件任何位置都不得出现其它 PCMig 子工程名（契约测试 WinUiProject_ReferencesOnlySanctionedProjects
+         会扫描整份 csproj，注释里写出来同样会命中失败 —— 曾因此让发版闸门 0/5 红）。 -->
+    <ApplicationIcon>Assets\pcmig.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
@@ -20,6 +30,15 @@
     <!-- 固定 Stable 版本：避免浮动版本在企业网络下的长时间解析/大包重试。 -->
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" PrivateAssets="all" />
+    <!--
+      ★ Round-3 PHASE C（执行书 §12）★ Win2D：PCMig Immersive Transfer Progress 的**唯一**绘制后端。
+      为什么必须用它：新进度条每帧要画 Track / Fill / Head Halo / Push Band(双层) / 粒子 / Ripple / Border 九层，
+      并只在 Fill Capsule 内剪裁。用"几十个 XAML Ellipse + 几十个 Storyboard"会带来数十个 UI 元素与
+      每条动画各自的时钟（正是上一轮"抽动"的根源之一），也无法在每帧做局部光学耦合。
+      约束：只用官方包、**固定版本**（禁止浮动）、与 net8.0-windows10.0.19041.0 + WindowsAppSDK 2.5.1 +
+      unpackaged/self-contained 组合；restore/build 一旦失败立即停下报告，不允许退化成 XAML 元素堆。
+    -->
+    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\PCMig.Core\PCMig.Core.csproj" />
@@ -28,6 +47,12 @@
     <None Include="..\..\matrix\migration-matrix.yaml" Link="matrix\migration-matrix.yaml" CopyToOutputDirectory="PreserveNewest" />
     <!-- 应用内更新日志：唯一内容源仍是 docs\更新日志.md，只嵌入供 WinUI 只读呈现。 -->
     <EmbeddedResource Include="..\..\docs\更新日志.md" LogicalName="PCMig.WinUI.Assets.CHANGELOG.md" />
+    <!-- ★ v0.5.0 修复 ★ 应用图标必须随发布目录一起输出：
+         exe 内嵌图标（ApplicationIcon）决定任务栏/资源管理器显示，
+         而同目录的 pcmig.ico 供窗口 AppWindow.SetIcon 与安装程序使用。 -->
+    <Content Include="Assets\pcmig.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\pcmig-64.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\pcmig-256.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <!--
     WinUI 3 已知缺口：self-contained publish 不会把应用自身的资源索引 <App>.pri 带进发布目录，

@@ -108,19 +108,16 @@ public readonly record struct ResponsiveLayout(
         _ => 110,
     };
 
-    /// <summary>底栏进度轨道的**最小宽**（FIX BATCH 5：Wide = 160、Normal = 120、Compact = 96；与 MainWindow.xaml 的 MinWidth 逐字一致）。
-    /// 进度轨道所在的是底栏唯一的弹性列（第 2 列 <c>*</c>），所以运行时它通常比这个值更宽：
-    /// canonical 1424 下约 280 DIP，Wide 档下界 1320 下约 176，Compact 下界 960 下约 134。
-    /// 这里给的是**下限**，保底不让进度条在窄档位消失（§36）。
-    /// 之所以改成下限而不是固定宽：把中段隔离列归零后，固定宽之和在 Wide 档的非 canonical 宽度（如 1342）会溢出，
-    /// 最右的"恢复"按钮被窗口裁掉（UIA 实测 w=62 而非 124，违反 §8「窗口宽度固定时按钮永远在可视范围」）。
-    /// 弹性列让轨道吸收余量，任何宽度都不再溢出，且右端动作区左边界 X 仍与文本内容无关（验收：漂移 ≤1 px）。</summary>
-    public double FooterProgressWidth => Mode switch
-    {
-        LayoutMode.Wide => 160,
-        LayoutMode.Normal => 120,
-        _ => 96,
-    };
+/// <summary>底栏进度宿主的**最小宽**：本轮改为 **0（无硬下限）**。
+    /// 为什么取消原来的 160 / 120 / 96：进度轨道所在的是底栏唯一的弹性列（第 2 列 <c>*</c>），
+    /// 在 canonical 1424 的完整预算下该列**只剩约 138 DIP**（1424 − Shell 外边距 40 − BottomBar 边框 2
+    /// − BottomBar 内边距 44 − 固定内容 1056 − 8 处列距 144）。原来的 160 下限比槽位本身还宽 22 DIP
+    /// ⇒ 宿主越出槽位、右端胶囊圆弧被裁成直角（用户真机判词 C）。
+    /// 现在宿主取 <c>MinWidth = 0</c> + <c>HorizontalAlignment = Stretch</c>，宽度完全由星号列决定：
+    /// 宽度为 0 时控件安全地不绘制，正常窗口范围内仍有可用宽度。
+    /// 与 MainWindow.xaml 的 <c>MinWidth</c> 保持**同一个事实来源**（两边都是 0），
+    /// 不留"XAML 0 / 运行时 160"的双重事实。</summary>
+    public double FooterProgressWidth => 0d;
 
     /// <summary>FIX BATCH 5（§8）：底栏四块数字区的**保留宽**。
     /// 这些值在运行过程中会在很宽的区间里变化（"9 KB/s" ↔ "112.17 MB/s"、"—" ↔ "1 小时 23 分"、

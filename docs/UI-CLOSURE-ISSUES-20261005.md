@@ -52,6 +52,11 @@
 - **待判**：是 `LineHeight` 不足导致 ascent 裁切，还是 `SecondarySurface` 的表面层（边缘高光 / 内阴影 / ESL 浮雕层）覆盖内容顶部（用户原话「有个遮罩什么玩意儿」）。**必须像素测量后定因，禁止四张卡各加一个 Magic Margin（PMML-R10）**。
 - **要求**：共享 `MetricValueStyle` / Token；100% / 125% / 150% DPI 无顶裁切、无底裁切、视觉中心与基线一致。
 - **分类**：A（修法）+ **B（PMML: Metric Card Typography / Optical Baseline / No Text Clipping）**。
+- **★ Round-2 PHASE 5 / 5B 定因结论（2026-10-05，真机逐列首墨迹测量）★**
+  - 候选根因**逐一排除**：`LineHeight` 手段无效（自然行高 25.4 DIP < 旧写死的 32，加行高只会让行盒更大）；父级布局/裁切不存在（6 变体 × 7 样本 × 5 档离屏 DPI 下 `anyClipped` 全 False，生产变体净空 9–10 物理像素）；字重回退曾被认为"不改变墨迹盒"（WPF `FormattedText.BuildGeometry()` 六字重度量完全相同），但**真机像素测量否定了该推断**。
+  - **真正原因**：字体轮廓在**低字号下的栅格化**。`Microsoft YaHei UI` FontSize 20 的字符 `2`：`Normal(400)` 顶部墨迹跨 **13 行**、`SemiBold(600)` 只剩 **12 行且首行覆盖 60% 墨迹列**、`Bold(700)` 达 **70%**；同一字符在 FontSize 96 下跨 **64–68 行（ratio 0.24–0.27）** ⇒ 轮廓完好，是粗笔画在 20 px 下被 grid-fitting 把弧顶吸附到同一像素行。
+  - 而生产样式请求的正是 `SemiBold(600)`（本机 `Microsoft YaHei UI` 只注册 290/400/700，无该字面）⇒ **改 `FontWeight="Normal"`**，改后真机轮廓与探针 `Normal(400)` **逐字段一致**（`2` 的 ratio 0.6000→0.5000、`S` 0.6667→0.5556）。`Medium(500)` 与 `Normal(400)` 真机完全等价，故取 `Normal`。
+  - **诚实口径**：这是**渐进改善**，不是"从削平变回圆弧"的戏剧性变化；生产卡本体的截图仍缺（`RenderTargetBitmap` 与 `Translation` 不兼容）。详见 `UI-CLOSURE-ROUND2-REPORT-20261005.md` 的 E5 / E5B。
 
 ### UI-05 Footer 动态数值不得推动 Action Buttons — B（回归）
 - **证据**：用户指令 §13、§15；`MainWindow.xaml:122` 底栏 9 列 Grid（Auto, Auto, *, Auto, Auto, 0, 0, Auto, Auto）。
@@ -167,3 +172,37 @@ Motion：真实 running 进度 / pause / resume / complete —— **录制连续
 
 **构建**：`dotnet build PCMig.sln -c Release` ⇒ 成功，**0 error / 3 warning**（= 基线 `PCMigSurface.xaml:53/54/56` WMC1506）。
 **未结项**：全部 14 条均需按 U6 清单做**人工视觉复验**（用户主导，见 U6 节）。
+---
+
+## Round-2 追加（2026-10-05）— 用户视频证伪后的返修状态
+
+> 来源：用户 Round-2 Fix Plan + 视频 `20261005-0330-07.1223683.mp4`（98.67 s / 1422x880 / 30 fps）+ 新标注截图。
+> 完整报告：`docs\UI-CLOSURE-ROUND2-REPORT-20261005.md`。
+> **视频证据凌驾于本表上一轮的任何 "FIXED" 标注**；本表内编号（UI-01…UI-14）按施工顺序 U1–U4 重排，与用户指令正文条目顺序不完全对应 ⇒ 引用时「编号 + 描述性标题」并列。
+
+### 状态总览
+
+| 问题（按描述性标题） | 上一轮标注 | Round-2 判定 | 依据 |
+|---|---|---|---|
+| 底栏百分比被截断为 `15....`（UI-01） | FIXED | **VERIFIED FIXED** | 契约测试 + 底栏呈现节拍 |
+| 暂停后整体视觉归零、「剩余 100% 未传」（UI-02/UI-03 暂停归零） | FIXED | **VERIFIED FIXED** | 真机 30 样本恒 99.9%（`phStop\stop-samples.csv`） |
+| 提示卡内容驱动变高 / 文字堆叠 / 出现滚动条（UI-07/08/09） | FIXED | **VERIFIED FIXED** | 三种内容状态 `HintScroll h=57` 完全一致；四通道满载溢出场景仍 NOT VISUALLY VERIFIED |
+| 进度条「平滑补间」肉眼不可见、像变粗（UI-05） | FIXED（实为假） | **VERIFIED FIXED** | 601 帧：163 个前沿位置、单帧最大跳 24 px、无 >20 px 回退 |
+| 粒子 / Sweep / Glow 肉眼无效果（UI-06） | FIXED（实为假） | **VERIFIED FIXED**（真根因：负 DelayTime 致装饰层静默降级为空） | Running 期探针 sweep/glow/particles/marker 全 True |
+| 四张 Metric Card 大号数值顶部像被削（IMG5 / UI-03 数值） | FIXED（实为假，且旧结论"黑块遮挡"被撤销） | **NOT VISUALLY VERIFIED / OPEN** | 隔离探针 6 变体 × 7 样本 × 5 档 DPI 全部 `anyClipped=False`，生产变体净空最大（9–10 px）；用户真机所见尚未对齐 |
+| 顶部摘要三组不共面（Round-2 新发现） | 未登记 | **VERIFIED FIXED** | 宽窗 maxΔ 0.5 DIP、窄窗 maxΔ 1.0 DIP（判据 ≤2） |
+| Stop（可恢复中断）把主百分比重置为 0.0%（用户视频 43.7→44.0 s） | 未登记（上一轮 floor 只覆盖 Paused） | **VERIFIED FIXED** | Stop 后 30 样本恒 99.9%、Resume 后 16 样本恒 99.9%、`UnexpectedProgressRegression` 日志 0 条 |
+
+### 代码级纠正（本轮新增的"上一轮假结论"更正）
+
+1. **UI-06 假结论**：上一轮报告"粒子/Sweep/Glow 已实现"不成立 —— `ProgressMotionDriver.StartParticleLoops()` 使用**负 DelayTime** 被 Composition 拒绝，`CreateDecorations()` 抛异常后被构造函数的 `catch` **静默降级为空**，装饰层在屏幕上根本不存在。现改为惰性创建 + 正相位。
+2. **UI-05 假结论**：上一轮"已实现平滑补间"不成立 —— 只是把条变粗。真因是"采样频率 ≠ 信息频率"（Core 真值约 2 s 变一次）且文本与条各读不同来源。
+3. **IMG5 旧结论（黑块遮挡）撤销口径**：本轮不再以"用户看错"结案，改为隔离探针分类（§PHASE 5）；分类结果为**非字体层、非父级布局层**，故保持 OPEN 而不是宣称已修。
+4. **文档缺陷更正**：`src\PCMig.WinUI\Themes\Typography.xaml` 中 `PCMigTextStatValue` 上方注释曾声称 `UseLayoutRounding=True`，实际该样式从未设置它；注释已按探针结论重写（**只改注释，未改属性值**）。
+
+### 未关闭项（沿用报告 F 节口径）
+
+- Metric 数值顶部被削 ⇒ **OPEN**（需用户提供其截图 DPI/缩放与具体数值以复现）
+- 提示卡四通道满载内部滚动 ⇒ CODE FIXED / NOT VISUALLY VERIFIED
+- 顶部摘要双行状态句真机截图 ⇒ CODE FIXED / NOT VISUALLY VERIFIED
+- 视觉厚度 token 7 vs 8 DIP 的参考图像素 A/B 定档 ⇒ CODE FIXED（当前 8）

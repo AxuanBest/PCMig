@@ -51,4 +51,43 @@
     <GradientStop Color="#4D46618C" Offset="0.45"/>
     <GradientStop Color="#B33A5478" Offset="1"/>
   </LinearGradientBrush>
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       ★ Round-3 PHASE C（执行书 §22）★ PCMig Immersive Transfer Progress 调色板。
+       ★ 为什么必须是 Theme Resource（§22 末句）★ 颜色**不允许**硬编码散落在 Renderer 里，
+         否则"深蓝灰不纯黑 / 亮芯不纯白"这类光学口径会各自漂移、也无法统一换肤。
+         Renderer 只按 key 取值；资源缺失时有登记在控件里的兜底色（保证不会画不出来）。
+       ★ 语义分层（§8 + R31/R32/R34）★ 这些颜色**只**影响光学呈现：
+         Track = 轨道材质（中性炭黑/暖黑，**没有外层描边、没有全宽硬边**）；
+         Chroma = Track-Space 色场（左 Aqua/Cyan → 中青蓝 → 后电蓝；进度只负责"逐渐揭示"）；
+         FillLight = 纵向极轻材质修饰（不是色彩主导）；
+         Head Halo / Inner = **体积光场**的两层颜色（连续衰减，**不是描边色**）；
+         Band Outer / Core = Push Band 的"双层光压"（外层宽而淡、亮芯窄而稍亮）；
+         Particle = 数据材质微粒。
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <!--
+       ★ Round-3 视觉纠偏（R31 / R32 / R34）★
+       与上一版的实质差异：
+         · Track 改为中性炭黑/暖黑方向 —— 不再是被用户读成"蓝灰外壳"的蓝调，且**不再有外层描边**；
+         · Fill 不再是一支固定的纵向蓝渐变，而是 **Track-Space Chroma Field** 的 6 个色停靠点
+           （左 Aqua/Cyan → 中青蓝 → 后电蓝）；进度增长只是"逐渐揭示"这个色场；
+         · FillLight 只是极轻的纵向材质修饰（真实强度由 ImmersiveProgressParameters.FillShadeOpacity 施加）；
+         · Head 只有**体积光场**的两层颜色（外层青 / 内层白青），**不再有 1 DIP 锐光描边**；
+         · 已删除 Border / TrackEdge / FillTop / FillBottom / HeadRim 这些只服务旧蓝条+外壳的 key。
+       颜色只从这里取；资源缺失时控件有兜底色（保证不会画不出来）。
+     -->
+  <SolidColorBrush x:Key="ImmersiveProgressTrackTopBrush" Color="#FFD6E1F8"/>
+  <SolidColorBrush x:Key="ImmersiveProgressTrackBottomBrush" Color="#FFD6E1F8"/>
+  <SolidColorBrush x:Key="ImmersiveProgressChromaStartBrush" Color="#FFA7E1DF"/>
+  <SolidColorBrush x:Key="ImmersiveProgressChromaCyanSoftBrush" Color="#FF83D5DC"/>
+  <SolidColorBrush x:Key="ImmersiveProgressChromaCyanBrush" Color="#FF55BFE5"/>
+  <SolidColorBrush x:Key="ImmersiveProgressChromaBlueBrush" Color="#FF35A2EF"/>
+  <SolidColorBrush x:Key="ImmersiveProgressChromaDeepBrush" Color="#FF1F83F7"/>
+  <SolidColorBrush x:Key="ImmersiveProgressChromaElectricBrush" Color="#FF258EF8"/>
+  <SolidColorBrush x:Key="ImmersiveProgressFillLightTopBrush" Color="#14FFFFFF"/>
+  <SolidColorBrush x:Key="ImmersiveProgressFillLightBottomBrush" Color="#10001028"/>
+  <SolidColorBrush x:Key="ImmersiveProgressHeadHaloBrush" Color="#FF9BDFFF"/>
+  <SolidColorBrush x:Key="ImmersiveProgressHeadInnerBrush" Color="#FFF0FCFF"/>
+  <SolidColorBrush x:Key="ImmersiveProgressBandOuterBrush" Color="#FFB8D8FF"/>
+  <SolidColorBrush x:Key="ImmersiveProgressBandCoreBrush" Color="#FFE8F2FF"/>
+  <SolidColorBrush x:Key="ImmersiveProgressParticleBrush" Color="#FFDCECFF"/>
 </ResourceDictionary>

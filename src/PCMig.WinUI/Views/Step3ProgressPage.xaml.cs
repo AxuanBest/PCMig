@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using PCMig.Core.Models;
 using PCMig.Core.Util;
+using PCMig.WinUI.Controls.ImmersiveProgress;
 using PCMig.WinUI.Presentation;
 
 namespace PCMig.WinUI.Views;
@@ -34,27 +35,188 @@ public sealed partial class Step3ProgressPage : UserControl
     private double _totalProgressPercent;
 
     /// <summary>
-    /// ★ UI Closure 2026-10-05（用户指令 UI-05）★ 进度条**渲染补间**驱动：真值仍由本页唯一写入者提供，
-    /// 驱动只把它在 Composition 层（GPU、InsetClip.RightInset）平滑过去，不参与任何业务判断。
+    /// ★ Round-3 PHASE E（§7/§23）★ 旧「补间驱动」与"真值像素宽"字段已从生产路径移除：
+    /// Step3 主进度条现在只有一个视觉拥有者 = <c>TotalImmersiveProgress</c>（PCMig Immersive Transfer Progress）。
+    /// 平滑不再由"每来一个目标就起一段 0.2~1.2 s 补间"完成，而由呈现协调器的**连续指数滤波**完成
+    /// （见 Presentation\ProgressPresentationCoordinator.cs，PMML-R24）；控件只负责按给定值渲染几何 + 光学层。
+    /// 旧驱动类文件冻结保留（底栏仍用其轻量补间），**本页对它的引用数为零**（由 UI05 契约锁定）。
     /// </summary>
-    private ProgressMotionDriver? _progressMotion;
-
-    /// <summary>上一次交给驱动的真值像素宽（用于识别"目标回退" ⇒ 必须 SnapTo 而不是回爬）。</summary>
-    private double _lastRenderedWidth;
 
     /// <summary>★ PHASE C-1 探针 ★ 调试覆盖层刷新定时器（仅 PCMIG_PROGRESS_DEBUG=1 时存在）。</summary>
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _debugTimer;
 
+    /// <summary>
+    /// ★ Round-2 2026-10-05（§3.3）★ 呈现节拍（80 ms = 12.5 Hz）：从 VM 的**共享呈现时间线**
+    /// 取一个视觉百分比，用它同时驱动大号百分比文本与蓝色进度条。
+    /// 为什么要一个独立节拍：真值从引擎来是**离散**的（几秒一个台阶），而"数字立刻跳到新真值、条慢慢追"
+    /// 会让人眼看到明显的不同步（用户视频 52.0 s / 54.9 s 的两次大跳）。数字与条读同一个视觉值即可消除。
+    /// </summary>
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _presentTimer;
+
+    /// <summary>
+    /// 呈现节拍间隔（毫秒）。★ Round-3 PHASE B（§15）★ 由 80 ms（12.5 Hz）改为 **16 ms（≈60 Hz 渲染帧）**：
+    /// 视觉推进现在是连续指数滤波器 <c>visual += (target-visual)*(1-exp(-k*dt))</c>，它必须**按渲染帧**求值；
+    /// 按 12.5 Hz 求值会让每帧跨过 1/3 个时间步，视觉上重新变成"一格一格挪"。
+    /// 本拍只做"取值 + 写文本 + 设条宽"（同一个 <c>VisualPercent</c>），不做任何分配。
+    /// </summary>
+    private const int PresentIntervalMs = 16;
+
+    /// <summary>
+    /// ★ Round-3 PHASE E（§7）★ 调试探针开关：环境变量 <c>PCMIG_PROGRESS_DEBUG=1</c>（或 <c>true</c>）。
+    /// 为什么本页自己读、不再借用旧驱动类的静态开关：生产路径必须与**已冻结的旧驱动**
+    /// 彻底脱钩（本页对旧驱动类的引用数为零，由 UI05 契约锁定），否则"旧视觉路线已下线"就只能靠嘴说。
+    /// 只读环境变量，绝不改变任何生产行为。
+    /// </summary>
+    private static bool ProgressDebugEnabled { get; } = ResolveProgressDebugEnabled();
+
+    private static bool ResolveProgressDebugEnabled()
+    {
+        try
+        {
+            var raw = Environment.GetEnvironmentVariable("PCMIG_PROGRESS_DEBUG");
+            return string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public Step3ProgressPage()
     {
         InitializeComponent();
-        // ★ FIX BATCH 5（§8）★ 轨道宽度变化（窗口缩放 / 密度档位切换）时必须重算填充宽度，
-        //   否则填充会停留在上一次的像素值上与真实百分比不符。写入者仍是 UpdateTotalProgressFill（唯一）。
-        TotalProgressHost.SizeChanged += (_, _) => UpdateTotalProgressFill();
-        // ★ UI Closure 2026-10-05（用户指令 UI-05）★ 填充元素常驻满宽（XAML 本地 Width="Auto" 覆盖样式里的 0），
-        //   用 Composition 的 InsetClip 表示"未完成部分"，在 GPU 上把视觉补间到真值。
-        _progressMotion = new ProgressMotionDriver(TotalProgressFill, TotalProgressHost);
+        // ★ Round-3 PHASE E（§23）★ 轨道宽度变化不再需要本页重算像素宽：ImmersiveTransferProgress 每帧按自己的
+        //   ActualWidth 求几何（Metrics.ProgressWidth = Width × Progress01），窗口缩放自然跟随。
+        //   写入者仍是 UpdateTotalProgressFill（唯一），它只写一个**百分比**，不再写像素。
+        StartPresentationTimer();
         StartDebugProbe();
+        TryExportStatCards();
+    }
+
+    /// <summary>
+    /// ★ PHASE 5B 诊断专用（PCMIG_STATCARD_EXPORT=&lt;目录&gt;）★ 把四张统计卡的**真实渲染结果**导出为 PNG，
+    /// 用于在屏幕捕获不可用的环境下取得"生产卡字形"的像素证据。
+    /// 只读环境变量、只写文件，绝不改变任何生产行为；未设变量时立即返回。
+    /// 为什么需要它：本机 SetForegroundWindow / CopyFromScreen / PrintWindow 三条路都拿不到 WinUI 3 窗口的
+    /// 真实画面（详见 Themes\Typography.xaml 的 PHASE 5B 注释），而 RenderTargetBitmap 直接渲染 XAML 视觉树，
+    /// 不受窗口遮挡、桌面合成与前台状态影响。
+    /// </summary>
+    private async void TryExportStatCards()
+    {
+        string? dir = null;
+        try { dir = Environment.GetEnvironmentVariable("PCMIG_STATCARD_EXPORT"); } catch { }
+        if (string.IsNullOrWhiteSpace(dir)) return;
+
+        await Task.Delay(2500);
+        var log = new System.Text.StringBuilder();
+        try
+        {
+            log.AppendLine("dir=" + dir);
+            log.AppendLine("statcard0=" + (StatCard0 is null ? "null" : "ok"));
+        }
+        catch { }
+        foreach (var pair in new (FrameworkElement? el, string name)[]
+                 {
+                     (StatCardsGrid, "statcards-grid"),
+                     (SpeedValueText, "value-speed"),
+                     (EtaValueText, "value-eta"),
+                     (ObjectValueText, "value-object"),
+                     (BytesValueText, "value-bytes"),
+                 })
+        {
+            try
+            {
+                if (pair.el is null) { log.AppendLine(pair.name + ": element-null"); continue; }
+                await ExportElementAsync(pair.el, dir!, pair.name);
+                log.AppendLine(pair.name + ": ok");
+            }
+            catch (Exception ex)
+            {
+                log.AppendLine(pair.name + ": EX " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        try
+        {
+            System.IO.File.WriteAllText(System.IO.Path.Combine(dir!, "export.log"), log.ToString());
+        }
+        catch { }
+    }
+
+    /// <summary>把一个元素渲染成 PNG（诊断专用；异常由调用方吞掉，绝不影响进度真值）。</summary>
+    private static async Task ExportElementAsync(FrameworkElement element, string dir, string name)
+    {
+        var rtb = new Microsoft.UI.Xaml.Media.Imaging.RenderTargetBitmap();
+        await rtb.RenderAsync(element);
+        var pixels = await rtb.GetPixelsAsync();
+        var folder = await Windows.Storage.StorageFolder.GetFolderFromPathAsync(dir);
+        var file = await folder.CreateFileAsync(name + ".png", Windows.Storage.CreationCollisionOption.ReplaceExisting);
+        using var stream = await file.OpenAsync(Windows.Storage.FileAccessMode.ReadWrite);
+        var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(
+            Windows.Graphics.Imaging.BitmapEncoder.PngEncoderId, stream);
+        encoder.SetPixelData(
+            Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
+            Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied,
+            (uint)rtb.PixelWidth,
+            (uint)rtb.PixelHeight,
+            96,
+            96,
+            System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions.ToArray(pixels));
+        await encoder.FlushAsync();
+    }
+
+    // ★ Round-3 PHASE E（§10）★ 页面侧的 ResolveProgressVisualThickness() 已删除：视觉厚度现在完全由控件
+    //   按 token PCMigImmersiveProgressThickness(12) 与端帽半径 PCMigImmersiveProgressRadius(6) 自持，
+    //   页面不再有机会在同一根进度条上写第二个厚度数字（"一个进度条只能有一个视觉拥有者"，§7）。
+
+    /// <summary>启动 16 ms 呈现节拍（失败绝不影响进度显示本身）。</summary>
+    private void StartPresentationTimer()
+    {
+        try
+        {
+            var timer = DispatcherQueue?.CreateTimer();
+            if (timer is null) return;
+            timer.Interval = TimeSpan.FromMilliseconds(PresentIntervalMs);
+            timer.IsRepeating = true;
+            timer.Tick += (_, _) => AdvancePresentationTick();
+            timer.Start();
+            _presentTimer = timer;
+        }
+        catch
+        {
+            // 呈现节拍起不来时，PushState 仍会按真值兜底写数字与条（显示正确性优先于平滑度）。
+        }
+    }
+
+    /// <summary>
+    /// ★ Round-2 2026-10-05（§3.3）★ 呈现节拍：推进共享呈现时间线并**同时**刷新大号百分比、字节与进度条。
+    /// 语义边界：视觉值只会**落后**于已确认显示真值、永不超出（协调器内部强制），也不会在真值不动时自爬；
+    ///   暂停 / 停止 / 中断 / 完成时协调器已冻结或落位，本方法照实渲染，不制造任何"假进度"。
+    /// </summary>
+    private void AdvancePresentationTick()
+    {
+        var session = _session;
+        if (session is null) return;
+
+        double visual;
+        try { visual = session.AdvancePresentation(DateTime.UtcNow); }
+        catch { return; }
+
+        var planned = session.PresentationTruth?.PlannedBytes ?? 0L;
+        TotalPercentText.Text = $"{visual:0.0}%";
+        if (planned > 0)
+        {
+            // §3.3 选 A：主进度面上的字节数与百分比**同源**，不出现"数字已到、字节还在旧值"的错位。
+            TotalBytesText.Text = $"{Format.Bytes(session.PresentationVisualBytes)} / {Format.Bytes(planned)}";
+        }
+        else if (string.IsNullOrEmpty(TotalBytesText.Text))
+        {
+            TotalBytesText.Text = session.ProgressText;
+        }
+
+        _totalProgressPercent = double.IsNaN(visual) ? 0 : Math.Clamp(visual, 0, 100);
+        UpdateTotalProgressFill();
     }
 
     /// <summary>
@@ -67,7 +229,7 @@ public sealed partial class Step3ProgressPage : UserControl
     /// </summary>
     private void StartDebugProbe()
     {
-        if (!ProgressMotionDriver.DebugEnabled) return;
+        if (!ProgressDebugEnabled) return;
         ProgressDebugPanel.Visibility = Visibility.Visible;
         try
         {
@@ -94,11 +256,13 @@ public sealed partial class Step3ProgressPage : UserControl
 
     private void UpdateDebugProbe()
     {
-        if (!ProgressMotionDriver.DebugEnabled) return;
+        if (!ProgressDebugEnabled) return;
 
         try
         {
-            var motion = _progressMotion?.DescribeDebug() ?? "PMD (none)";
+            // ★ Round-3 PHASE E ★ 旧 PMD 诊断行已下线：本页不再引用旧驱动，
+            //   进度链路的自证改由下面 headX / fillW / bandX / state 四个真实渲染量承担。
+            var motion = "PMD (removed in PHASE E)";
             var session = _session;
             var raw = session?.LastTruth;
             var shown = session?.PresentationTruth;
@@ -108,8 +272,12 @@ public sealed partial class Step3ProgressPage : UserControl
                 + $"raw: pct={raw?.Percent:0.0} displayed={raw?.DisplayedTransferredBytes ?? 0} committed={raw?.CommittedBytes ?? 0} "
                 + $"inFlight={raw?.InFlightConfirmedBytes ?? 0} src={raw?.InFlightSource.ToString() ?? "-"} retry={raw?.RetryState.ToString() ?? "-"}\n"
                 + $"display: pct={shown?.Percent:0.0} displayed={shown?.DisplayedTransferredBytes ?? 0} "
-                + $"floorActive={session?.ResumeDisplayFloorActive ?? false} floorBytes={session?.ResumeDisplayFloorBytes ?? 0}\n"
-                + $"track={TotalProgressHost.ActualWidth:0.0} fillActual={TotalProgressFill.ActualWidth:0.0} localNow={DateTime.Now:HH:mm:ss.fff}";
+                + $"continuation={session?.ContinuationDisplayMode.ToString() ?? "-"} active={session?.ContinuationActive ?? false} highWaterBytes={session?.ContinuationHighWaterBytes ?? 0}\n"
+                + $"visual: pct={session?.PresentationVisualPercent ?? 0:0.0} bytes={session?.PresentationVisualBytes ?? 0} lag={session?.PresentationLagPercent ?? 0:0.00} lagging={session?.PresentationIsLagging ?? false}\n"
+                + $"timeline: {session?.PresentationDescribe ?? "-"}\n"
+                + $"track={TotalProgressHost.ActualWidth:0.0} headX={TotalImmersiveProgress?.HeadX ?? 0:0.0} "
+                + $"fillW={TotalImmersiveProgress?.ProgressWidth ?? 0:0.0} bandX={TotalImmersiveProgress?.BandCenterX ?? 0:0.0} "
+                + $"state={TotalImmersiveProgress?.ProgressState.ToString() ?? "-"} localNow={DateTime.Now:HH:mm:ss.fff}";
         }
         catch
         {
@@ -118,37 +286,48 @@ public sealed partial class Step3ProgressPage : UserControl
     }
 
     /// <summary>
-    /// ★ FIX BATCH 5（§8）★ 顶栏进度填充的**唯一写入者**：宽度 = 百分比 × 轨道实际宽度。
-    /// 为什么不用 ProgressBar 控件：见 <c>Themes\Controls.xaml</c> 中 PCMigProgressTrack/PCMigProgressFill
-    /// 的说明 —— WinUI 3 的 ProgressBar 不会按 DeterminateRoot/ProgressBarIndicator 驱动自定义模板的
-    /// 填充宽度（实测 UIA 值 47.29% 而像素零变化）。这里没有任何动画推进宽度；百分比本身来自唯一真值。
+    /// ★ Round-3 PHASE E（§16/§23、PMML-R23）★ 主进度条的**唯一写入者**：把同一个 <c>VisualProgress</c>
+    /// （左侧大号百分比与字节数用的就是它）交给 <c>TotalImmersiveProgress</c>，并在同一处映射任务状态。
+    ///
+    /// 为什么改成"只写一个百分比"：旧写法在这里算像素宽、再喂给旧补间驱动起一段补间，
+    /// 于是"数字一个源、条另一个源"，并制造出用户视频里"一段走完、停一下、再走一段"的速度断点（§15）。
+    /// 现在几何由控件按自身宽度求（<c>Metrics.ProgressWidth = Width × Progress01</c>），
+    /// 平滑由协调器的连续指数滤波负责，本方法**不做任何动画决策**。
+    ///
+    /// 装饰层（Push Band / 粒子 / Ripple / Halo）不属于进度真值：状态一到 Paused/Interrupted/Failed/Completed
+    /// 就把它们收干净（§19），但**绝不回写 Value**——Head 永远只表示"已确认的迁移事实"（§8、PMML-R21）。
     /// </summary>
     private void UpdateTotalProgressFill()
     {
         var percent = Math.Clamp(double.IsNaN(_totalProgressPercent) ? 0 : _totalProgressPercent, 0, 100);
-        var trackWidth = TotalProgressHost.ActualWidth;
-        var width = trackWidth > 0 ? Math.Round(trackWidth * percent / 100.0, 1) : 0;
 
-        // ★ UI Closure 2026-10-05（用户指令 UI-05 / §23 禁止的假修复）★ 补间只用于"运行中的正常推进"：
-        //   · 暂停 / 暂停中 / 停止 / 中断 / 失败 / 完成 —— 一律 SnapTo（不留在半路，也绝不让光波/粒子继续前进）；
-        //   · 目标比上一次更小（新任务、真值重置）—— SnapTo（进度不可能变小，视觉回爬就是伪造）；
-        //   · 系统关闭动画 —— 驱动内部直接落位，业务状态与最终像素完全一致。
-        var motion = _progressMotion;
-        if (motion is not null)
+        var immersive = TotalImmersiveProgress;
+        if (immersive is not null)
         {
-            motion.SetTrackWidth(trackWidth);
-            var phase = _session?.Phase ?? JobPhase.Created;
-            // ★ UI-06 状态映射 ★ 只有 Running 开装饰：暂停 / 停止 / 失败 / 完成一律关（暂停时让光波继续扫 = 撒谎）。
-            //   走局部引用 motion 而不是字段：字段可能被其它路径改写，编译器对字段解引用会报 CS8602。
-            motion.SetActive(phase == JobPhase.Running);
-            var normalProgress = phase == JobPhase.Running && width >= _lastRenderedWidth;
-            if (normalProgress) motion.SetTarget(width); else motion.SnapTo(width);
-            _lastRenderedWidth = width;
+            immersive.Value = percent;
+            immersive.ProgressState = MapProgressState(_session?.Phase ?? JobPhase.Created);
         }
-
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
-            TotalProgressHost, $"迁移总进度 {percent:0.0}%");
     }
+
+    /// <summary>
+    /// ★ Round-3 PHASE E（§19 状态机）★ Core 任务阶段 → 控件视觉状态。这是"事实 → 表现"的单向映射：
+    /// 控件永远不反过来决定业务阶段（PMML-R28）。Holding（Head 静止但活动继续）由 §18 的语义单列，
+    /// 本页只在阶段确实是 Running 时给 Running；真值长时间不动时 PresentationTruth 自己会停住，
+    /// Push Band 仍会继续跑（§18 Progress Head = Fact / Push Band = Activity）。
+    /// </summary>
+    private static ImmersiveProgressState MapProgressState(JobPhase phase) => phase switch
+    {
+        JobPhase.Running => ImmersiveProgressState.Running,
+        JobPhase.Paused => ImmersiveProgressState.Paused,
+        JobPhase.Interrupted => ImmersiveProgressState.Interrupted,
+        JobPhase.Verifying => ImmersiveProgressState.Verifying,
+        JobPhase.Completed or JobPhase.CompletedWithErrors => ImmersiveProgressState.Completed,
+        JobPhase.Failed => ImmersiveProgressState.Failed,
+        // 用户主动取消：已完成的事实仍然有效，但不该再用"正在搬运"的动效暗示后台还在干活。
+        JobPhase.Canceled => ImmersiveProgressState.Warning,
+        // Created / Preflight / Scanning / Planned / AwaitingReview：还没有任何可确认的传输事实。
+        _ => ImmersiveProgressState.Preparing,
+    };
 
     public void ApplyState(PageReadiness state)
     {
@@ -220,12 +399,18 @@ public sealed partial class Step3ProgressPage : UserControl
         //   LastTruth(raw) 只用于诊断：恢复后 raw 会先重建到 0，直接读它会让用户看到进度倒退。
         var truth = session.PresentationTruth;
         var percent = truth?.Percent ?? session.Percent;
-        TotalPercentText.Text = $"{percent:0.0}%";
-        TotalBytesText.Text = truth is null
-            ? session.ProgressText
-            : $"{Format.Bytes(truth.DisplayedTransferredBytes)} / {Format.Bytes(truth.PlannedBytes)}";
-        _totalProgressPercent = double.IsNaN(percent) ? 0 : Math.Clamp(percent, 0, 100);
-        UpdateTotalProgressFill();
+        // ★ Round-2（§3.3）★ 大号百分比 / 字节 / 进度条都归**呈现节拍**（AdvancePresentationTick，80 ms）驱动；
+        //   这里不再直接写 —— 否则真值一到就把数字跳到最前，而条还在补间，用户看到的就是"数字先跳、条后追"。
+        //   只有呈现节拍起不来（DispatcherQueue 不可用）时按真值兜底，保证任何情况下数字都与真值一致。
+        if (_presentTimer is null)
+        {
+            TotalPercentText.Text = $"{percent:0.0}%";
+            TotalBytesText.Text = truth is null
+                ? session.ProgressText
+                : $"{Format.Bytes(truth.DisplayedTransferredBytes)} / {Format.Bytes(truth.PlannedBytes)}";
+            _totalProgressPercent = double.IsNaN(percent) ? 0 : Math.Clamp(percent, 0, 100);
+            UpdateTotalProgressFill();
+        }
 
         // ── 四张统计卡：传输速度 / 预计剩余 / 对象进度 / 已传-计划 ──
         SpeedValueText.Text = truth is null

@@ -122,6 +122,20 @@ internal sealed class ProgressMotionDriver
     private bool _active;
     private float _trackHeight = 12f;
 
+    /// <summary>
+    /// Round-2（§3.5）：进度条的**视觉厚度**（DIP）。0 = 跟随布局 host 的高度（旧行为）。
+    /// 由调用方从 token `PCMigProgressVisualThickness` 注入（Themes\Materials.xaml），
+    /// 让"布局占位 12 DIP"与"视觉厚度 8 DIP"解耦；装饰层（扫描高光/柔光/粒子/标记线）
+    /// 也按视觉厚度绘制并在 host 内垂直居中，避免高光比条本身还高（那会让用户觉得"条又变粗了"）。
+    /// </summary>
+    private float _visualThickness;
+
+    /// <summary>尺寸计算实际使用的厚度（不超过 host 高度）。</summary>
+    private float VisualHeight => _visualThickness > 0f ? Math.Min(_visualThickness, _trackHeight) : _trackHeight;
+
+    /// <summary>视觉条在 host 内的垂直居中偏移。</summary>
+    private float DecorationTop => Math.Max(0f, (_trackHeight - VisualHeight) / 2f);
+
     private double _trackWidth;
     private double _targetPixels;      // 真值目标（已完成像素）
     private double _fromPixels;        // 本段动画起点（视觉像素）
@@ -188,8 +202,41 @@ internal sealed class ProgressMotionDriver
         }
     }
 
+    /// <summary>
+    /// Round-2（§3.5）：设置进度条的**视觉厚度**（DIP，通常来自 token `PCMigProgressVisualThickness`）。
+    /// 传 0 或负数 = 回退到旧行为（视觉厚度 = 布局 host 高度）。
+    /// 只影响 track 内装饰层的绘制尺寸与纵向位置；真值/动画推进逻辑完全不变。
+    /// </summary>
+    public void SetVisualThickness(double thickness)
+    {
+        var value = double.IsNaN(thickness) ? 0f : (float)Math.Max(0d, thickness);
+        if (Math.Abs(value - _visualThickness) < 0.01f) return;
+        _visualThickness = value;
+        try
+        {
+            ResizeDecorations();
+        }
+        catch
+        {
+            // 与 SetTrackWidth 同样的纪律：装饰层异常绝不影响进度真值。
+        }
+    }
+
     /// <summary>真值目标变化：GPU 补间过去（系统关闭动画时直接落位）。</summary>
-    public void SetTarget(double filledPixels)
+    public void SetTarget(double filledPixels) => ApplyTarget(filledPixels, double.NaN);
+
+    /// <summary>
+    /// ★ Round-2 2026-10-05（§3.3 / §3.4）★ 由**共享呈现时间线**驱动的补间：
+    /// 目标像素与补间时长都由 <c>ProgressPresentationCoordinator</c> 按"视觉落后真值多少"算出，
+    /// 本驱动只负责用同一条**线性**曲线把它画到 GPU 上（Composition 关键帧默认线性）。
+    /// 于是大号百分比文本（同一协调器的 Advance 值）与蓝色进度条消费的是同一个视觉比例，
+    /// 不会再出现"数字已经 47.3%、蓝条还在半路"。
+    /// 该重载不参与本类的目标间隔自适应 —— 时长已经由协调器按 delta 决定。
+    /// </summary>
+    public void SetTargetFromTimeline(double filledPixels, double spanSeconds)
+        => ApplyTarget(filledPixels, spanSeconds);
+
+    private void ApplyTarget(double filledPixels, double explicitSpanSeconds)
     {
         if (double.IsNaN(filledPixels) || filledPixels < 0d) return;
         if (Math.Abs(filledPixels - _targetPixels) < 0.5d) return;
@@ -209,11 +256,17 @@ internal sealed class ProgressMotionDriver
         var spanSeconds = distance / (MaxCatchUpPerSecond * _trackWidth);
         spanSeconds = Math.Clamp(spanSeconds, MinSpanSeconds, MaxSpanSeconds);
 
-        // ★ PHASE C-2：真值实际约 2~4 秒才到一次 ⇒ 固定 0.40 秒补间之后有 80% 时间是静止的，
-        //   视觉上就是"每两秒跳一大段"。用最近一次真值到达间隔的 85%（上限 1.8 秒）填满静止期：
-        //   这是**补间时长的自适应**，不是预测真值、不是自爬 —— 起点与终点仍严格等于两次真实目标。
-        if (!double.IsNaN(_lastTargetGapMs) && _lastTargetGapMs > 0d)
+        if (!double.IsNaN(explicitSpanSeconds) && explicitSpanSeconds > 0d)
         {
+            // ★ Round-2：共享时间线给的时长优先（上限放宽到 MaxSpanCeilingSeconds，
+            //   否则协调器按 delta 算出的 0.825/1.2 秒会被旧的 0.40 秒上限砍掉，又变回"跳一段"）。
+            spanSeconds = Math.Clamp(explicitSpanSeconds, MinSpanSeconds, MaxSpanCeilingSeconds);
+        }
+        else if (!double.IsNaN(_lastTargetGapMs) && _lastTargetGapMs > 0d)
+        {
+            // ★ PHASE C-2：真值实际约 2~4 秒才到一次 ⇒ 固定 0.40 秒补间之后有 80% 时间是静止的，
+            //   视觉上就是"每两秒跳一大段"。用最近一次真值到达间隔的 85%（上限 1.8 秒）填满静止期：
+            //   这是**补间时长的自适应**，不是预测真值、不是自爬 —— 起点与终点仍严格等于两次真实目标。
             var adaptive = Math.Min(_lastTargetGapMs * AdaptiveSpanRatio / 1000d, MaxSpanCeilingSeconds);
             if (adaptive > spanSeconds) spanSeconds = adaptive;
         }
@@ -331,7 +384,7 @@ internal sealed class ProgressMotionDriver
         var visual = CurrentVisualPixels();
         var rightInsetBase = _clip.RightInset;
         return string.Concat(
-            FormattableString.Invariant($"PMD debug=1 active={_active} track={_trackWidth:0.0}x{_trackHeight:0.0} "),
+            FormattableString.Invariant($"PMD debug=1 active={_active} track={_trackWidth:0.0}x{_trackHeight:0.0} visualH={VisualHeight:0.0} top={DecorationTop:0.0} "),
             FormattableString.Invariant($"target={_targetPixels:0.0} visual={visual:0.0} rightInsetBase={rightInsetBase:0.0} "),
             FormattableString.Invariant($"animating={!double.IsNaN(_startedAtMs)} span={_lastAnimationSpanSeconds:0.000} "),
             FormattableString.Invariant($"targetChanges={_targetChangeCount} intervalEmaMs={_targetIntervalEmaMs:0.0} "),
@@ -461,13 +514,13 @@ internal sealed class ProgressMotionDriver
 
         var shape = _compositor.CreateSpriteShape();
         var geometry = _compositor.CreateRectangleGeometry();
-        geometry.Size = new Vector2(SweepBandWidth, _trackHeight);
+        geometry.Size = new Vector2(SweepBandWidth, VisualHeight);
         shape.Geometry = geometry;
         shape.FillBrush = brush;
 
         var visual = _compositor.CreateShapeVisual();
         visual.Shapes.Add(shape);
-        visual.Size = new Vector2(SweepBandWidth, _trackHeight);
+        visual.Size = new Vector2(SweepBandWidth, VisualHeight);
         visual.Offset = new Vector3(-SweepBandWidth, 0f, 0f);
         return visual;
     }
@@ -486,13 +539,13 @@ internal sealed class ProgressMotionDriver
 
         var shape = _compositor.CreateSpriteShape();
         var geometry = _compositor.CreateRectangleGeometry();
-        geometry.Size = new Vector2(GlowWidth, _trackHeight);
+        geometry.Size = new Vector2(GlowWidth, VisualHeight);
         shape.Geometry = geometry;
         shape.FillBrush = brush;
 
         var visual = _compositor.CreateShapeVisual();
         visual.Shapes.Add(shape);
-        visual.Size = new Vector2(GlowWidth, _trackHeight);
+        visual.Size = new Vector2(GlowWidth, VisualHeight);
         visual.Offset = new Vector3(0f, 0f, 0f);
         return visual;
     }
@@ -544,13 +597,13 @@ internal sealed class ProgressMotionDriver
 
             var shape = _compositor.CreateSpriteShape();
             var geometry = _compositor.CreateRectangleGeometry();
-            geometry.Size = new Vector2(EdgeMarkerWidth, _trackHeight);
+            geometry.Size = new Vector2(EdgeMarkerWidth, VisualHeight);
             shape.Geometry = geometry;
             shape.FillBrush = brush;
 
             var visual = _compositor.CreateShapeVisual();
             visual.Shapes.Add(shape);
-            visual.Size = new Vector2(EdgeMarkerWidth, _trackHeight);
+            visual.Size = new Vector2(EdgeMarkerWidth, VisualHeight);
             visual.Offset = new Vector3(0f, 0f, 0f);
             return visual;
         }
@@ -563,13 +616,18 @@ internal sealed class ProgressMotionDriver
     /// <summary>把装饰物的尺寸 / 纵向位置对齐到当前轨道高度与宽度。</summary>
     private void ResizeDecorations()
     {
+        // Round-2（§3.5）：装饰层与轨道/填充一样，按**视觉厚度**（而不是 12 DIP 的布局高）做，
+        // 并整体下移 DecorationTop，保证高光/柔光/粒子都贴在真正的进度条上，而不是溢出到条外。
+        var top = DecorationTop;
+
         if (_sweepVisual is not null)
         {
-            _sweepVisual.Size = new Vector2(SweepBandWidth, _trackHeight);
+            _sweepVisual.Size = new Vector2(SweepBandWidth, VisualHeight);
+            _sweepVisual.Offset = new Vector3(_sweepVisual.Offset.X, top, 0f);
             if (_sweepVisual.Shapes.Count > 0 && _sweepVisual.Shapes[0] is CompositionSpriteShape sweepShape
                 && sweepShape.Geometry is CompositionRectangleGeometry sweepGeometry)
             {
-                sweepGeometry.Size = new Vector2(SweepBandWidth, _trackHeight);
+                sweepGeometry.Size = new Vector2(SweepBandWidth, VisualHeight);
             }
 
             if (_active) StartSweepLoop();
@@ -577,27 +635,29 @@ internal sealed class ProgressMotionDriver
 
         if (_glowVisual is not null)
         {
-            _glowVisual.Size = new Vector2(GlowWidth, _trackHeight);
+            _glowVisual.Size = new Vector2(GlowWidth, VisualHeight);
+            _glowVisual.Offset = new Vector3(_glowVisual.Offset.X, top, 0f);
             if (_glowVisual.Shapes.Count > 0 && _glowVisual.Shapes[0] is CompositionSpriteShape glowShape
                 && glowShape.Geometry is CompositionRectangleGeometry glowGeometry)
             {
-                glowGeometry.Size = new Vector2(GlowWidth, _trackHeight);
+                glowGeometry.Size = new Vector2(GlowWidth, VisualHeight);
             }
         }
 
         if (_edgeMarkerVisual is not null)
         {
-            _edgeMarkerVisual.Size = new Vector2(EdgeMarkerWidth, _trackHeight);
+            _edgeMarkerVisual.Size = new Vector2(EdgeMarkerWidth, VisualHeight);
+            _edgeMarkerVisual.Offset = new Vector3(_edgeMarkerVisual.Offset.X, top, 0f);
             if (_edgeMarkerVisual.Shapes.Count > 0 && _edgeMarkerVisual.Shapes[0] is CompositionSpriteShape markerShape
                 && markerShape.Geometry is CompositionRectangleGeometry markerGeometry)
             {
-                markerGeometry.Size = new Vector2(EdgeMarkerWidth, _trackHeight);
+                markerGeometry.Size = new Vector2(EdgeMarkerWidth, VisualHeight);
             }
         }
 
         if (_particleHost is not null)
         {
-            // 粒子纵向位置在轨道高度内按索引均匀分散（前沿附近视觉更活跃，主体克制）。
+            // 粒子纵向位置在**视觉厚度**内按索引均匀分散（前沿附近视觉更活跃，主体克制）。
             // 注意：VisualCollection 没有索引器 ⇒ 先物化成数组再按序号取（顺序 = 插入顺序）。
             var children = _particleHost.Children.ToArray();
             var count = children.Length;
@@ -605,9 +665,9 @@ internal sealed class ProgressMotionDriver
             {
                 var child = children[i];
                 var radius = ParticleRadius(i);
-                var span = Math.Max(0f, _trackHeight - (radius * 2f));
+                var span = Math.Max(0f, VisualHeight - (radius * 2f));
                 var fraction = count <= 1 ? 0.5f : (i / (float)(count - 1));
-                var y = span <= 0f ? 0f : span * (0.18f + (0.64f * fraction));
+                var y = span <= 0f ? top : top + (span * (0.18f + (0.64f * fraction)));
                 child.Offset = new Vector3(child.Offset.X, y, 0f);
             }
         }
@@ -657,7 +717,7 @@ internal sealed class ProgressMotionDriver
             }
             else
             {
-                _edgeMarkerVisual.Offset = new Vector3(markerTo, 0f, 0f);
+                _edgeMarkerVisual.Offset = new Vector3(markerTo, DecorationTop, 0f);
             }
         }
 

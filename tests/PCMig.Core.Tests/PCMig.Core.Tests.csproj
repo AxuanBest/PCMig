@@ -58,6 +58,32 @@
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\UiBatchBuffer.cs" Link="LinkedPresentation\UiBatchBuffer.cs" />
     <!-- A.5（P1-5）诊断出口：只 using System.IO，零 WinUI 依赖 ⇒ 可链入（VM 会调用它）。 -->
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\UiFlushTrace.cs" Link="LinkedPresentation\UiFlushTrace.cs" />
+    <!-- ★ Round-2 2026-10-05（§3.2 / §3.3）★ 进度**呈现**时间线：纯 System.* 逻辑（无 WinUI 类型），
+         VM 持有并驱动它、UI 读它取视觉百分比 ⇒ 必须链入，否则 VM 编译失败（CS0246）。
+         行为级断言见 ProgressPresentationCoordinatorTests。 -->
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\ProgressPresentationCoordinator.cs" Link="LinkedPresentation\ProgressPresentationCoordinator.cs" />
+  </ItemGroup>
+
+  <!--
+    ══════════════════════════════════════════════════════════════════════════
+    ★ Round-3 PHASE D（执行书 §11 / §26 判据 ⑨）★ Immersive Progress 的**纯逻辑**链入
+    ══════════════════════════════════════════════════════════════════════════
+    为什么要链入：真机 timeline.csv 曾出现两类越界（0% 时仍有 14 枚粒子存活；
+    progressWidth=26.233 时 particleMinX=-1.163）——这类缺陷必须在**数字层面**被锁死，
+    而不是靠人看 CSV 事后发现。粒子池与参数表都只 using System.*，
+    故可被 net8.0 的测试项目真实 new 出来断言（见 ImmersiveProgressParticleBoundsTests）。
+    ★ 纪律：本分组只许链入**纯 System.*** 文件。ImmersiveProgressPalette 带
+      Windows.UI.Color（WinRT），因此它被刻意放在 ImmersiveTransferProgressRenderer.cs、
+      不放在参数表里；若将来有人把 WinRT 类型放回参数表，本测试项目会编译失败 ——
+      那是必须被看见的信号，正确做法是继续分层，而不是加引用糊过去。
+  -->
+  <ItemGroup Label="Round3ImmersivePureLogicSources">
+    <Compile Include="..\..\src\PCMig.WinUI\Controls\ImmersiveProgress\ImmersiveProgressParameters.cs" Link="LinkedImmersive\ImmersiveProgressParameters.cs" />
+    <Compile Include="..\..\src\PCMig.WinUI\Controls\ImmersiveProgress\ImmersiveProgressParticle.cs" Link="LinkedImmersive\ImmersiveProgressParticle.cs" />
+    <!-- 动画状态（Band 相位 / 粒子池 / Ripple 池 / Halo）：同样零 using、纯 System.* ⇒
+         可对「判据 ⑦ 单调逼近 + 连续减速」「⑧ Ripple 上限」「⑩⑪ Paused/Failed 停止活动」
+         「⑫ Head 静止而 Band 继续」做真实数字断言（ImmersiveProgressAnimationStateTests）。 -->
+    <Compile Include="..\..\src\PCMig.WinUI\Controls\ImmersiveProgress\ImmersiveProgressAnimationState.cs" Link="LinkedImmersive\ImmersiveProgressAnimationState.cs" />
   </ItemGroup>
 
 </Project>

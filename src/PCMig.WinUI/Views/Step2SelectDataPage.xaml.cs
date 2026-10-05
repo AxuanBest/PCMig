@@ -294,14 +294,20 @@ public sealed partial class Step2SelectDataPage : UserControl
             switch (child)
             {
                 case DirNode d:
+                    // ★ 2026-10-05 紧急修复（用户真机判词：展开 H 只看到一个可勾选的「…」）★
+                    //   模型侧存在两类**非真实目录**的 DirNode：`AddDummy()` 的懒加载占位，
+                    //   以及"文件过多仅显示前 N 个"的提示行 —— 它们的 `FullPath` 都为空串。
+                    //   它们**绝不能**成为用户可见、可勾选的树节点（用户明确要求"不能再出现一个 ..."）。
+                    //   箭头 affordance 由 <see cref="TreeViewNode.HasUnrealizedChildren"/> 负责，
+                    //   不需要、也不允许再靠一个假子节点来表达。
+                    if (d.FullPath.Length == 0) break;
                     node.Children.Add(BuildNode(d));
                     break;
                 case FileRow f:
                     node.Children.Add(new TreeViewNode { Content = f });
                     break;
                 default:
-                    node.Children.Add(new TreeViewNode());   // 占位/提示行（无模型）
-                    break;
+                    break;   // 模型侧只产出 DirNode / FileRow：绝不向 UI 插入"无模型空节点"
             }
         }
         // 未加载 ⇒ true（显示箭头；点击时触发 Expanding 走异步 realize）；
@@ -818,6 +824,9 @@ public sealed partial class Step2SelectDataPage : UserControl
             switch (child)
             {
                 case DirNode d:
+                    // ★ 2026-10-05 紧急修复 ★ 与 SyncNodeChildren 同一纪律：`FullPath` 为空的
+                    //   占位/提示 DirNode 永不 materialize 到 UI（用户真机看到的可勾选「…」就是它）。
+                    if (d.FullPath.Length == 0) continue;
                     if (existing.Contains(d)) continue;
                     node.Children.Add(BuildNode(d));
                     break;
@@ -826,8 +835,8 @@ public sealed partial class Step2SelectDataPage : UserControl
                     node.Children.Add(new TreeViewNode { Content = f });
                     break;
                 default:
-                    // 模型侧目前只产出 DirNode / FileRow；保留兜底且不重复添加。
-                    if (node.Children.Count == 0) node.Children.Add(new TreeViewNode());
+                    // ★ 2026-10-05 ★ 绝不再插入"无模型空节点"：它会在树上渲染成一行空白/假行，
+                    //   而它对用户没有任何意义（本页只呈现 DirNode / FileRow）。
                     break;
             }
         }

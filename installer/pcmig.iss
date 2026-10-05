@@ -1,9 +1,9 @@
-; ============================================================
+﻿; ============================================================
 ; PCMig 迁移工具 - Inno Setup 安装脚本
 ; 构建: ISCC.exe installer\pcmig.iss（先执行 publish 到 dist\app）
 ; ============================================================
 #define MyAppName "PCMig 迁移工具"
-#define MyAppVersion "0.4.9"
+#define MyAppVersion "0.5.0"
 #define MyAuthor "郑子轩（Axuanbest）"
 #define MyCopyright "郑子轩 个人制作"
 
@@ -26,8 +26,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 DisableProgramGroupPage=yes
 SetupIconFile=..\src\PCMig.Gui\Assets\pcmig.ico
-UninstallDisplayIcon={app}\PCMig.exe
-VersionInfoVersion=0.4.9.0
+UninstallDisplayIcon={app}\PCMig.WinUI.exe
+VersionInfoVersion=0.5.0.0
 VersionInfoCompany=Axuanbest
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
@@ -41,12 +41,16 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 Source: "..\dist\app\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
-Name: "{autodesktop}\PCMig 迁移工具"; Filename: "{app}\PCMig.exe"
-Name: "{group}\PCMig 迁移工具 (GUI)"; Filename: "{app}\PCMig.exe"
+; ★ v0.5.0（2026-10-06）★ 主界面 = WinUI（PCMig.WinUI.exe）；
+;   经典 WPF 界面保留为**回退入口**（PCMig-classic.exe），WinUI 起不来时仍可用。
+Name: "{autodesktop}\PCMig 迁移工具"; Filename: "{app}\PCMig.WinUI.exe"
+Name: "{group}\PCMig 迁移工具 (WinUI)"; Filename: "{app}\PCMig.WinUI.exe"
+Name: "{group}\PCMig 迁移工具（经典界面·回退）"; Filename: "{app}\PCMig-classic.exe"
 Name: "{group}\PCMig 命令行 (CLI)"; Filename: "{app}\pcmig-cli.exe"
 Name: "{group}\使用说明"; Filename: "{app}\使用说明.txt"
 Name: "{group}\更新日志"; Filename: "{app}\更新日志.txt"
 Name: "{group}\首日实测检查表"; Filename: "{app}\首日实测检查表.md"
 
 [Run]
-Filename: "{app}\PCMig.exe"; Description: "安装完成后启动 PCMig 迁移工具"; Flags: postinstall nowait skipifsilent unchecked
+Filename: "{app}\PCMig.WinUI.exe"; Description: "安装完成后启动 PCMig 迁移工具（WinUI 界面）"; Flags: postinstall nowait skipifsilent unchecked
+Filename: "{app}\PCMig-classic.exe"; Description: "启动经典界面（回退）"; Flags: postinstall nowait skipifsilent unchecked

@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using PCMig.WinUI.Diagnostics;
+using PCMig.WinUI.Controls.ImmersiveProgress;
 using PCMig.Diagnostics.Abstractions;
 using PCMig.Core.Diagnostics;
 using PCMig.Core.Models;
@@ -48,14 +49,26 @@ public sealed partial class MainWindow : Window
     private double _footerProgressPercent;
 
     /// <summary>
-    /// ★ UI Closure 2026-10-05（用户指令 UI-05：进度视觉不得一帧一帧跳）★
-    /// 底栏进度填充的视觉补间驱动（Composition 层，60 Hz 由合成器承担）。它只做"真实旧值 → 真实新值"
-    /// 之间的补间，绝不预测下一进度；暂停/停止/中断/失败/完成与任何回退一律 SnapTo 真值。
+    /// ★ Round-3 视觉纠偏（R33）★ 底栏进度现已切换到 <c>ImmersiveTransferProgress Variant="Compact"</c>：
+    /// 它继承 Hero 的 Capsule / Track-Space Chroma / Head 体积光场，并与 Hero 共用同一个 <c>VisualProgress</c>。
+    /// 旧的像素补间路线因此**退出生产** ——
+    /// 视觉连续滤波现在由呈现协调器统一负责，底栏不再需要第二套像素补间。
     /// </summary>
-    private ProgressMotionDriver? _footerMotion;
-
-    /// <summary>上一帧渲染的填充像素宽度：用于判断目标是否在前进（回退必须立刻落位，不得动画）。</summary>
+    /// <summary>上一帧渲染的填充百分比：用于判断目标是否在前进（回退/冻结时必须立刻落位，不得动画）。</summary>
     private double _lastFooterFillWidth;
+
+    /// <summary>
+    /// ★ Round-2 2026-10-05（§3.2 / §3.3）★ **Shell 级呈现节拍（80 ms）**：全局唯一推进共享呈现时间线的地方。
+    /// 为什么放在 Shell：底栏在四页都常驻，顶栏只在 Step3；推进者必须只有一个（否则同一时刻被推进两次），
+    /// 而消费它的页面（Step3 的顶栏）只**读**视觉值。数字与进度条因此永远读同一个视觉比例。
+    /// </summary>
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _presentTimer;
+
+    /// <summary>
+    /// 呈现节拍间隔（毫秒）。★ Round-3 PHASE B（§15）★ 80 ms → **16 ms**：底栏与 Step3 消费同一个
+    /// 连续指数滤波器，必须按渲染帧求值（理由见 <c>Step3ProgressPage.PresentIntervalMs</c>）。
+    /// </summary>
+    private const int PresentIntervalMs = 16;
 
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(IntPtr hwnd);
@@ -242,6 +255,21 @@ public sealed partial class MainWindow : Window
         // 用于证明“TreeView 能真实展开出子目录/文件”，详见 Presentation\Step2TreeQaProbe.cs。
         InstallStep2TreeQaProbeIfRequested();
 
+        // 【PHASE 5 字体探针接入点】仅在环境变量 PCMIG_METRIC_PROBE=1 时启用：
+        // 把窗口内容整体替换为 MetricTypographyProbe（变体 A–F 同屏隔离渲染 + 洋红基准线），
+        // 用于按用户指令 §6 定位"统计卡大号数值顶部被削"发生在字体层还是父级布局层。
+        // 未设该变量 ⇒ 本方法立刻返回，生产路径逐位不变。详见 Views\MetricTypographyProbe.xaml.cs。
+        InstallMetricTypographyProbeIfRequested();
+
+        // 【PHASE 5B 字形轮廓探针接入点】仅在环境变量 PCMIG_GLYPH_PROBE=1 时启用：
+        // 把窗口内容整体替换为 GlyphContourProbe（字重 × 字形 × 字号 同屏 + 洋红基准线），
+        // 用于证实"统计卡大号数值顶部被横着削平"的成因是低字号栅格化把字形顶部弧线
+        // 吸附到同一像素行（请求 SemiBold 600 被 YaHei UI 向上取整命中 Bold 700），
+        // 而不是父级容器裁切。未设该变量 ⇒ 本方法立刻返回，生产路径逐位不变。
+        // 详见 Views\GlyphContourProbe.xaml.cs。
+        InstallGlyphContourProbeIfRequested();
+        InstallImmersiveProgressProbeIfRequested();
+
         // ★ 阶段 A 包 4（用户要求）：应用重新启动时必须**主动调用真实的** JobManager.FindUnfinished()
         //   （经会话的 FindUnfinishedOnStartupAsync）；但**绝不自动恢复**——
         //   探测只产生「检测到未完成任务」的真实提示（Step 4 状态行 + 实时日志），
@@ -268,6 +296,22 @@ public sealed partial class MainWindow : Window
         // 为什么用 AppWindow.Closing 而不是 Window.Closed：
         //   Closed 触发时 Window.Close() 已开始拆卸 XAML，时机偏晚；
         //   Closing 更早，取消默认关闭后本进程主动 Exit，可避开 LdrShutdownProcess 的 Xaml 卸载。
+        // ★ v0.5.0 图标修复（用户真机判词：「任务栏里看到的是个默认图标，就是 Windows 系统丢失图标的那个样」）★
+        //   根因：`src\PCMig.WinUI\PCMig.WinUI.csproj` 此前**没有 `<ApplicationIcon>`** ⇒ 编译出的
+        //   PCMig.WinUI.exe 不含图标资源，任务栏/资源管理器只能显示系统默认占位。
+        //   已补 `<ApplicationIcon>Assets\pcmig.ico</ApplicationIcon>`（exe 内嵌，决定资源管理器与固定项），
+        //   这里再显式 SetIcon 一次：unpackaged WinUI 3 的窗口/任务栏图标在"已固定到任务栏"等场景下
+        //   依赖 AppWindow 的图标，显式设置更稳。找不到文件就安静跳过，绝不影响启动。
+        try
+        {
+            var iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "pcmig.ico");
+            if (System.IO.File.Exists(iconPath)) AppWindow.SetIcon(iconPath);
+        }
+        catch
+        {
+            // 图标设置失败不是启动阻塞项
+        }
+
         AppWindow.Closing += (_, args) =>
         {
             args.Cancel = true;      // 不交给框架的关闭流程
@@ -315,6 +359,66 @@ public sealed partial class MainWindow : Window
                 PageSelectData.ExpandAllRootsForVerification();
             };
         }
+    }
+
+    /// <summary>
+    /// 【PHASE 5 / 用户指令 §6】Metric Typography 隔离探针的 Shell 侧接入：
+    /// **只有**环境变量 <c>PCMIG_METRIC_PROBE=1</c> 时才有动作 —— 把窗口内容整体替换为
+    /// <see cref="Views.MetricTypographyProbe"/>（变体 A–F 同屏渲染 + 洋红基准线），
+    /// 用于把"统计卡大号数值顶部被削"从主观描述变成可测像素事实：
+    ///   · 隔离变体就已削顶 ⇒ 字体 / 字重 / 光栅化问题；
+    ///   · 隔离变体正常但生产变体 F（生产样式 + MinHeight host）削顶 ⇒ 父级布局问题。
+    /// 不设该环境变量时本方法立即返回：生产启动路径逐位不变（与既有 QA 探针同一纪律）。
+    /// 不参与业务：探针无 ViewModel、无事件订阅、不写任何状态。
+    /// </summary>
+    private void InstallMetricTypographyProbeIfRequested()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("PCMIG_METRIC_PROBE"), "1", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Content = new Views.MetricTypographyProbe();
+    }
+
+    /// <summary>
+    /// 【PHASE 5B / 用户 2026-10-05 追加纠正】Glyph Contour 探针的 Shell 侧接入：
+    /// **只有**环境变量 <c>PCMIG_GLYPH_PROBE=1</c> 时才有动作 —— 把窗口内容整体替换为
+    /// <see cref="Views.GlyphContourProbe"/>，同屏渲染"字重 × 字形 × 字号"矩阵，
+    /// 用于证实用户新证据所指的"数字 2 / 字母 G 的顶部弧线被拍平成一条水平线"：
+    /// 已确认本机 <c>Microsoft YaHei UI</c> 只注册 290/400/700 三个字面（无 SemiBold 600），
+    /// 生产样式请求 SemiBold(600) 实际命中 Bold(700)；而同一字形在 96–200 px 下顶部跨度
+    /// 仍达 139–147 行 ⇒ 字体轮廓完好，问题只在低字号栅格化。
+    /// 不设该环境变量时本方法立即返回：生产启动路径逐位不变（与既有 QA 探针同一纪律）。
+    /// 不参与业务：探针无 ViewModel、无事件订阅、不写任何状态。
+    /// </summary>
+    private void InstallGlyphContourProbeIfRequested()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("PCMIG_GLYPH_PROBE"), "1", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Content = new Views.GlyphContourProbe();
+    }
+
+    /// <summary>
+    /// 【Round-3 PHASE D（执行书 §26）】Immersive Progress 真机探针的 Shell 侧接入：
+    /// **只有**环境变量 <c>PCMIG_IMMERSIVE_PROBE=1</c> 时才有动作 —— 把窗口内容整体替换为
+    /// <see cref="Views.ImmersiveProgressVisualProbe"/>，用确定性序列
+    /// 0 / 10 / 24.8 / 47.3 / 62.3 / 75 / 90 / 100（含 Holding / Pause / Resume / Completed / Failed）
+    /// 驱动同一个 <c>ProgressPresentationCoordinator</c>，并把每拍落成 <c>timeline.csv</c>。
+    /// 不设该环境变量时本方法立即返回：生产启动路径逐位不变（与既有 QA 探针同一纪律）。
+    /// 不参与业务：探针无 ViewModel、无事件订阅、不写任何业务状态。
+    /// </summary>
+    private void InstallImmersiveProgressProbeIfRequested()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("PCMIG_IMMERSIVE_PROBE"), "1", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Content = new Views.ImmersiveProgressVisualProbe();
     }
 
     /// <summary>
@@ -432,46 +536,53 @@ public sealed partial class MainWindow : Window
     private void AttachFooterToSession()
     {
         Session.PropertyChanged += (_, _) => PushFooter();
-        // ★ FIX BATCH 5（§8）★ 轨道宽度变化（窗口缩放 / 响应式密度档位切换）时必须重算填充宽度，
-        //   否则填充会停留在上一次的像素值上与真实百分比不符。写入者仍是 UpdateFooterProgressFill（唯一）。
+        // ★ FIX BATCH 5（§8）★ 轨道宽度变化（窗口缩放 / 响应式密度档位切换）时必须重算，
+        //   否则填充会停留在上一次的值上与真实百分比不符。写入者仍是 UpdateFooterProgressFill（唯一）。
         FooterProgressHost.SizeChanged += (_, _) => UpdateFooterProgressFill();
-        // ★ UI Closure 2026-10-05（用户指令 UI-05）★ 底栏与顶栏共用同一个补间驱动实现：真值仍是
-        //   PushFooter 推进来的 ProgressTruthSnapshot 百分比，动画只负责把"已经发生的真实变化"画平。
-        _footerMotion = new ProgressMotionDriver(FooterProgressFill, FooterProgressHost);
+        // ★ Round-3 视觉纠偏（R33）★ 底栏改用 ImmersiveTransferProgress（Compact 变体）后，
+        //   像素补间驱动**不再参与底栏**：视觉连续滤波现在由呈现协调器统一负责，
+        //   Hero 与 Compact 因此天然同源同值。旧的像素补间字段已删除。
+        StartPresentationTimer();
         // ★ FIX BATCH 6（§9）★ 左侧提示卡接上同一会话：它只读语义通道
         //   （OperationalStatus / UserHint / ErrorSummary / CurrentObjectStatus），
         //   禁止在这里或卡片里拼业务状态。
         HintCard.Attach(Session);
-        // ★ UI Closure 2026-10-05（用户指令 UI-07）★ 提示卡向上增长必须有上界，否则长流程文案会把卡片
-        //   顶进步骤导航里（碰/压/穿 Step4）。尺寸变化时重算；**不**监听 HintCard.SizeChanged ——
-        //   卡片高度正是由本上界约束的，反向监听会形成回环。
-        SidebarHost.SizeChanged += (_, _) => UpdateHintCardBounds();
-        StepNav.SizeChanged += (_, _) => UpdateHintCardBounds();
-        SidebarHost.Loaded += (_, _) => UpdateHintCardBounds();
-        UpdateHintCardBounds();
+        // ★ Round-2 2026-10-05（用户指令 §4）★ 提示卡改为**固定尺寸**：高度 = PCMigHintCardHeight token
+        //   （176 DIP），不再随内容增长。这里只负责把"物理可用高度"下发；窗口/侧栏几何变化时重算。
+        //   **不**监听 HintCard.SizeChanged —— 内容变化不得反向驱动卡片高度（固定尺寸即无回环）。
+        SidebarHost.SizeChanged += (_, _) => UpdateHintCardHeight();
+        StepNav.SizeChanged += (_, _) => UpdateHintCardHeight();
+        SidebarHost.Loaded += (_, _) => UpdateHintCardHeight();
+        UpdateHintCardHeight();
         PushFooter();
     }
 
     /// <summary>
-    /// ★ UI Closure 2026-10-05（用户指令 UI-07）★ 计算提示卡上界：
+    /// ★ Round-2 2026-10-05（用户指令 §4）★ 计算提示卡的**可用高度**：
     /// <c>侧栏可用高度 − 步骤导航（StepNav，即 Step4 所在控件）实际高度 − 标准段间距</c>。
     /// 标准段间距取 <c>HintCard</c> 在 XAML 里的 <c>Margin.Top = 12</c>（与 XAML 同源，不新造数字）。
-    /// 布局未完成（任一高度 ≤ 0）时**不设限**，避免装配早期把卡片压成 0 高；
-    /// 超出上界的部分由卡内 <c>ScrollViewer</c> 承担轻量滚动（见 ShellHintCard.xaml）。
+    /// 卡片只会在"可用高 ≥ 固定 token"时用 token（176 DIP），否则夹到可用高 —— 这是唯一"断点换档"；
+    /// 布局未完成（任一高度 ≤ 0）时按"未测量"处理 ⇒ 用固定 token 高，绝不把卡片压成 0 高。
+    /// 溢出只发生在卡内 Row1 内容视口（滚动条视觉隐藏，见 ShellHintCard.xaml）。
     /// </summary>
-    private void UpdateHintCardBounds()
+    private void UpdateHintCardHeight()
     {
         try
         {
             var sidebarHeight = SidebarHost.ActualHeight;
             var navHeight = StepNav.ActualHeight;
-            if (sidebarHeight <= 0d || navHeight <= 0d) return;
+            if (sidebarHeight <= 0d || navHeight <= 0d)
+            {
+                HintCard.SetAvailableHeight(double.NaN);   // 未测量 ⇒ 固定 token 高
+                return;
+            }
+
             const double standardSectionGap = 12d;   // = HintCard.Margin.Top（XAML 同源）
-            HintCard.SetMaxSurfaceHeight(sidebarHeight - navHeight - standardSectionGap);
+            HintCard.SetAvailableHeight(sidebarHeight - navHeight - standardSectionGap);
         }
         catch
         {
-            // 上界只是约束：计算失败时卡片保持无上限，绝不影响其它布局。
+            // 可用高只是约束：计算失败时卡片保持固定 token 高，绝不影响其它布局。
         }
     }
 
@@ -481,29 +592,111 @@ public sealed partial class MainWindow : Window
     /// 的说明 —— WinUI 3 的 ProgressBar 不按 DeterminateRoot/ProgressBarIndicator 驱动自定义模板的填充
     /// 宽度（实测 UIA RangeValue=47.29% 而同位置截图在进度条区域零像素变化）。
     /// 这里没有任何动画推进宽度：百分比来自唯一真值（ProgressTruthSnapshot），Pause 时百分比不变，
+    /// 只有真值变化才会改变填充像素。
+    /// <para>★ Round-2 2026-10-05（§3.5）★ 当 80 ms 呈现节拍在跑时，宽度由 RefreshFooterPresentation
+    /// 按**视觉百分比**驱动（数字与条同源）；没有节拍时仍由本方法按真值兜底。</para>
+    /// </summary>
+    /// <summary>
+    /// ★ Round-2 2026-10-05（§3.5）★ 取进度条视觉厚度 token（Themes\Materials.xaml: PCMigProgressVisualThickness）。
+    /// 取不到时回退到 token 当前值 8；渲染厚度错误绝不影响进度真值。
+    /// </summary>
+    private static double ResolveProgressVisualThickness()
+    {
+        try
+        {
+            if (Application.Current?.Resources is { } resources
+                && resources.TryGetValue("PCMigProgressVisualThickness", out var value)
+                && value is double thickness)
+            {
+                return thickness;
+            }
+        }
+        catch
+        {
+            // 资源字典不可用：按 token 当前值兜底。
+        }
+
+        return 8d;
+    }
+
+    /// <summary>启动 Shell 级 80 ms 呈现节拍（失败时底栏仍由 PushFooter 按真值兜底，显示正确性优先）。</summary>
+    private void StartPresentationTimer()
+    {
+        try
+        {
+            var timer = DispatcherQueue?.CreateTimer();
+            if (timer is null) return;
+            timer.Interval = TimeSpan.FromMilliseconds(PresentIntervalMs);
+            timer.IsRepeating = true;
+            timer.Tick += (_, _) => RefreshFooterPresentation();
+            timer.Start();
+            _presentTimer = timer;
+        }
+        catch
+        {
+            // 见方法注释。
+        }
+    }
+
+    /// <summary>
+    /// ★ Round-2 2026-10-05（§3.3）★ 呈现节拍：推进共享呈现时间线，并用**同一个视觉比例**刷新底栏百分比、
+    /// 字节与进度条。视觉值只会落后于已确认显示真值、永不超出，真值不动时也不会自爬（协调器内部强制）。
+    /// </summary>
+    private void RefreshFooterPresentation()
+    {
+        var session = Session;
+        if (session is null) return;
+
+        double visual;
+        try { visual = session.AdvancePresentation(DateTime.UtcNow); }
+        catch { return; }
+
+        var planned = session.PresentationTruth?.PlannedBytes ?? 0L;
+        FooterPercentText.Text = $"{visual:0.0}%";
+        if (planned > 0)
+        {
+            // §3.3 选 A：底栏的字节数与百分比同源，避免"数字已到、字节还在旧值"。
+            FooterBytesText.Text = $"{Format.Bytes(session.PresentationVisualBytes)} / {Format.Bytes(planned)}";
+        }
+
+        _footerProgressPercent = double.IsNaN(visual) ? 0 : Math.Clamp(visual, 0, 100);
+        UpdateFooterProgressFill();
+    }
+
+    /// <summary>
+    /// ★ Round-3 视觉纠偏（R33）★ 底栏进度的唯一写入者：把**同一个** VisualProgress 百分比写给
+    /// <c>FooterImmersiveProgress</c>（Compact 变体）。它不再换算像素宽度、不再有自己的补间——
+    /// 视觉连续滤波由呈现协调器统一负责，Hero 与 Compact 因此在任何时刻读同一个值。
     /// 完成时稳定 100%（PMML-R8：动画只能装饰，不能成为业务状态的依赖）。
     /// </summary>
     private void UpdateFooterProgressFill()
     {
         var clamped = double.IsNaN(_footerProgressPercent) ? 0 : Math.Clamp(_footerProgressPercent, 0, 100);
-        var trackWidth = FooterProgressHost.ActualWidth;
-        var width = trackWidth > 0 ? Math.Round(trackWidth * clamped / 100.0, 1) : 0;
-        // ★ UI Closure 2026-10-05（用户指令 UI-05）★ width 只作为**目标值**交给补间驱动；
-        //   不再直接写 FooterProgressFill.Width（布局属性：20 Hz 真值 × 60 fps 补间会每秒触发布局 60 次）。
-        //   前进（Running 且目标不回退）走补间；暂停/停止/中断/失败/完成与任何回退一律 SnapTo 真值 ——
-        //   暂停时让填充自己继续爬 = 撒谎（用户指令 UI-23 禁止）。
-        if (_footerMotion is not null)
-        {
-            _footerMotion.SetTrackWidth(trackWidth);
-            // ★ UI-06 状态映射 ★ 只有 Running 开装饰：暂停 / 停止 / 失败 / 完成一律关（暂停时让光波继续扫 = 撒谎）。
-            _footerMotion.SetActive(Session.Phase == JobPhase.Running);
-            var normalProgress = Session.Phase == JobPhase.Running && width >= _lastFooterFillWidth;
-            if (normalProgress) _footerMotion.SetTarget(width);
-            else _footerMotion.SnapTo(width);
-            _lastFooterFillWidth = width;
-        }
+
+        // ★ 同源（R33）★ 只写 Value 与状态机；不得在这里做任何业务判定。
+        FooterImmersiveProgress.Value = clamped;
+        FooterImmersiveProgress.ProgressState = MapFooterProgressState(Session.Phase);
+
+        _lastFooterFillWidth = clamped;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(FooterProgressHost, $"迁移进度 {clamped:0.0}%");
     }
+
+    /// <summary>
+    /// ★ Round-3 视觉纠偏（R33）★ 把作业阶段映射到 Compact 装饰状态。
+    /// 口径与 Step3 主条一致：**只有 Running 开动态**；暂停 / 停止 / 中断 / 失败一律收尾 ——
+    /// 暂停时让光波继续扫 = 撒谎（用户指令 UI-06 / UI-23 禁止）。
+    /// </summary>
+    private static ImmersiveProgressState MapFooterProgressState(JobPhase phase) => phase switch
+    {
+        JobPhase.Running => ImmersiveProgressState.Running,
+        JobPhase.Paused => ImmersiveProgressState.Paused,
+        JobPhase.Interrupted => ImmersiveProgressState.Interrupted,
+        JobPhase.Verifying => ImmersiveProgressState.Verifying,
+        JobPhase.Completed or JobPhase.CompletedWithErrors => ImmersiveProgressState.Completed,
+        JobPhase.Failed => ImmersiveProgressState.Failed,
+        JobPhase.Canceled => ImmersiveProgressState.Interrupted,
+        _ => ImmersiveProgressState.Idle,
+    };
 
     /// <summary>把会话的真实状态推到共用底栏（唯一入口）。</summary>
     private void PushFooter()
@@ -521,12 +714,17 @@ public sealed partial class MainWindow : Window
         //   托在用户已看到的分子上；LastTruth(raw) 只留给诊断/日志（MigrationSessionViewModel §2）。
         var truth = Session.PresentationTruth;
         var percent = truth?.Percent ?? Session.Percent;
-        FooterPercentText.Text = $"{percent:0.0}%";
-        FooterBytesText.Text = truth is null
-            ? Session.ProgressText
-            : $"{Format.Bytes(truth.DisplayedTransferredBytes)} / {Format.Bytes(truth.PlannedBytes)}";
-        _footerProgressPercent = double.IsNaN(percent) ? 0 : Math.Clamp(percent, 0, 100);
-        UpdateFooterProgressFill();
+        // ★ Round-2（§3.3）★ 底栏百分比 / 字节 / 进度条改由 80 ms 呈现节拍（RefreshFooterPresentation）驱动，
+        //   这里不再直接写 —— 否则真值一到就把数字跳到最前、条还在补间。只有节拍没起来时才按真值兜底。
+        if (_presentTimer is null)
+        {
+            FooterPercentText.Text = $"{percent:0.0}%";
+            FooterBytesText.Text = truth is null
+                ? Session.ProgressText
+                : $"{Format.Bytes(truth.DisplayedTransferredBytes)} / {Format.Bytes(truth.PlannedBytes)}";
+            _footerProgressPercent = double.IsNaN(percent) ? 0 : Math.Clamp(percent, 0, 100);
+            UpdateFooterProgressFill();
+        }
         FooterSpeedText.Text = truth is null
             ? Session.EngineSpeedText
             : (truth.SpeedBytesPerSecond > 0 ? Format.Speed(truth.SpeedBytesPerSecond) : "—");

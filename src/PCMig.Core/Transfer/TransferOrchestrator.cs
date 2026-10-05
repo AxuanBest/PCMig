@@ -94,6 +94,7 @@ public sealed class TransferOrchestrator
     private long _creditRetractEpoch;
     private long _largeCompletedBytes;          // large(/Z) 通道：已切换到下一个文件的前序大文件入账字节
     private string? _largeFileTarget;           // large(/Z) 通道：当前大文件的目标路径
+    private string? _largeFileSourcePath;       // ★ Round-3 PHASE A ★ 当前大文件的**源**路径（失败记忆与回冲都用源路径作键，与 /MT 通道一致）
     private long _largeFileStartLen;            // 该大文件开始前的已有长度（续传部分不重复计）
     private long _largeFileApproxSize;          // 当前大文件的近似大小（robocopy 输出解析值，兜底用）
     private PassKind _currentPass;
@@ -111,6 +112,48 @@ public sealed class TransferOrchestrator
     /// <summary>当前对象的重试/回冲真值（None / Retrying / RollingBack）——进度下降时必须能被解释。</summary>
     private RetryState _currentRetryState;
 
+    // ---- Round-3 PHASE A（2026-10-05，P0 真值污染）----
+    // 为什么必须有它：/Z 可续传会先给目标文件预分配最终长度（CurrentLargePartial 与
+    //   TrustsTargetStatForProgress 都据此拒绝信任目标长度），但 MarkInterrupted 却无条件走
+    //   MeasureSettledTarget ⇒ 把"只真传了 30 GB、长度却已预分配成 42 GB"的对象记成 42 GB，
+    //   经 baseBytes += receipt.TargetBytes 抬进 state.CompletedBytes，再被 RunningPercentCeiling
+    //   夹成 99.9%。用户真机视频：暂停前 72~74%，暂停瞬间 99.9% / 41.96 GB，Resume 后长期 99.9%，
+    //   而对象完成数仍是 0/41 —— 这不是呈现层问题，是 Core 真值被污染。
+    // 这里保存的是**已经过 ProgressTruthSnapshot.Create 同一套规则验证**的本对象确认量；
+    //   绝不在结算时重新读目标 FileInfo.Length。
+    /// <summary>本对象最近一次"可信确认的对象字节"（唯一允许用于 Interrupted 结算的量）。</summary>
+    private long _lastTrustedObjectConfirmedBytes;
+    /// <summary>本对象最近一次可信的**显示分子**（诊断与交叉校验用，不参与结算）。</summary>
+    private long _lastTrustedDisplayedBytes;
+    /// <summary>上面两个量所属的尝试趟次（attemptEpoch）；与当前趟不一致说明是新趟，必须重开。</summary>
+    private long _lastTrustedAttemptEpoch;
+
+    // ---- Round-2 2026-10-05（§3.1 真值源 trace）----
+    // 为什么需要它：用户视频显示"进度条仍在一段一段跳"，但"轮询 200 ms 一次"不等于"每 200 ms 都有一个
+    //   有用的新真值"。在猜测之前必须先区分四种情况：
+    //     A. 进程 I/O 计数器不可用 / 采样失败；
+    //     B. 可用但长时间不变（真值本身是稀疏的）；
+    //     C. 它在平滑变化，只是被上层某一层折叠成"重复值 + 大跳"；
+    //     D. 恢复时基线一次性发现了已存在的字节，大跳是真实且不可避免的。
+    //   本 trace 只落盘、只观测，不参与任何业务语义；PCMIG_PROGRESS_TRACE=1 时才启用。
+    private static readonly bool ProgressTraceEnabled = ResolveProgressTraceEnabled();
+    private long _lastTraceDisplayedBytes = -1;
+    private DateTime _lastTraceUtc = DateTime.MinValue;
+    private int _traceSamples;
+
+    private static bool ResolveProgressTraceEnabled()
+    {
+        try
+        {
+            var v = Environment.GetEnvironmentVariable("PCMIG_PROGRESS_TRACE");
+            return v is not null && (v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     // ---- 错误风暴检测 + 进度回冲 ----
     // F12：文件级错误行解析统一走 RobocopyRunner.TryParseFileErrorLine，保证"入账的键"与"回冲的键"
     //   由同一段代码产出同一字符串（旧实现各自取名字：/MT 重试行的名字带着 "正在重试..." 后缀，
@@ -123,6 +166,22 @@ public sealed class TransferOrchestrator
     /// </summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _failedCreditPaths =
         new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// ★ Round-3 PHASE A ★ /Z 大文件通道"已入账但结果未知"的**目标路径**→已入账字节。
+    ///
+    /// 为什么必须单独有一份：/Z 通道的入账时机是"下一个大文件的『新文件』行到达 ⇒ 前一个大文件必然已复制完"
+    /// （<see cref="CreditCurrentLarge"/>），而入账依据是 **robocopy 解析出的近似大小**——因为 /Z 会先把目标
+    /// 文件预分配成最终长度，实测增量恒为 0，取大值必然落到近似值上。
+    ///
+    /// 真机反例（PHASE A 第 3 轮，目标盘只剩 1.6 GB）：robocopy 的 stdout 是块缓冲，6 个大文件的
+    /// "新文件"行与紧随其后的 `错误 112 (0x00000070) 磁盘空间不足` **挤在同一批里**到达 ⇒ 42 GiB 全部
+    /// 入账、而一个字节都没落盘 ⇒ 界面报 42 GB / 42 GB（99.9%）+ 对象 0/41。旧实现只有 /MT 通道
+    /// （<see cref="_pendingCredit"/>）能按错误行回冲，/Z 通道的入账没有任何回冲键，于是失败字节永久留在分子上。
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _largeCredited =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private long _passFileAttempts;   // 本对象文件尝试数（含失败）
     private long _passErrors;         // 本对象文件错误数
     private string? _stormCode;       // 触发风暴终止的错误码（null=未触发）
@@ -200,6 +259,9 @@ public sealed class TransferOrchestrator
                 var rel = sourcePath[obj.SourcePath.Length..].TrimStart('\\');
                 var target = Path.Combine(obj.TargetPath, rel);
                 _largeFileTarget = target;
+                // ★ Round-3 PHASE A ★ 记源路径：入账的键必须是源路径（与 OnRunnerErrorLine / _failedCreditPaths 同一键空间），
+                //   否则 /Z 通道的入账永远找不到对应的回冲键——磁盘满时界面就会报"全部完成"（真机 42 GB / 99.9%）。
+                _largeFileSourcePath = sourcePath;
                 _largeFileApproxSize = approxBytes;
                 try { _largeFileStartLen = File.Exists(target) ? new FileInfo(target).Length : 0; }
                 catch { _largeFileStartLen = 0; }
@@ -235,19 +297,26 @@ public sealed class TransferOrchestrator
             Interlocked.Add(ref _bulkCopiedBytes, -credited);
             Interlocked.Increment(ref _creditRetractEpoch);   // F12：回冲即重开单调下限，界面必须立刻掉下来
         }
-        // /Z 通道：当前大文件失败则不再为其入账
-        if (_largeFileTarget != null)
+        // /Z 通道：① 已经按"前序大文件已复制完"入账过的，必须回冲；② 当前大文件失败则不再为其入账。
+        //   ★ Round-3 PHASE A ★ ①是新增的：旧实现只有 /MT 通道能回冲，/Z 通道的入账没有任何回冲路径，
+        //   于是"目标盘满 ⇒ 6 个大文件全部失败"时 42 GiB 虚报永久留在分子上（真机 42 GB / 42 GB（99.9%）、对象 0/41）。
+        var retractedLarge = 0L;
+        if (_largeCredited.TryRemove(srcPath, out var creditedLarge))
         {
-            var obj = _activeObject;
-            if (obj != null && srcPath.StartsWith(obj.SourcePath, StringComparison.OrdinalIgnoreCase))
-            {
-                var rel = srcPath[obj.SourcePath.Length..].TrimStart('\\');
-                if (string.Equals(_largeFileTarget, Path.Combine(obj.TargetPath, rel), StringComparison.OrdinalIgnoreCase))
-                {
-                    _largeFileTarget = null;
-                    Interlocked.Increment(ref _creditRetractEpoch);   // F12：当前大文件已判失败，实时增量作废
-                }
-            }
+            Interlocked.Add(ref _largeCompletedBytes, -creditedLarge);
+            retractedLarge = creditedLarge;
+        }
+        if (string.Equals(_largeFileSourcePath, srcPath, StringComparison.OrdinalIgnoreCase))
+        {
+            _largeFileTarget = null;
+            _largeFileSourcePath = null;
+            Interlocked.Increment(ref _creditRetractEpoch);   // F12：当前大文件已判失败，实时增量作废
+        }
+        if (retractedLarge > 0)
+        {
+            Interlocked.Increment(ref _creditRetractEpoch);   // F12：回冲即重开单调下限，界面必须立刻掉下来
+            _log.Information("大文件入账回冲：{SourcePath} 失败，扣回 {Bytes} 字节（/Z 通道按近似大小入账，失败后必须回冲）",
+                srcPath, retractedLarge);
         }
 
         // ①.5 磁盘满熔断（T07）：ENOSPC 属于"根因没除、重试毫无意义"——继续跑只会对每个文件
@@ -277,20 +346,38 @@ public sealed class TransferOrchestrator
     {
         var p = _largeFileTarget;
         if (p == null) return;
-        long done = _largeFileApproxSize;
-        try
+        var src = _largeFileSourcePath;
+        long done;
+        if (src != null && _failedCreditPaths.ContainsKey(src))
         {
-            if (File.Exists(p))
-                // 实测增量与近似大小取大：缓冲爆发时行到达晚于复制完成，实测增量=0，用近似值入账
-                done = Math.Max(_largeFileApproxSize, Math.Max(0, new FileInfo(p).Length - _largeFileStartLen));
-            else
-                // F12：目标上根本没有这个文件（失败/被跳过/写不进去）就一个字节都不认——旧实现照样按
-                //   _largeFileApproxSize 入账，等于给"失败的大文件"记满进度（D01 r4 的 1 GB 就是这么来的）。
-                done = 0;
+            // ★ Round-3 PHASE A ★ 本趟已经见过这个大文件的错误行 ⇒ 一个字节都不认。
+            //   robocopy 的 stdout 是块缓冲（且 /MT 与 /Z 混跑时顺序无保证），"新文件"行与紧随的错误行
+            //   会挤在同一批里到达；旧实现只看 File.Exists，而 /Z 预分配会让**失败的大文件也"存在且长度正确"**
+            //   ⇒ 真机实测：目标盘只剩 1.6 GB，6 个大文件全部 `错误 112 磁盘空间不足`，界面却报 42 GB / 42 GB（99.9%）。
+            done = 0;
         }
-        catch { /* 用近似值兜底 */ }
-        Interlocked.Add(ref _largeCompletedBytes, done);
+        else
+        {
+            done = _largeFileApproxSize;
+            try
+            {
+                if (File.Exists(p))
+                    // 实测增量与近似大小取大：缓冲爆发时行到达晚于复制完成，实测增量=0，用近似值入账
+                    done = Math.Max(_largeFileApproxSize, Math.Max(0, new FileInfo(p).Length - _largeFileStartLen));
+                else
+                    // F12：目标上根本没有这个文件（失败/被跳过/写不进去）就一个字节都不认——旧实现照样按
+                    //   _largeFileApproxSize 入账，等于给"失败的大文件"记满进度（D01 r4 的 1 GB 就是这么来的）。
+                    done = 0;
+            }
+            catch { /* 用近似值兜底 */ }
+        }
+        if (done > 0)
+        {
+            Interlocked.Add(ref _largeCompletedBytes, done);
+            if (src != null) _largeCredited[src] = done;   // 迟到错误行按此回冲（本文件可能已不是"当前大文件"）
+        }
         _largeFileTarget = null;
+        _largeFileSourcePath = null;
     }
 
     /// <summary>/Z 大文件通道的实时落盘增量（只 stat 当前一个文件，O(1)）。</summary>
@@ -699,9 +786,14 @@ public sealed class TransferOrchestrator
         _stormCode = null;
         _pendingCredit.Clear();
         _failedCreditPaths.Clear(); // F12f：新的一趟尝试，失败记忆清零
-        _largeFileTarget = null; _largeFileStartLen = 0; _largeFileApproxSize = 0;
+        _largeCredited.Clear();     // ★ Round-3 PHASE A ★ 新对象/新趟：旧对象的入账回冲键不得跨对象残留
+        _largeFileTarget = null; _largeFileSourcePath = null; _largeFileStartLen = 0; _largeFileApproxSize = 0;
         _currentRetryState = RetryState.None;   // FIX BATCH 4：新对象从"没有重试"开始
         Interlocked.Exchange(ref _ioConfirmedBytes, 0);
+        // Round-3 PHASE A：本对象的可信 checkpoint 随对象重开。
+        Interlocked.Exchange(ref _lastTrustedObjectConfirmedBytes, 0);
+        Interlocked.Exchange(ref _lastTrustedDisplayedBytes, 0);
+        Interlocked.Exchange(ref _lastTrustedAttemptEpoch, 0);
         _activeObject = obj; _currentPass = passKind;
         _lastFileEventAt = DateTime.MinValue; _lastEnumAt = DateTime.MinValue;
         _enumSkipLogged = false;
@@ -750,7 +842,9 @@ public sealed class TransferOrchestrator
             receipt.RobocopyExitCodeBulk = bulk?.ExitCode ?? -1;
             if (_spaceCode != null) return MarkSpaceFailed(receipt);     // 目标盘满：可恢复失败，不重试不续跑
             if (_stormCode != null) return MarkStormFailed(receipt);     // 错误风暴：主动终止，不重试不续跑
-            if (bulk == null) return MarkInterrupted(receipt, obj);       // 取消
+            if (bulk == null) return MarkInterrupted(receipt, obj,
+                ResolveLiveTrustedObjectBytes(obj),
+                Interlocked.Read(ref _lastTrustedAttemptEpoch));       // 取消
             if (!bulk.Success)
             {
                 receipt.ErrorClass = Classify(bulk);
@@ -763,7 +857,7 @@ public sealed class TransferOrchestrator
                 //   旧实现只在成功/大文件失败分支量一次，bulk 失败分支留 0 ⇒ 报告里"已传 0 B"，
                 //   而盘上实际躺着这趟已复制的那部分（D04 现场：三个文件被占用，其余 35 GB 已落盘）。
                 //   "失败"只是判定，不能顺手把"已经落盘多少"也说成 0。
-                MeasureTarget(receipt, obj);
+                MeasureSettledTarget(receipt, obj);
                 _log.Error("对象 {Id} {Pass} 通道失败: Exit={Code}（{Meaning}） {Err}",
                     obj.ObjectId, passKind, bulk.ExitCode,
                     PCMig.Core.Util.ErrorTranslator.ExitCodeText(bulk.ExitCode), receipt.ErrorDetail);
@@ -778,21 +872,23 @@ public sealed class TransferOrchestrator
                 receipt.RobocopyExitCodeLarge = large?.ExitCode ?? -1;
                 if (_spaceCode != null) return MarkSpaceFailed(receipt);
                 if (_stormCode != null) return MarkStormFailed(receipt);
-                if (large == null) return MarkInterrupted(receipt, obj);
+                if (large == null) return MarkInterrupted(receipt, obj,
+                    ResolveLiveTrustedObjectBytes(obj),
+                    Interlocked.Read(ref _lastTrustedAttemptEpoch));
                 if (!large.Success)
                 {
                     receipt.ErrorClass = Classify(large);
                     receipt.ErrorDetail = DetailFor(large);
                     receipt.Status = ObjectStatus.CompletedWithErrors; // 主体已成，大文件有问题单独标记
                     receipt.CompletedUtc = DateTime.UtcNow;
-                    MeasureTarget(receipt, obj);
+                    MeasureSettledTarget(receipt, obj);
                     return receipt;
                 }
             }
 
             receipt.Status = ObjectStatus.Completed;
             receipt.CompletedUtc = DateTime.UtcNow;
-            MeasureTarget(receipt, obj);
+            MeasureSettledTarget(receipt, obj);
             return receipt;
         }
         finally
@@ -834,9 +930,15 @@ public sealed class TransferOrchestrator
             Interlocked.Exchange(ref _largeCompletedBytes, 0);
             _pendingCredit.Clear();
             _failedCreditPaths.Clear(); // F12f：新的一趟尝试，失败记忆清零（失败只在本趟内被记住）
-            _largeFileTarget = null; _largeFileStartLen = 0; _largeFileApproxSize = 0;
+            _largeCredited.Clear();     // ★ Round-3 PHASE A ★ 新的一趟尝试：上一趟的 /Z 入账回冲键作废
+            _largeFileTarget = null; _largeFileSourcePath = null; _largeFileStartLen = 0; _largeFileApproxSize = 0;
         _currentRetryState = RetryState.None;   // FIX BATCH 4：新对象从"没有重试"开始
         Interlocked.Exchange(ref _ioConfirmedBytes, 0);
+            // Round-3 PHASE A：每一趟尝试都重开可信 checkpoint（与上面的单调基线同理）——
+            //   否则上一趟确认到的高值会被带进新趟，暂停结算时又变成假进度。
+            Interlocked.Exchange(ref _lastTrustedObjectConfirmedBytes, 0);
+            Interlocked.Exchange(ref _lastTrustedDisplayedBytes, 0);
+            Interlocked.Exchange(ref _lastTrustedAttemptEpoch, 0);
             _lastFileEventAt = DateTime.MinValue;
             Interlocked.Increment(ref _attemptEpoch);   // 通知进度轮询：单调基线随本趟尝试重开
 
@@ -888,8 +990,16 @@ public sealed class TransferOrchestrator
         return null;
     }
 
-    /// <summary>枚举目标侧实测落盘量（Receipt 的数据以此为准，不依赖 robocopy 自报）。</summary>
-    private void MeasureTarget(ObjectReceipt receipt, PlannedObject obj)
+    /// <summary>
+    /// 枚举目标侧实测落盘量（**已完成/已结算**对象的 Receipt 以此为准，不依赖 robocopy 自报）。
+    /// <para>
+    /// ★ Round-3 PHASE A ★ 由 <c>MeasureTarget</c> 改名而来。<b>名字即纪律</b>：只有对象已经
+    /// "落定"（Completed / 真正可实测的失败收尾 / Verifier 复验）才允许调用它；
+    /// 被打断（Pause / Stop / Cancel）的对象**绝不能**走这里 —— 见
+    /// <see cref="CaptureInterruptedConfirmedProgress"/>（<c>/Z</c> 预分配会把最终长度当成已传字节）。
+    /// </para>
+    /// </summary>
+    private void MeasureSettledTarget(ObjectReceipt receipt, PlannedObject obj)
     {
         try
         {
@@ -928,23 +1038,260 @@ public sealed class TransferOrchestrator
     }
 
     /// <summary>
-    /// 被打断（暂停 / 取消）的回执。
+    /// 被打断（暂停 / 取消 / 停止）的回执。
     /// <para>
-    /// ★ UI Closure / 进度真值（2026-10-05，用户人工验收项）★ 被打断的对象**同样必须实测目标落盘量**。
-    /// 旧实现这里不测落盘 ⇒ <c>receipt.TargetBytes</c> 停在默认 0（<c>Models.cs:277</c>）⇒ 紧接着的对象字节
-    /// 累计把"本次已确认传完的字节"覆写成 0 ⇒ 真值快照按 <c>inFlightConfirmedBytes=0</c> 重算百分比 = 0
-    /// ⇒ 界面出现"暂停后 0.0% / 0 B / 176.9 GB 计划 / 剩余 100% 未传"（用户现场截图）。
-    /// 中断只意味着"这个对象没完成"，**不意味着已经传到盘上的数据不算数**。
-    /// 实测口径与失败分支（:754-758 F7）完全一致：只量落盘，不猜测、不外推。
+    /// ★ Round-3 PHASE A（2026-10-05，P0 真值污染修复）★
+    /// 旧实现在这里**无条件** <c>MeasureTarget</c>（现名 <see cref="MeasureSettledTarget"/>）。那对
+    /// "目标长度 == 真实落盘量"的通道是对的，但对 <c>/Z</c> 可续传通道是灾难：robocopy 会先给目标文件
+    /// 预分配最终长度，于是"只真传了 30 GB、长度却已经是 42 GB"的对象被记成 <c>TargetBytes≈42 GB</c>，
+    /// 经 <c>baseBytes += receipt.TargetBytes</c> 抬进 <c>state.CompletedBytes</c>，再被
+    /// <c>RunningPercentCeiling</c> 夹成 99.9%。真机后果（用户视频）：暂停前 72~74%，暂停瞬间
+    /// 99.9% / 41.96 GB，Resume 后长期 99.9%，而对象完成数仍是 0/41 —— 三者不可能同时为真。
+    /// </para>
+    /// <para>
+    /// 现在改为**只认运行时可信 checkpoint**：<c>PollProgressAsync</c> 用同一套
+    /// <see cref="ProgressTruthSnapshot"/> 规则验证过的"本对象确认量"。结算时再读一次目标
+    /// <c>FileInfo.Length</c> 就等于把 <c>TrustsTargetStatForProgress</c> 那条保护绕过去。
+    /// </para>
+    /// <para>
+    /// <b>为什么不能用"实测长度"做兜底</b>：本条通道分不出"已落盘"与"已预分配"，所以
+    /// <c>measured</c> 永远只是<b>上界</b>而非事实。若将来某个通道确认 <c>TargetStatTrusted == true</c>
+    /// （即该趟确实不做预分配），也只允许把实测作为"不超过可信上界"的**补充证据**，不能作为默认来源。
     /// </para>
     /// </summary>
-    private ObjectReceipt MarkInterrupted(ObjectReceipt receipt, PlannedObject obj)
+    private ObjectReceipt MarkInterrupted(ObjectReceipt receipt, PlannedObject obj,
+        long trustedObjectConfirmedBytes, long trustedAttemptEpoch)
     {
         receipt.Status = ObjectStatus.Interrupted;
         receipt.CompletedUtc = DateTime.UtcNow;
         receipt.ErrorDetail = "interrupted";
-        MeasureTarget(receipt, obj);
+        CaptureInterruptedConfirmedProgress(receipt, obj, trustedObjectConfirmedBytes, trustedAttemptEpoch);
         return receipt;
+    }
+
+    /// <summary>
+    /// 现算"本对象截至此刻的可信已确认字节"（**只读 Worker I/O 与解析累计，绝不读目标长度**）。
+    /// <para>
+    /// 为什么需要它：进度轮询是 2 秒一轮，短任务或"开始后立刻按暂停"时
+    /// <c>_lastTrustedObjectConfirmedBytes</c> 可能一次都还没被采到 —— 若此时直接用它结算，
+    /// 分子会变成 0（正是 P04 回归测试抓到的退化，也是 UI-02 那个"暂停后 0 B"的老现象）。
+    /// 这里用与轮询**完全同一套来源**（bulk 解析累计 + /Z 已入账大文件 + 当前大文件 O(1) 实时长度 +
+    /// 进程 I/O 计数器）现算一次，再与最近一次采样取大：
+    /// 既不依赖目标长度（<c>/Z</c> 预分配污染的唯一入口），也不丢基线（采样值含 baseline）。
+    /// </para>
+    /// </summary>
+    private long ResolveLiveTrustedObjectBytes(PlannedObject obj)
+    {
+        var sampled = Interlocked.Read(ref _lastTrustedObjectConfirmedBytes);
+
+        // ★ Round-3 PHASE A（Stop 路径 P0 的第二条注入项）★
+        //   预分配通道（Large 的 /Z、RootFiles 的 /J）**不得**再把 live 增量算进来。
+        //   真机证据（job JOB-20261005-143738-4963，Stop 于 85.7%）：
+        //     `Phase=Interrupted committed=45097156608`（42 GiB，= 预分配目标长度总和），
+        //     同一时刻对象完成数仍 0/41 —— 分子只能来自"预分配长度"这一类伪证据。
+        //   为什么 live 增量在这条通道上不可信：
+        //     · `_ioConfirmedBytes` 是 worker 进程**从源读出的字节**累计。`/Z` 重启续传时 robocopy
+        //       会重新读一遍已经预分配好的目标所对应的源区间，读计数因此可以在极短时间内冲上
+        //       对象计划量（真机 0.2 秒内 `inFlight=45097156608`），它**证明不了目标落盘了多少**；
+        //     · `CurrentLargePartial()` 对预分配通道恒 0（TrustsTargetStatForProgress → false），
+        //       `_largeCompletedBytes` 只记已完成的前序文件 —— 都不是"当前对象本次确认量"。
+        //   因此这条通道**只认运行时可信 checkpoint**（它由轮询用"本趟已确认"口径维护、只增不减）；
+        //   若还没采到样本（对象开始后立刻被打断），宁可记 0 —— 呈现层有 continuation 高水位兜住
+        //   显示连续性，而"凭空多出没传过的字节"是不可恢复的信任破坏（执行书 §18 / R24）。
+        if (_currentPass != PassKind.Bulk)
+            return sampled;
+
+        var liveIncrement = Interlocked.Read(ref _bulkCopiedBytes)
+            + Interlocked.Read(ref _largeCompletedBytes)
+            + CurrentLargePartial()
+            + Interlocked.Read(ref _ioConfirmedBytes);
+        var trusted = Math.Max(sampled, liveIncrement);
+
+        // ★ 目标长度在这里**只有一个合法用法**：Bulk 小文件通道的补充证据（取大，上界由
+        //   ResolveInterruptedConfirmedBytes 夹到计划量）。这与轮询里"回退枚举只允许 Bulk"是同一条
+        //   既有口径（见 PollProgressAsync 的 enumFallbackAllowed）。
+        //   为什么其它通道不行：
+        //     · Large（/Z）通道：robocopy 会先给目标文件预分配最终长度 ⇒ 长度 ≠ 已落盘字节，
+        //       采信它就是把 31 GiB 的对象记成 42 GiB（这正是 P0：暂停瞬间 72% → 99.9%）；
+        //     · RootFiles 通道：源根可能散落单个超大文件，一旦被 /J 预分配，枚举同样会虚报接近完成。
+        //   反过来说，Bulk 通道若连这条补充证据都不给，"worker 已写盘但还没解析出任何行"的短暂窗口
+        //   里分子就会掉成 0 —— 那是 UI-02 的假归零，同样不可接受。
+        if (_currentPass == PassKind.Bulk)
+        {
+            var measured = MeasureCurrentTargetBytes(obj);
+            if (measured > trusted) trusted = measured;
+        }
+        return trusted;
+    }
+
+    /// <summary>
+    /// 续传基线（Round-3 PHASE A）：**只有不预分配的通道**才允许用"目标当前长度"当基线。
+    /// <para>
+    /// 真机证据（job JOB-20261005-143738-4963，Stop 后 Resume）：续传瞬间
+    /// <c>Phase=Running previousDisplayedBytes=0 newDisplayedBytes=45097156608 newPercent=99.9
+    /// source=ParsedWorkerOutput</c> —— 0 → 42 GiB 只用了一次轮询，而对象完成数还是 0/41。
+    /// 唯一能解释这条读数的就是旧基线 <c>MeasureCurrentTargetBytes(obj)</c>：
+    /// Stop 留下的 Interrupted 回执让 <c>hasPriorReceipt</c> 为真，于是基线取到了
+    /// <b>/Z 预分配后的目标长度</b>（42 GiB），<c>nowBytes = baseline + …</c> 一步顶到计划量，
+    /// 再被 <c>RunningPercentCeiling = 99.9</c> 夹住 —— 与用户视频里的 99.9% / 41.96 GB 完全同源。
+    /// </para>
+    /// <para>
+    /// 口径与 <c>PollProgressAsync</c> 既有的 <c>enumFallbackAllowed = _currentPass == PassKind.Bulk</c>
+    /// 一致；预分配通道唯一可信的续传基线是上一次运行落下的 <b>Interrupted 回执</b>
+    /// （PHASE A 之后其 <c>TargetBytes</c> 已是运行时可信 checkpoint，不再是目标逻辑长度）。
+    /// 取不到就记 0：宁可让呈现层用高水位拖住显示，也不能凭空多出没传过的字节。
+    /// </para>
+    /// </summary>
+    private long ResolveResumeBaselineBytes(PlannedObject obj)
+    {
+        var trusted = ReadTrustedInterruptedReceiptBytes(obj);
+        var mayPreallocate = obj.UseRestartablePass;
+        var measured = mayPreallocate ? 0L : MeasureCurrentTargetBytes(obj);
+        var baseline = ResolveResumeBaselineForPass(_currentPass, measured, trusted, mayPreallocate);
+        if (baseline > 0)
+        {
+            _log.Debug("续传基线：object={ObjectId} pass={Pass} mayPreallocate={MayPreallocate} " +
+                "measuredTargetBytes={Measured} trustedReceiptBytes={Trusted} baseline={Baseline}",
+                obj.ObjectId, _currentPass, mayPreallocate, measured, trusted, baseline);
+        }
+        return baseline;
+    }
+
+    /// <summary>
+    /// 续传基线选择规则（纯函数，便于契约测试直接锁死）：
+    /// ① <b>可信 Interrupted 回执优先</b>（任何通道）：它由运行时 checkpoint 写入，是"本趟真正确认过的字节"；
+    /// ② 会预分配的对象（<c>UseRestartablePass</c> ⇒ Large 通道挂 <c>/Z</c>）**永不**采信目标长度 —— 宁可为 0，
+    ///    由呈现层高水位保证显示不倒退；
+    /// ③ 只有"不预分配的 Bulk 小文件通道 + 没有回执"才允许退回目标长度。
+    /// </summary>
+    /// <remarks>
+    /// ★ Round-3 PHASE A（Stop 路径 P0 的第三条注入项，真机定位）★
+    /// 旧实现只按 <c>pass</c> 分流：Bulk ⇒ 目标长度、其余 ⇒ 回执。漏洞在于
+    /// <b>"通道"与"目标上有没有预分配文件"是两件事</b>：一个对象的 Large 通道（/Z）先跑、把 6 个 8 GiB 文件
+    /// 预分配成全长，随后 Resume 时**先跑 Bulk 通道**（robocopy 选项 <c>/MAX:… /MT:16</c>），
+    /// 于是基线按 Bulk 口径取到实测目标长度 = <b>42 GiB</b>（恰好等于整对象计划量）。
+    /// 真机证据（job JOB-20261005-150030-19a6，`phA4-gate`）：
+    /// Resume 后第一次轮询的 trace 即为
+    /// <c>base=45097156608 now=45097156608</c>（<c>io=0</c>，0.25 秒内不可能真传 42 GiB），
+    /// 紧接着 UI 写 <c>99.9% / 41.96 GB</c>，而 robocopy 同一刻的汇总行是
+    /// <c>文件: 6 复制 0 跳过 6</c> / <c>字节: 42.000 g 0 42.000 g</c>（一个字节都没复制）。
+    /// trace 里 <c>pass=Large</c> 是"打印那一刻"的通道，<c>baseline</c> 是轮询启动时按 Bulk 算出来的 —— 两者不同刻。
+    /// </remarks>
+    internal static long ResolveResumeBaselineForPass(PassKind pass, long measuredTargetBytes,
+        long trustedReceiptBytes, bool objectMayPreallocate)
+    {
+        if (trustedReceiptBytes > 0) return trustedReceiptBytes;
+        if (pass != PassKind.Bulk || objectMayPreallocate) return 0;
+        return measuredTargetBytes > 0 ? measuredTargetBytes : 0;
+    }
+
+    /// <summary>
+    /// 读取"本对象上一次运行留下的、可信的已确认字节"。只有 <c>Interrupted</c> 回执可信：
+    /// 它由 <c>CaptureInterruptedConfirmedProgress</c> 按运行时 checkpoint 写入，不是目标长度。
+    /// 其它状态（Failed / 无回执）返回 0 —— 本趟从零开始算，由呈现层高水位保证显示不倒退。
+    /// </summary>
+    private long ReadTrustedInterruptedReceiptBytes(PlannedObject obj)
+    {
+        try
+        {
+            var receipts = _ctx.LoadReceipts();
+            var trusted = ResolveTrustedInterruptedBytes(receipts, obj.ObjectId, obj.EstimatedBytes);
+            var count = receipts.Count(r => string.Equals(r.ObjectId, obj.ObjectId, StringComparison.OrdinalIgnoreCase));
+            if (count > 1)
+            {
+                _log.Debug(
+                    "续传基线：object={ObjectId} 共有 {Count} 份回执（每次尝试一份），按「最新一次尝试的状态 + 所有 Interrupted 的最大值」解析出可信字节 {Trusted}",
+                    obj.ObjectId, count, trusted);
+            }
+            return trusted;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning("读取续传基线失败（按 0 处理，绝不回退到目标长度）: {Object} {Error}", obj.ObjectId, ex.Message);
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// 对象级回执权威解析（纯函数，便于回归）：同一对象**可能有多份回执**——每次尝试写一份，
+    /// 文件名精确到秒（<c>JobManager.SaveReceipt</c>）。因此解析口径必须**确定且单调**，
+    /// 否则"已确认字节"会随目录枚举顺序变化（旧实现取第一份命中的：两份 Interrupted 时可能取到更小的那份，
+    /// 让已确认字节倒退；这正是 UI Closure 要根治的那一类污染）。
+    /// <list type="number">
+    /// <item>只看**最新一次尝试**的状态：先比 <c>CompletedUtc</c>，同刻再比 <c>Attempt</c>；</item>
+    /// <item>最新一次是 <c>Interrupted</c> ⇒ 可信字节取该对象**所有 Interrupted 回执的最大值**（已确认的字节只许变大），再按计划字节夹取；</item>
+    /// <item>最新一次不是 <c>Interrupted</c>（Completed / Failed）或无回执 ⇒ 返回 0，本趟从零起算，显示不倒退由呈现层高水位负责。</item>
+    /// </list>
+    /// </summary>
+    internal static long ResolveTrustedInterruptedBytes(
+        IEnumerable<ObjectReceipt> receipts, string objectId, long plannedBytes)
+    {
+        ObjectReceipt? latest = null;
+        var highestInterrupted = 0L;
+        var seen = 0;
+        foreach (var r in receipts)
+        {
+            if (!string.Equals(r.ObjectId, objectId, StringComparison.OrdinalIgnoreCase)) continue;
+            seen++;
+            if (r.Status == ObjectStatus.Interrupted && r.TargetBytes > highestInterrupted) highestInterrupted = r.TargetBytes;
+            if (latest is null
+                || r.CompletedUtc > latest.CompletedUtc
+                || (r.CompletedUtc == latest.CompletedUtc && r.Attempt > latest.Attempt))
+            {
+                latest = r;
+            }
+        }
+
+        if (seen == 0 || latest is null) return 0;
+        if (latest.Status != ObjectStatus.Interrupted) return 0;
+
+        var trusted = highestInterrupted > 0 ? highestInterrupted : latest.TargetBytes;
+        if (trusted <= 0) return 0;
+        if (plannedBytes > 0 && trusted > plannedBytes) trusted = plannedBytes;
+        return trusted;
+    }
+
+    /// <summary>
+    /// Interrupted 结算：<c>receipt.TargetBytes</c> 表示"**截至被打断时本趟已可信确认的对象字节**"，
+    /// <b>不是</b>目标文件的逻辑长度（<c>/Z</c> 预分配会让后者等于最终大小）。
+    /// <para>
+    /// 口径与 <c>MeasureSettledTarget</c> 明确区分：
+    /// <b>Completed Receipt Truth ≠ Interrupted In-flight Truth</b> ——
+    /// 前者问"盘上现在有多少"（对象已经完整结束，可以直接量），
+    /// 后者问"这一趟确认传到了多少"（对象还在半途，只认运行时 checkpoint）。
+    /// </para>
+    /// <para>
+    /// Interrupted 永不进入 <c>completedIds</c>（skip 权威集合只取 <c>ObjectStatus.Completed</c>），
+    /// 所以这个数不会冒充"完成"，只用于恢复时的进度连续性。
+    /// </para>
+    /// </summary>
+    private ObjectReceipt CaptureInterruptedConfirmedProgress(ObjectReceipt receipt, PlannedObject obj,
+        long trustedObjectConfirmedBytes, long trustedAttemptEpoch)
+    {
+        var trusted = ResolveInterruptedConfirmedBytes(trustedObjectConfirmedBytes, obj.EstimatedBytes);
+        receipt.TargetBytes = trusted;
+        // 文件计数无可靠运行时来源：保持 0，不猜（旧实现顺带把实测文件数也带进来了）。
+        receipt.TargetFiles = 0;
+        _log.Information(
+            "对象 {ObjectId} 被打断：按运行时可信 checkpoint 结算 {TrustedBytes}（计划 {PlannedBytes}，" +
+            "attemptEpoch={AttemptEpoch}）；不使用目标实测长度（/Z 会预分配最终大小）",
+            obj.ObjectId, Format.Bytes(trusted), Format.Bytes(Math.Max(obj.EstimatedBytes, 0)), trustedAttemptEpoch);
+        return receipt;
+    }
+
+    /// <summary>
+    /// Interrupted 结算的夹取规则：可信确认量必须落在 <c>[0, 本对象计划量]</c> 内。
+    /// <para>
+    /// 单独抽成 <c>internal static</c> 是为了让回归测试能直接锁死这条规则
+    /// （TEST A：<c>/Z</c> 预分配场景下 30.99 GiB 绝不能被写成 42 GiB）。
+    /// 计划量未知（≤0）时不做上界夹取 —— 不知道上界就不要假装知道。
+    /// </para>
+    /// </summary>
+    internal static long ResolveInterruptedConfirmedBytes(long trustedObjectConfirmedBytes, long estimatedBytes)
+    {
+        if (trustedObjectConfirmedBytes <= 0) return 0;
+        var planned = estimatedBytes > 0 ? estimatedBytes : 0;
+        return planned > 0 && trustedObjectConfirmedBytes > planned ? planned : trustedObjectConfirmedBytes;
     }
 
     private enum PauseOutcome { Running, Canceled }
@@ -1137,7 +1484,10 @@ public sealed class TransferOrchestrator
     /// <summary>
     /// 进度轮询（超大规模安全）：
     ///   主通道 = robocopy 输出行累计（bulk）+ 当前大文件 stat（/Z），平时零枚举；
-    ///   基线 = 仅当本对象有历史 Receipt（即续传）时枚举一次目标，全新对象基线为 0；
+    ///   基线 = 仅当本对象有历史 Receipt（即续传）时才有：**Bulk 通道**枚举一次目标；
+    ///          **预分配通道**（Large /Z、RootFiles /J）改用上一次 Interrupted 回执里的可信已确认字节
+    ///          （Round-3 PHASE A；目标长度在预分配通道上等于最终大小，拿它当基线就是把 42 GiB 计划量
+    ///          一步变成"已传完 42 GiB"，真机表现为续传瞬间 99.9%）；全新对象基线为 0；
     ///   回退 = robocopy 重定向 stdout 是块缓冲，少量大文件时行会憋到进程退出才到达——
     ///         30 秒无文件行事件则实测枚举一次目标（间隔≥10s，取最大值保证单调不回退）。
     /// </summary>
@@ -1146,7 +1496,7 @@ public sealed class TransferOrchestrator
     {
         var hasPriorReceipt = _ctx.LoadReceipts().Any(r =>
             string.Equals(r.ObjectId, obj.ObjectId, StringComparison.OrdinalIgnoreCase));
-        var baseline = hasPriorReceipt ? MeasureCurrentTargetBytes(obj) : 0;
+        var baseline = hasPriorReceipt ? ResolveResumeBaselineBytes(obj) : 0;
         long lastBytes = baseline;
         var lastTime = DateTime.UtcNow;
         // 进度停滞检测（v0.3.8）："界面长时间不动"是用户判断"卡死"并手动终止的直接原因，
@@ -1310,6 +1660,31 @@ public sealed class TransferOrchestrator
                 inFlightSource: ResolveInFlightSource(effBytes),
                 timestampUtc: now);
 
+            // ★ Round-3 PHASE A ★ 同步保存"本对象最近一次可信确认量"与所属趟次。
+            //   这是 Interrupted 结算的**唯一**依据（MarkInterrupted 不再读目标文件长度）。
+            //   这里写入的已经是经 ProgressTruthSnapshot.Create 规则验证过的值——它已经排除了
+            //   /Z 预分配污染（TargetStat 在 targetStatTrusted=false 时不被承认）。结算时再读一次
+            //   目标 FileInfo.Length 就等于把这条保护绕过去。
+            //   趟次一致时只增不减（轮询可能采到 RollingBack 后的低值，但"已经确认过的量"不应被抹掉）。
+            var sampledEpoch = Interlocked.Read(ref _lastTrustedAttemptEpoch);
+            // 注意口径：checkpoint 存的是"本对象**全量**可信已确认字节"（含本对象开始前就已落盘的
+            //   baseline），与 receipt.TargetBytes 的语义一致；truth.CurrentObjectConfirmedBytes
+            //   只含本趟增量，所以这里要补回 baseline。
+            var trustedFull = Math.Max(0L, baseline + truth.CurrentObjectConfirmedBytes);
+            if (sampledEpoch != truth.AttemptEpoch)
+            {
+                Interlocked.Exchange(ref _lastTrustedAttemptEpoch, truth.AttemptEpoch);
+                Interlocked.Exchange(ref _lastTrustedObjectConfirmedBytes, trustedFull);
+                Interlocked.Exchange(ref _lastTrustedDisplayedBytes, truth.DisplayedTransferredBytes);
+            }
+            else
+            {
+                if (trustedFull > Interlocked.Read(ref _lastTrustedObjectConfirmedBytes))
+                    Interlocked.Exchange(ref _lastTrustedObjectConfirmedBytes, trustedFull);
+                if (truth.DisplayedTransferredBytes > Interlocked.Read(ref _lastTrustedDisplayedBytes))
+                    Interlocked.Exchange(ref _lastTrustedDisplayedBytes, truth.DisplayedTransferredBytes);
+            }
+
             // 对外一律报"本次运行的累计平均速率"（T01：旧口径偏低 4.6 倍，用户会误判剩余时间）；
             // speed.Current 只用于上面的速度异常检测，不再出现在给用户看的数字里。
             var shown = truth.SpeedBytesPerSecond;
@@ -1322,6 +1697,11 @@ public sealed class TransferOrchestrator
                 state.BytesPerSecond = shown;
                 _ctx.SaveState(state);
             }
+            if (ProgressTraceEnabled)
+            {
+                TraceProgressSnapshot(state, obj, truth, ioConfirmed, ioProgress.Source, nowBytes, effBytes, baseline);
+            }
+
             // 停滞超过 45 秒：把"当前对象 / 已传 A / 共 B"和"大文件可能数分钟无进度变化"一并报出去，
             // 让用户知道引擎还活着、在等的是大文件而不是卡死（生产事故里用户据此误判并终止了任务）。
             var msg = stallSeconds >= StallWarnSeconds
@@ -1339,6 +1719,41 @@ public sealed class TransferOrchestrator
 
     /// <summary>进度停滞多久算"值得提示"（秒）。取 45 秒：小于最常见的"大文件首字节延迟"窗口。</summary>
     public const double StallWarnSeconds = 45;
+
+    /// <summary>
+    /// Round-2（§3.1）：把每一拍的**真值来源**如实落盘，用来回答"真值到底是稀疏（B）
+    /// 还是被上层折叠（C），还是恢复时基线一次性发现了已有字节（D）"。
+    /// 只观测、不改变任何业务语义；由环境变量 <c>PCMIG_PROGRESS_TRACE=1</c> 开启。
+    /// </summary>
+    private void TraceProgressSnapshot(JobState state, PlannedObject obj, ProgressTruthSnapshot truth,
+        long ioConfirmed, ProgressTruthSource ioSource, long nowBytes, long effBytes, long baseline)
+    {
+        try
+        {
+            var utc = truth.TimestampUtc;
+            var prev = _lastTraceDisplayedBytes;
+            var delta = prev < 0 ? 0L : truth.DisplayedTransferredBytes - prev;
+            var deltaPercent = prev < 0 || truth.PlannedBytes <= 0 ? 0d : delta * 100.0 / truth.PlannedBytes;
+            var gapMs = _lastTraceUtc == DateTime.MinValue ? 0d : (utc - _lastTraceUtc).TotalMilliseconds;
+            _lastTraceDisplayedBytes = truth.DisplayedTransferredBytes;
+            _lastTraceUtc = utc;
+            _traceSamples++;
+            _log.Information(
+                "ProgressTrace#{N} job={JobId} obj={ObjectId} pass={Pass} phase={Phase} raw={Raw} committed={Committed} " +
+                "inFlight={InFlight} source={Source} ioSource={IoSource} ioConfirmed={IoConfirmed} epoch={Epoch} " +
+                "retry={Retry} baseline={Baseline} nowBytes={NowBytes} effBytes={EffBytes} delta={Delta} " +
+                "deltaPercent={DeltaPercent} gapMs={GapMs} utc={Utc}",
+                _traceSamples, state.JobId, obj.ObjectId, _currentPass, state.Phase,
+                truth.DisplayedTransferredBytes, truth.CommittedBytes, truth.InFlightConfirmedBytes,
+                truth.InFlightSource, ioSource, ioConfirmed, truth.AttemptEpoch, truth.RetryState,
+                baseline, nowBytes, effBytes, delta, Math.Round(deltaPercent, 4), Math.Round(gapMs, 1),
+                utc.ToString("O"));
+        }
+        catch
+        {
+            // 观测失败不是错误：绝不让 trace 影响传输或业务判定
+        }
+    }
 
     /// <summary>
     /// PHASE C-3（§3）：轻量进度采样间隔（毫秒）。取 200（5 Hz）——这一档只读内存里的解析累计、

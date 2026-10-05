@@ -539,8 +539,8 @@ Reduced Motion:
 
 ### §22.5 Progress State Motion（进度装饰的状态映射）
 
-- **PMML-R26（新增）**：进度装饰**只在 `Running` 打开**；`Pausing / Paused / Stopped / Failed / Interrupted / Resumable / Completed / CompletedWithErrors` 一律**立即落到真值并关闭装饰**。
-- 「暂停时粒子仍前流」「暂停时扫描高光继续扫」被明确定为**视觉撒谎**（用户指令 §23 假修复清单）。关闭必须同时 `IsVisible=false` 与 `StopAnimation`，避免"半路静止的亮带/光点"。
+- **PMML-R26（v0.5.0 起按 R35 修订）**：进度装饰在 `Running` / `Holding` / `Warning` / `Preparing` 全开；**`Paused` / `Interrupted`（可续传）保留低强度活性**（Push Band 降速降亮、粒子数量与流速降到 40~60%、Halo 保留但略降）。**只有 `Failed` / `Completed` 才是真正终止态**，必须立即落到真值并关闭装饰。
+- 「暂停时粒子仍前流」「暂停时扫描高光继续扫」曾按旧口径被定为**视觉撒谎**（用户指令 §23 假修复清单）；**该定性已被 v0.5.0 用户最终要求取代**：用户明确要求「Pause 时 Progress Head / 百分比 / 字节完全冻结，但粒子、Push Band、Halo 不要全部熄灭，只降低活性」。⇒ 判据从"暂停必须全停"改为"暂停必须冻结**事实**、保留**活性**"。真正禁止的是暂停时**进度数字或 Head 继续爬**（那才是撒谎）；装饰层永远不得改变 Value / Percent / ConfirmedBytes。
 
 ## §23 运动与入场
 
@@ -598,9 +598,159 @@ Reduced Motion:
 | **PMML-R23** | 同行 Metric Card 共享同一套数值/标签样式与垂直基线，禁止单卡私有排版。 |
 | **PMML-R24** | 底栏动态数值不得改变动作区 X 位置；伸缩由中间弹性区吸收。 |
 | **PMML-R25** | 填充常驻满宽，可见长度只由裁剪标量表达；禁止按帧写布局/几何属性驱动进度。 |
-| **PMML-R26** | 进度装饰只在 Running 打开；其余状态立即落真值并关装饰（暂停时继续扫 = 撒谎）。 |
+| **PMML-R26** | 进度装饰在 Running / Holding / Warning / Preparing 全开；**Paused / Interrupted 保留低强度活性**（R35）；仅 Failed / Completed 立即落真值并关装饰。暂停时**进度事实必须冻结**（数字/Head 自己爬 = 撒谎），但活性材质不得全部熄灭。 |
 | **PMML-R27** | 可扩张面板必须有上界（含下界与内部滚动）、有动画、用参与布局的属性。 |
 | **PMML-R28** | 文本入场统一轻动效与触发纪律（只在折叠↔显示或真变化时播一次）。 |
 | **PMML-R29** | 动画必须 GPU-friendly；Composition 对象一次性创建；Forever 必须可停。 |
 | **PMML-R30** | 字符串属性名的动画必须有真机可播放证据；拼错会静默失效。 |
 | **PMML-R31** | 禁止为动画引入重量级依赖；业务核心不得为纯视觉问题改动。 |
+
+---
+
+# 附录 B：PCMig Immersive Transfer Progress（Round-3，2026-10-05）
+
+> **编号口径声明（重要，避免两套编号混淆）**：本文件 **附录 A** 里的 `PMML-R16 … R31` 是 v1.0 时期的补充编号；`docs/PMML-UI修改硬性规范.md` 里的 `PMML-R16 … R20`（显示真值连续性 / 关键数值不截断 / 固定几何 / 字体字面 / 呈现层单一时间线）与本次新增的 **`PMML-R21 … R30`** 是 Round-2 / Round-3 的正式编号。**凡涉及进度视觉语言（Progress Visual Language）与迁移真值边界，以本附录 B 与《PMML-UI修改硬性规范》的 R21~R30 为准**；同号冲突时以硬性规范为准。
+
+本附录是 PCMig 0.5.x 起**官方进度视觉语言**的正式规范。它取代此前的"旧进度动效路线"（`ProgressMotionDriver` + Sweep + 8 粒子方案）：旧路线只许下线/删除，**不得再扩展**（不加 Sweep 参数、不加粒子、不调 `InsetClip` 跨度、不再做厚度 A/B 投票）。
+
+## B.A 产品语义（这是什么）
+
+- 控件正式名称：**PCMig Immersive Transfer Progress**（不可再叫"实验效果""探针效果"）。
+- 它要同时是四件事：
+  1. **真实**（Head 不说谎：只表示已确认的迁移事实）；
+  2. **流畅**（VisualProgress 吸收离散真值的跳变）；
+  3. **有生命**（Push Band / Particle 表达"后台任务仍在工作"）；
+  4. **克制**（Particle / Ripple 永远只是辅助，不是主视觉）。
+- **五种语义严格分离**（写代码时必须能一一对应）：
+
+| 元素 | 语义 | 允许影响 Value？ |
+|---|---|---|
+| **Progress Head**（进度头 / 填充右端） | 已经确认的迁移事实 | 它**就是**事实的图形表示 |
+| **Push Band**（推光带） | 任务活动 / 数据正在工作 | **绝不** |
+| **Particles**（粒子） | 数据物质的微弱流动 | **绝不** |
+| **Ripple**（涟漪） | 局部交互反馈 | **绝不** |
+| **Head Halo / Rim** | 当前活跃前沿的光照 | **绝不** |
+
+- 判定成败的不是"像素变了/条动了/代码里调用了 Composition 动画"，而是**用户真机所见**（见 B.N 证据闸门）。
+
+## B.B 几何稳定 / 光照动态（核心原则）
+
+- **Geometry = Stable / Lighting = Dynamic**。
+- Track 是纤细胶囊；Progress Fill 的**右端永远是稳定圆弧**（`)`），永远不是平切（`|`）。
+- Head 的几何不得被任何"液面/波浪/噪声路径"扰动；允许变化的是 Halo / Rim / Band 的**亮度与不透明度**。
+- `FillWidth < Thickness` 时 `radius = min(Thickness/2, FillWidth/2)`，避免低进度几何翻折。
+
+## B.C 尺寸 Token（第一版正式尺寸，不再投票）
+
+| Token | 值 | 含义 |
+|---|---|---|
+| `PCMigImmersiveProgressHostHeight` | **16** DIP | 布局槽（上下各留 2 DIP 呼吸） |
+| `PCMigImmersiveProgressThickness` | **12** DIP | 实际动态材质厚度 |
+| `PCMigImmersiveProgressRadius` | **6** DIP | 端帽半径 |
+
+- 用户真机验收后若判定 12 太粗/太细，**只许改 Token，不许改布局结构**。
+- 底栏（Footer）保留轻量静态条（8 / 4）以免两道满血 Push Band 互相竞争；将来若统一，必须做 `ImmersiveTransferProgressVariant.Compact`，**不得复制一份代码**。
+
+## B.D Progress Truth Boundary（真值边界，最容易出错的地方）
+
+- 完整链路：
+  `Robocopy / Engine → ProgressTruthSnapshot → Core 可信真值 → ContinuationDisplayState → 已确认呈现目标 → ProgressPresentationCoordinator → VisualProgress → { 主百分比文本, 主字节文本, ImmersiveTransferProgress }`
+- `ImmersiveTransferProgress` **永远不知道** Robocopy / SMB / Receipt / Verifier / JobState / 日志 / 源路径 / 目标路径；它只接受 **`Value` / `Maximum` / `VisualState` / `EffectsQuality`** 四个输入（`PMML-R28`，**该边界必须有测试**）。
+- `/Z` 与 `/J` 会先把目标文件预分配到最终长度 ⇒ **这些通道上 `FileInfo.Length` 永远不能当作已确认字节**。唯一例外是 `/MT` 的 Bulk 通道（那里目标长度是唯一证据，禁掉它会退化成 UI-02 的"暂停后 0 B"假归零）。
+- 被打断（`MarkInterrupted`）时写入回执的 `TargetBytes` 语义是**"截至被打断时刻的可信已确认字节"**，不是目标的逻辑长度。
+
+## B.E VisualProgress（连续状态滤波）
+
+- 长期存活的 `TargetProgress` / `VisualProgress`；每个渲染节拍：
+  `visual += (target − visual) × (1 − exp(−k × dt))`，默认 **`k = 10`**（时间常数 100 ms）。
+- 硬边界：`VisualProgress ≤ TargetProgress`；正常运行期**不回退**；没有新目标时追平即停；**不预测、不外推、不自我爬向 99%**。
+- 目标变化**只修改目标**：不重启动画、不清空速度状态、不新建动画段（`PMML-R24`）——"每来一个目标就播一段 0.2~1.2 s 线性动画"会让速度在每个目标处重启，这本身就是抖动源，Round-3 已废弃。
+- `dt` 必须来自高精度时间戳并夹取 `dt = min(dt, 1/30 s)`，防止窗口还原后大跳。
+- `Completed` 可以用 0.05 pp 的吸附精确落到 100（一位小数显示分辨率的一半 ⇒ 屏幕数字不变，不算无证据前跳）。
+
+## B.F Push Band（推光带）
+
+- **同时最多一条**（`ActiveBandCount ≤ 1`）；两层柔光：外场 `SigmaX≈26~34 / SigmaY≈5~6 / Opacity 0.18~0.28`，亮核 `SigmaX≈9~12 / Opacity 0.16~0.26`。
+- 周期 `1.20~1.45 s`（活动 `0.90~1.05 s`，静止 `0.25~0.40 s`）；静止段不透明度**精确为 0**（这就是"同时最多一条"的实现口径）。
+- 运动 `x(t) = sin(t × π/2)`，`t ∈ [0,1]`：先快、持续减速、靠近 Head 时柔和收尾。**禁止线性、禁止分段变速、禁止突然减速。**
+- 它是"宽而柔的两次光压"，**不是**硬白条；不是跑马灯，不做并行扫描。
+
+## B.G Particle（粒子）
+
+- 生产默认活跃：**High 14 / Balanced 9 / Reduced 4**（池容量 16），半径 `0.55~1.20 DIP`，寿命 `0.8~1.35 s`，跟随因子 `0.18~0.28`。
+- 出生轨迹窗口 `max(64 DIP, ProgressWidth × 0.18)`，范围 `Head − TrailLength` 到 `Head − 6 DIP`，并**必须被裁剪在填充胶囊内**：
+  - 胶囊装不下粒子时（`progressWidth` 过小）**一枚都不许有**；
+  - 粒子 X 必须被夹在 `[capsuleLeft, capsuleRight]` 内（真机曾出现 `pMin = −1.163`）。
+- 粒子属于 **Progress Space**，不是屏幕空间自由飞行；Head 前进时轻微拖带（`follow factor`）。
+- **固定池**：绝不允许每帧 `new Particle` / LINQ / 频繁 `List.Add/Remove`。
+
+## B.H Ripple（涟漪）
+
+- 同时最多 `3~4` 个；半径 `1.5 → 4.5 DIP`；时长 `180~260 ms`；峰值不透明度 `≤ 0.20`；冷却 `≥ 220 ms`；`Reduced` 档**关闭**。
+- 只在 Push Band 与粒子局域影响越过阈值（`influence ≥ 0.55`）且冷却允许时触发；**它是极稀疏的反馈，不得成为主视觉**。
+
+## B.I Head Halo / Rim（前沿光照）
+
+- Halo 长度 `36~56 DIP`（当前 **48**），外圈不透明度 `0.25~0.40`（当前 **0.34**），局部光晕 `16~24 DIP`（当前 20）；Rim `1 DIP`、不透明度 `0.65~0.82`（当前 0.74）。
+- **不得是白色描边圆环**；Halo 只能有一点越过 Head（约 `haloLength × 0.35`），其余被裁剪在填充胶囊语义内。
+
+## B.J 状态机（12 态）
+
+| 状态 | Head | Push Band | 粒子 | Ripple | Halo |
+|---|---|---|---|---|---|
+| Idle / Preparing | 跟随 VisualProgress | — | — | — | 弱 |
+| Running | 追 VisualProgress | 运行 | 活跃 | 允许 | 满 |
+| Holding | **静止** | **继续跑** | 减缓 | 少量 | 保持（表达"还在干活"） |
+| Pausing | 保持可信值 | 减速/淡出 | 淡出 | 停 | 渐弱 |
+| Paused / Interrupted | 冻结（事实不动） | **继续（降速降亮，R35）** | 降到 40~60% 数量/流速 | 保留 | 保留（略降） |
+| Stopping | 同 Pausing | 停 | 淡出 | 停 | 减弱 |
+| Interrupted | **冻结在可信高水位** | 停 | 停 | 停 | 停 |
+| Verifying | 100% 或真实完成点 | 停 | 停 | 停 | 极弱（**不得再有"正在传输"动画**） |
+| Completed | 100%（**仅 Core 真完成**） | 停 | 收尾 | 停 | 收尾 |
+| Warning / Failed | 保留最后可信值 / Error 语义 | 停 | 淡出 | 停 | 停 |
+
+- **真正终止态**（`Failed` / `Completed`）装饰必须**全停**（`band = 0 / particles = 0 / ripple = 0`），有测试锁定；`Paused` / `Interrupted`（可续传）**不属于终止态**，按 R35 保留低强度活性（`TerminalStates_StopAllDecorations` 只覆盖 Failed/Completed，Paused/Interrupted 由 `RecoverableStates_KeepMaterialAlive_ButWeaker` 锁定）。
+
+## B.K Reduced Effects / Reduced Motion
+
+- `EffectsQuality.High / Balanced / Reduced` 只影响装饰强度（粒子数、Ripple 开关、Band 强度、Halo 强度、是否用重模糊）。
+- 远桌面（RDP / Horizon）/ 集成显卡 / 虚拟机 / 低性能模式默认 Balanced 或 Reduced，但 **未经用户授权不得改变业务 UI 逻辑**。
+- Reduced Motion：Head 仍可直接跟随 VisualProgress，Push Band 可关闭或减速，粒子 / Ripple 关闭，**业务值与 Automation `Value` 完全不变**（`PMML-R29`）。
+
+## B.L 性能与渲染架构
+
+- 渲染所有者**只有一个**：Win2D（官方 NuGet `Microsoft.Graphics.Win2D`，**固定版本**，加入前必须验证 `net8.0-windows10.0.19041.0` + Windows App SDK 2.5.1 + unpackaged / self-contained 可还原可构建）。
+- 禁止"几十个 XAML Ellipse + Storyboard"、禁止每帧创建 XAML 元素或 Storyboard。
+- 每帧严格 9 层顺序：1 Track → 2 Fill → 3 Push Band 外场 → 4 Push Band 亮核 → 5 Head Halo → 6 Head Rim → 7 Particles → 8 Ripples → 9 Border；所有动态层裁剪在 Fill 胶囊内。
+- 每帧禁止：`new Brush` / `new Geometry` / `new Particle` / LINQ / 重量级 `List` 增删 / 新 Storyboard。渐变**形状**只在创建设备或换调色板时写入；帧内只改 `StartPoint` / `EndPoint` / `Opacity`。
+- **线程纪律（真机崩溃教训）**：Win2D `CanvasAnimatedControl.Update/Draw` 跑在**游戏循环线程**，不是 UI 线程。该线程**不得**读 DependencyProperty、不得读 `Application.Current.Resources`、不得读 `MotionDirector.SystemAnimationsEnabled`（跨线程访问 XAML 对象会以 `0xc000027b`（`RPC_E_WRONG_THREAD`）崩掉整个应用）。正确做法：UI 线程把值 + 调色板发布成**不可变快照**，渲染线程只读快照。
+- 每帧零分配的**自检**也必须在暂停画布后再做离屏绘制（同一批画刷被渲染线程就地改写，Win2D 画刷不是线程安全的）。
+- `DeviceLost` 时必须能恢复，且**绝不影响迁移业务**。
+
+## B.M Accessibility
+
+- 自定义 Canvas 不能只让 UIA 看到一个 Canvas：必须实现 `ProgressBar` / `RangeValueProvider` 语义（`Minimum = 0` / `Maximum = 100` / `Value =` 与视觉一致的可访问值）。
+- Automation Name = `迁移总进度 56.3%`；屏幕阅读器**不得**读取 BandPhase / Particle / Ripple / Glow（纯视觉层）。
+- 真机口径（WinUI 3）：`IRangeValueProvider` **没有** `RangeValueChanged` 事件，值变化要靠 `RaisePropertyChangedEvent(RangeValuePatternIdentifiers.ValueProperty, old, new)`，并用 `ListenerExists(AutomationEvents.PropertyChanged)` 守卫。
+
+## B.N Evidence Gate（证据闸门）
+
+- 取证工具：`ImmersiveProgressVisualProbe`（显式环境变量挂载，确定性序列 `0 / 10 / 24.8 / 47.3 / 62.3 / 75 / 90 / 100` + Holding / Pause / Resume），输出 `frames\` 与 `timeline.csv`，列：
+  `timestamp / rawPercent / effectiveConfirmedPercent / visualPercent / headX / bandCenterX / bandPhase / activeParticles / activeRipples / state`（实现中还输出 `bandOpacity / haloStrength / particleMinX / particleMaxX / progressWidth / hostWidth` 等）。
+- 13 条验收判据：① `headX` 与 `visualPercent` 误差 ≤1 px；② `visualPercent ≤ confirmedPercent`；③ 正常运行无回退；④ Running 期无无理由大前跳；⑤ 新目标到达后视觉连续追上；⑥ 没有"一段跑完—停顿—再一段"的速度断点；⑦ 一个周期内 Push Band 单调朝 Head 且持续减速；⑧ `ActiveBandCount ≤ 1`；⑨ 所有粒子在填充胶囊内；⑩ Paused / Interrupted 后 **Head 与事实冻结**，但 Band / 粒子 / Halo 保留低强度活性（R35）；⑪ Failed 后装饰停；⑫ Holding 期 Head 不动而 Band 可继续；⑬ `Completed` 仅在 `settled = true` 时到 100%。
+- 每个结论必须诚实标注 `VERIFIED FIXED（真机证据）/ CODE FIXED / NOT VISUALLY VERIFIED / OPEN`；`PMML-R30` 的七项缺一即不得称"视觉已验证"。
+
+## B.O 实现坐标（本规范的唯一实现）
+
+```
+src\PCMig.WinUI\Controls\ImmersiveProgress\
+  ImmersiveTransferProgress.xaml(.cs)         控件：DependencyProperty + Visual State + Theme + Automation + Reduced Effects + Renderer 生命周期 + UI 线程快照
+  ImmersiveTransferProgressRenderer.cs        Renderer：Track / Fill / Head Halo / Push Band / Particle / Ripple / Border（9 层）
+  ImmersiveProgressAnimationState.cs          动画状态：BandPhase / 粒子池 / Ripple / dt / 随机种子 / 上次进度位置
+  ImmersiveProgressParticle.cs                粒子与 Ripple 的池与结构（胶囊内约束）
+  ImmersiveProgressParameters.cs              全部 Token 化参数（无散落魔法数字）
+  ImmersiveTransferProgressAutomationPeer.cs  ProgressBar / RangeValue 语义
+```
+
+- 主题：尺寸 Token 在 `Themes\Materials.xaml`；颜色全部走 `Themes\Colors.xaml` 的 `ImmersiveProgress*Brush`（Renderer **不得**硬编码颜色）。
+- 生产接线：`Views\Step3ProgressPage.xaml(.cs)` —— 一个进度语义**只有一个视觉拥有者**，绝不把旧 Fill 与新 Canvas 叠起来。
