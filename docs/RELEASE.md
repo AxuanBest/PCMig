@@ -183,7 +183,7 @@ Portable 目录内容：`PCMig.WinUI.exe` + 其原生组件、`pcmig-cli.exe`、
 - 改动**前**的基线 tag 命名 `<当前版本>-before-<描述>`；改动**完成并验证后**命名 `<当前版本>-<描述>`。
 - 禁止 `rebase`、`amend`、`filter-repo`、`BFG`、`reset --hard`、`git clean`、`force push`、任何形式的历史重写。
 - **v0.5.0 与 v0.5.1 的历史与发行资产保持 immutable**：不移 tag、不删 tag、不重发。
-- 仓库内的 `*-before-*` 等历史基线 tag 属开发过程记录，**不标记其名字所指的状态**；引用历史版本请以交付区的历史安装包与 `docs/历史版本索引.md` 为准。
+- 仓库内的 `*-before-*` 等历史基线 tag 属开发过程记录，**不标记其名字所指的状态**；引用历史版本请以 GitHub Releases 中的历史安装包与 `docs/历史版本索引.md` 为准。
 - 工作区撤销改动请用 `git stash` 或 `git revert`；禁止使用 `git reset --hard`、`git checkout .`、`git restore .`、`git clean -fd`。
 
 ---
@@ -210,7 +210,7 @@ Portable 目录内容：`PCMig.WinUI.exe` + 其原生组件、`pcmig-cli.exe`、
 
 > 有安装包 ≠ 有源码快照；有更新日志 ≠ 有源码快照。
 
-历史安装包属**发布产物**，以 Release asset 形式提供，**不写入 Git 历史**；也不为缺少源码快照的历史版本补建版本 tag。
+安装包属**发布产物**，通过 GitHub Releases 作为 Release asset 分发，**不写入 Git 历史**：v0.5.0 / v0.5.1 已发布（Latest = v0.5.1），Legacy v0.1.x – v0.4.x 待通过独立归档 Release 集中上传。也不为缺少源码快照的历史版本补建版本 tag。
 
 逐版本证据索引见 `docs/历史版本索引.md`。
 
@@ -228,7 +228,7 @@ Portable 目录内容：`PCMig.WinUI.exe` + 其原生组件、`pcmig-cli.exe`、
 ## 14. 已知基础设施限制
 
 - 发版脚本面向 Windows + PowerShell + Inno Setup + Windows App SDK 的本机环境编写，**未做 CI 化**，尚无自动化流水线。
-- 安装包与历史版本存档当前位于维护者的本机交付区（**不入 Git 仓库**），尚未公开发布。
+- 安装包**不进入普通 Git tree**，而是通过 GitHub Releases 作为 Release asset 分发：**v0.5.0 与 v0.5.1 已完成发布，当前 Latest Release 为 v0.5.1**。仍可确认的 Legacy v0.1.x – v0.4.x 历史安装包**尚未批量上传**，计划由独立的 Legacy Installers Archive Release 集中归档；该归档发布与「历史源码快照是否可用」分别记录，互不推断。
 - 界面视觉与动效的最终验收由人工完成；仓库内没有、也不主张存在自动视觉验收流程。
 - 回退通道 `PCMIG_CLASSIC_UI=1`（或 exe 旁 `classic-ui.flag`）属旧 WPF 源码内的能力，从 v0.5.1 起不再随交付物提供；仓库内开发调试仍可使用。
 

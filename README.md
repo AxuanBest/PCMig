@@ -384,7 +384,7 @@ PCMig.sln
   | `v0.5.0` | 0.5.0 | WinUI 3 全新界面 + Diagnostics 可信度体系 + 沉浸式传输进度 |
 
 - `v0.5.0` 及其更早的正式安装包**全部保留在交付区**，作为历史版本存档；新旧版本**并列保留、互不覆盖**。
-- 仓库中另有 **45 个历史基线 tag**（`v0.4.x-before-*`、`v0.5.0-before-*`、`winui-*` 等），属开发过程记录。**它们不标记其名字所指的状态**：49 个版本 / 开发历史 tag（含 `v0.5.0`、`v0.5.1`、`v0.4.5`、`v0.4.6` 与上述 45 个基线 tag）只落在 **18 个 commit** 上，其中 26 个 tag 共用同一个 v0.4.6 状态的 commit、7 个共用同一个 v0.5.0 前置基线 commit。另有 1 个**归档 tag** `legacy-installers-archive-20261006`（指向历史安装包归档说明节点，**不代表任何版本的源码快照**）⇒ 全仓库共 **50 个 tag / 19 个 commit**。**引用历史版本时请以交付区的历史安装包与 [`docs/历史版本索引.md`](docs/历史版本索引.md) 为准，不要以 tag 名为准。**
+- 仓库中另有 **45 个历史基线 tag**（`v0.4.x-before-*`、`v0.5.0-before-*`、`winui-*` 等），属开发过程记录。**它们不标记其名字所指的状态**：49 个版本 / 开发历史 tag（含 `v0.5.0`、`v0.5.1`、`v0.4.5`、`v0.4.6` 与上述 45 个基线 tag）只落在 **18 个 commit** 上，其中 26 个 tag 共用同一个 v0.4.6 状态的 commit、7 个共用同一个 v0.5.0 前置基线 commit。另有 1 个**归档 tag** `legacy-installers-archive-20261006`（指向历史安装包归档说明节点，**不代表任何版本的源码快照**）⇒ 全仓库共 **50 个 tag / 19 个 commit**。**引用历史版本时请以 GitHub Releases 中的历史安装包与 [`docs/历史版本索引.md`](docs/历史版本索引.md) 为准，不要以 tag 名为准。**
 - 远端仓库为 `origin` → https://github.com/AxuanBest/PCMig.git（发布分支 `main`）。上述 tag 中只有 `v0.5.0`、`v0.5.1` 与归档 tag `legacy-installers-archive-20261006` 已推送到远端，其余历史基线 tag 仅存在于维护者本地。
 
 ### Historical releases / 历史发布与安装包
@@ -395,7 +395,7 @@ PCMig.sln
 - 三件事**分别记录、互不推断**：① 历史 Release **是否存在**；② 安装包**是否存在**；③ 是否存在**精确源码快照**（有安装包 ≠ 有源码快照，有更新日志 ≠ 有源码快照）。
 - 详见 [`docs/历史版本索引.md`](docs/历史版本索引.md)（逐版本证据索引）与 [`docs/更新日志.md`](docs/更新日志.md)（逐版本说明）。
 
-> 历史安装包属**发布产物**，以 Release asset 形式提供，**不写入 Git 历史**；也不为缺源码快照的历史版本补建版本 tag。
+> 安装包属**发布产物**：正式版本（v0.5.0 / v0.5.1）的安装包已作为 GitHub Release asset 提供，**不写入 Git 历史**；Legacy v0.1.x – v0.4.x 历史安装包待通过独立归档 Release 集中发布（尚未上传）。也不为缺源码快照的历史版本补建版本 tag。
 
 ### 发布产物
 
@@ -452,7 +452,7 @@ PCMig.sln
 5. **平台限制** —— 依赖 Robocopy 与 WinUI 3，**仅支持 Windows**；不提供 Linux / macOS 支持。
 6. **诊断预留事件** —— 事件覆盖矩阵中的 `Reserved` 事件是预留位，尚未接线生效，详见 [`docs/诊断系统实施-事件覆盖矩阵.md`](docs/诊断系统实施-事件覆盖矩阵.md)。
 7. **发版基础设施** —— 发版脚本面向本机环境编写（Windows + PowerShell + Inno Setup + Windows App SDK），**未做 CI 化**，尚无自动化流水线。
-8. **分发状态** —— 源码已托管于 [github.com/AxuanBest/PCMig](https://github.com/AxuanBest/PCMig)；尚未建立正式 GitHub Releases，安装包与历史版本存档当前位于维护者的本机交付区，尚未公开发布。
+8. **分发状态** —— 源码已托管于 [github.com/AxuanBest/PCMig](https://github.com/AxuanBest/PCMig)。**v0.5.0 与 v0.5.1 已通过 GitHub Releases 正式发布，当前 Latest Release 为 v0.5.1**，对应的 `PCMigSetup-0.5.0.exe` 与 `PCMigSetup-0.5.1.exe` 已作为 Release asset 上传。仍可确认的 **Legacy v0.1.x – v0.4.x 历史安装包尚未批量上传**，计划通过独立的 Legacy Installers Archive Release 集中归档。
 
 ---
 
