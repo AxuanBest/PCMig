@@ -415,7 +415,7 @@ CaseVerdict:       PASS | FAIL | INVALID/INCONCLUSIVE
 ### 现状（重要）
 - **仓库里没有任何能产生百万级文件的脚本。** `lab\vm-gen-massdata.ps1` 上限 **50,000 个 512 B 小文件（≈25.6 MB）** + 40 层深路径 + 一个持锁 `.pst`；`lab\fill-e.ps1` 只到 ≈8.4 GB + 填盘。
 - 历史最大实测规模仅 **50,001 文件 / 14 s / 3,571 文件/秒 / 100 MB**（`docs\qa\history\Private-Test-Lab-Final-Report.md:106`）。
-- `lab\vm-gen-massdata.ps1` 还有**依赖缺陷**：第 3 段用的 `E:\迁移全量测试\被锁定目录\锁定文件.pst` 由 `fill-e.ps1` 创建，且用 `FileMode.Open` ⇒ **单独跑必抛异常**；顺序必须 `fill-e.ps1` → `vm-gen-massdata.ps1`。两个脚本都写死 `E:`。
+- `lab\vm-gen-massdata.ps1` 还有**依赖缺陷**：第 3 段用的 `<外置测试根>\被锁定目录\锁定文件.pst` 由 `fill-e.ps1` 创建，且用 `FileMode.Open` ⇒ **单独跑必抛异常**；顺序必须 `fill-e.ps1` → `vm-gen-massdata.ps1`。两个脚本都写死 `E:`。
 - ⇒ **210 万文件生成器必须新写**（Phase 1 工作量），且必须在 **guest 内**运行、写 guest 的 `D:`，不得在宿主 E: 上跑。
 
 ### 目标组成（真实验收，不是模拟计数）

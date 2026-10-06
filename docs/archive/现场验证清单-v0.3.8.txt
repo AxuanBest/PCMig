@@ -13,7 +13,7 @@ PCMig v0.3.8 现场验证清单（真实共享，约 15 分钟）
    期望：输出 0.3.8
 
 第 2 步｜扫描残缺必须拦住（这次事故 14:27 就是这类网络错误）：
-    <发版工作副本>\pcmig-cli.exe new --host 192.0.2.25 --source \\192.0.2.25\d --target D:\ --jobs E:\PCMig-Jobs --yes
+    <发版工作副本>\pcmig-cli.exe new --host 192.0.2.25 --source \\192.0.2.25\d --target D:\ --jobs <外置根>\PCMig-Jobs --yes
    期望：扫描期间若某目录读不到，必须报出 对象｜路径｜原因 并拒绝开始（退出码 3），
          而不是像旧版那样静默漏掉整棵目录；若提示可放行，请不要加 --allow-incomplete-scan。
 
