@@ -1,4 +1,9 @@
-﻿
+
+param(
+  [Parameter(Mandatory = $true)][string]$Path,
+  [string]$OutputPath = (Join-Path $env:TEMP 'paste-ocr.txt')
+)
+
 $ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
@@ -15,7 +20,6 @@ $eng = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
 if ($eng -eq $null) { $eng = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new('zh-Hans-CN')) }
 if ($eng -eq $null) { Write-Output '无可用 OCR 引擎'; exit }
 Write-Output ('引擎语言: ' + $eng.RecognizerLanguage.LanguageTag)
-$path = 'C:\Users\user\AppData\Local\Temp\modlens-dsh-paste\p-WqX9j8\paste.png'
 $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])
 $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
 $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
@@ -28,6 +32,6 @@ $txt = ($res.Lines | ForEach-Object { $_.Text }) -join [char]10
 $txt = $txt -replace '(?i)(apikey|api_key|token|password|passwd|sk-)[^\s]{6,}', '$1=***'
 $txt = $txt -replace '\b[A-Za-z0-9+/]{32,}={0,2}\b', '***'
 $txt = $txt -replace '(SRC-PC-2|<口令已脱敏>|<口令已脱敏>)', '***'
-[IO.File]::WriteAllText('E:\deepseek work\paste-ocr.txt', $txt, (New-Object Text.UTF8Encoding($true)))
+[IO.File]::WriteAllText($OutputPath, $txt, (New-Object Text.UTF8Encoding($true)))
 Write-Output $txt
 Write-Output 'OCR_DONE'

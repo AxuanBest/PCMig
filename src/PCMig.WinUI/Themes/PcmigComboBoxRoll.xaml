@@ -26,7 +26,7 @@
             Closed = 1→0（0.13s）。
        **背景材质 / 圆角 / 阴影 / 选中 pill / 尺寸 / 其它一切保持与官方模板逐字相同。**
 
-       来源：C:\Users\User\.nuget\packages\microsoft.windowsappsdk.winui\2.3.9\lib\net6.0-windows10.0.17763.0\Microsoft.WinUI\Themes\generic.xaml
+       来源：<NuGet 缓存>\microsoft.windowsappsdk.winui\2.3.9\lib\net6.0-windows10.0.17763.0\Microsoft.WinUI\Themes\generic.xaml
        生成时间：2026-09-30 14:05
        ⚠ 维护提示：这是与 Windows App SDK 版本绑定的模板副本；升级 WinUI 后应与新版
          generic.xaml 重新比对（重跑本脚本即可再生成一份）。

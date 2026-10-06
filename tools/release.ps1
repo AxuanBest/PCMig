@@ -1,4 +1,4 @@
-﻿# PCMig 发版脚本 —— 先写日志，再打包；没写日志就打不出包。
+# PCMig 发版脚本 —— 先写日志，再打包；没写日志就打不出包。
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File "E:\Project\deepseek work\PCMig\tools\release.ps1" -Version 0.4.5
 # 路径纪律（见 docs/RELEASE.md）：
 #   本机（个人电脑）：仓库 E:\Project\deepseek work\PCMig ｜ 交付 E:\Project\PCMig ｜ 工作副本 D:\PCMig ｜ 源码镜像 E:\Project\镜像备份源码\PCMig
@@ -148,7 +148,7 @@ Get-Process PCMig -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 Log '生成 更新日志.txt（记事本可直接打开）'
 # ★ 2026-10-06 修复 ★ 不能直接写 `python`：本机 PATH 上的 python.exe / python3.exe 是
-#   Microsoft Store 的"应用执行别名"存根（C:\Users\User\AppData\Local\Microsoft\WindowsApps\），
+#   Microsoft Store 的“应用执行别名”存根（<WindowsApps 目录>），
 #   调用它只会打印 "Python was not found; run without arguments to install from the Microsoft Store..."
 #   并返回非 0，**却让脚本继续往下跑** —— 结果是 docs\更新日志.txt 根本没被重新生成，
 #   紧随其后的闸门报「更新日志.txt 里没有 vX.Y.Z」而中止（v0.5.0 首发就卡在这里）。

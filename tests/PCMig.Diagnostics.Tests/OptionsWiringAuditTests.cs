@@ -88,7 +88,7 @@ public sealed class OptionsWiringAuditTests
         sb.AppendLine();
         sb.AppendLine("> 由 `tests/PCMig.Diagnostics.Tests/OptionsWiringAuditTests.cs` 每次运行重新生成：");
         sb.AppendLine("> 逐项统计运行时源码里的真实消费者。**Active 才代表该配置真的生效**。");
-        sb.AppendLine($"> 生成时间（本机）：{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine("> 生成时间：不写入文档（保证仓库可复现）。");
         sb.AppendLine();
         sb.AppendLine($"| 配置项 | 状态 | 运行时读取点 |");
         sb.AppendLine($"|---|---|---|");

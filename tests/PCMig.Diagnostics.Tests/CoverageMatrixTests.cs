@@ -113,7 +113,7 @@ public sealed class CoverageMatrixTests
         sb.AppendLine();
         sb.AppendLine("> 由 `tests/PCMig.Diagnostics.Tests/CoverageMatrixTests.cs` 每次运行重新生成：");
         sb.AppendLine("> 扫描生产源码里的事件发布点（排除目录定义自身、规则/反馈消费方、测试）。");
-        sb.AppendLine($"> 生成时间（本机）：{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine("> 生成时间：不写入文档（保证仓库可复现）。");
         sb.AppendLine();
         sb.AppendLine($"| 事件总数 | Produced | Deep-only | Reserved | Retired |");
         sb.AppendLine($"|---|---|---|---|---|");

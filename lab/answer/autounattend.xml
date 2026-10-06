@@ -91,7 +91,7 @@
         <Enabled>true</Enabled>
         <Username>Administrator</Username>
         <LogonCount>5</LogonCount>
-        <Password><Value>Pcmig@Test123</Value><PlainText>true</PlainText></Password>
+        <Password><Value>REPLACE_ME</Value><PlainText>true</PlainText></Password>
       </AutoLogon>
     </component>
   </settings>
