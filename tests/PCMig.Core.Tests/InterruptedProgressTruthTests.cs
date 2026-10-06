@@ -391,7 +391,9 @@ public class InterruptedProgressTruthTests
     {
         var path = Path.Combine(FindRepoRoot(), relativePath);
         Assert.True(File.Exists(path), $"找不到源文件：{path}");
-        return File.ReadAllText(path, Encoding.UTF8);
+        // 行尾无关：同一提交在 core.autocrlf=false 的检出里是 LF、在 autocrlf=true 的检出里是
+        // CRLF（git archive 同样按 autocrlf 展开），源码契约只关心文本形状，不关心换行编码。
+        return File.ReadAllText(path, Encoding.UTF8).Replace("\r\n", "\n");
     }
 
     /// <summary>从签名处开始按大括号配平截取一个方法体（源码契约测试用）。</summary>
