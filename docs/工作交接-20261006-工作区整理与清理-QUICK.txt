@@ -1,0 +1,97 @@
+PCMig 工作区整理 / 清理 · 交接短卡（2026-10-06）
+================================================================
+完整交接：docs\工作交接-20261006-工作区整理与清理.md
+验收报告：archive\cleanup-20261006\ACCEPTANCE-REPORT-11.md
+执行清单：archive\cleanup-20261006\CLEANUP-PLAN.csv（261 行）
+
+■ 一句话状态
+  按用户执行书「PCMig v0.5.0 发版后工作区整理 / 清理执行书（修订版）」
+  §0–§19 完成了一次「有原则的文件系统清理与归档」。释放 427.8 GB。
+  未改产品源码、未改发版脚本、未发版、未 push、未打 tag、未提交 commit。
+  状态：WAITING FOR HUMAN INSTRUCTION。下一步全部需要人工明确指令。
+
+■ 坐标
+  权威工作区 E:\Project\deepseek work\PCMig  分支 feature/winui-v0.5.0
+  交付区 E:\Project\PCMig   工作副本 D:\PCMig   脚本 tools\release.ps1
+  实验室 E:\PCMigLab   备份根 E:\Project\镜像备份源码
+  清理记录 E:\Project\deepseek work\archive\cleanup-20261006\
+  归档根   E:\Project\deepseek work\archive\{review-packages,bug-evidence,
+           design-reference,scripts\cleanup-20261006-root-scripts}
+  三 VM 框架 E:\Project\deepseek work\PCMig\lab\three-vm\
+  快速回归集 E:\PCMigLab\smoke-data\（57.23 MB，≤100 MB 上限）
+
+■ 当前权威状态（实读）
+  HEAD = git log --oneline -1 实读（不写死）；tags = v0.5.0 + v0.5.1
+  + 7 个 v0.5.0-before-*；REMOTES = 0 个（本仓库无远端，不能 push）
+  工作树 = 63 项 = 2 个 ` M`（机器生成文档的时间戳行）+ 61 个 `??`
+  （lab\three-vm\ 60 + lab\smoke-data\README.md 1）—— 待授权后提交
+  交付物：PCMigSetup-0.5.1.exe 93,276,509 B
+          SHA256 4255FBD6E77CCEE1190ACDC05FC66F8A4843BE197FE993BDBE78FE495B329937
+          PCMigSetup-0.5.0.exe 158,468,801 B（未被覆盖，并列保留）
+  卷空闲：C 212.4 GB / D 456.7 GB / E 326.7 GB
+
+■ 做了什么（§18 十一项）
+  1. 释放 427.8 GB（C +45.3 / D +168.1 / E +214.4）
+  2. 100G / 200G / 500G 大体积：全清（本机从未存在 100/200/500 GB 单文件；
+     实际形态 42 GiB 级 payload 8 份→0、42 GB 级目录 13 个→0、
+     12,006 文件小文件树 1 份→0、≥1 GB 单文件去重 77→14（余者全为 VM 盘））
+  3. 临时文件：synthetic payload 424.48 GB + 临时 publish 2.83 GB +
+     构建测试产物 770.81 MB，全部按明确路径删除
+  4. 无用图片：删 31 目录 / 134 文件 / ≈41 MB；保留 31 子目录 /
+     3,123 文件 / 1,371.56 MB（被报告/PMML 引用的 A/B 对照图集全留）
+  5. 一次性脚本：真删 0（只删 preload.obj / shim_v2.obj）；
+     MOVE 99 → archive\scripts\cleanup-20261006-root-scripts\
+     MOVE 27 → lab\three-vm\runner\（UI 自动化能力）
+     MOVE 8  → archive\release\说明-history\
+  6. 复验包：archive\review-packages\ = 34 条目 / 2,709 文件 / 115.45 MB
+     （ui-closure 6 / immersive-progress 2 / diagnostics 8 / other 18）
+     + E:\PCMigLab\three-vm\review-packages\ 2 条 + 桌面 1 套 = 36 + 1
+  7. 三 VM 框架 = PCMig\lab\three-vm\ 60 文件 / 196 KB
+     （runner 28 / scenarios 23 / scripts 3 / configs 3 / docs 1 /
+       evidence-template 1 / README 1）；§6 清单 21 项逐项核对全部在位
+  8. Bug evidence = archive\bug-evidence\（7 子类 + README，含
+     问题→根因→修复索引）
+  9. Desktop PCMig 条目 38 → 2（309 MB → ≈93 MB，只留 v0.5.1 复验包）
+ 10. git status：见上「当前权威状态」；未提交任何 commit
+ 11. Build / Core / Diagnostics 全部正常：
+     Build 0 error / 4 warning（= 基线：WMC1506 ×3 + xUnit2031 ×1）
+     Core 569/569 · Diagnostics 382/382
+
+■ 明确没做（如实说明，不装懂）
+  · 未做人工视觉终验
+  · 未在真实物理机复验 v0.5.1
+  · 未 push（无远端）；未打新 tag；未 release
+  · 三 VM 的 .avhdx / .VMRS 检查点差分盘 ≈315 GB 未动（破坏性，未授权）
+  · D:\PCMigLab-R3\usercheck 3.84 GB 未动（已判定为用户个人音频/AI 素材）
+  · E:\Project\镜像备份源码 9.04 GB 未动
+  · 工作区根 38 个非 PCMig 松散文件未动；非 PCMig 工作区目录未动
+  · archive\docs-history\ 暂空；docs\ 根 16 项交接未成组归档
+  · ⚠ 9 个未被 git 跟踪的 .trx 已按 §10 删除且不可从 git 恢复
+
+■ 下一步（全部需要人工明确指令，不得自行开工）
+  ⓪ 是否提交那 61 个未跟踪框架文件（lab\three-vm\ 60 + 1）
+  ⓪ 是否清理三 VM .avhdx / .VMRS 检查点（≈315 GB，会丢回滚点）
+  ⓪ 是否恢复那 9 个 .trx（若判定为正式证据）
+  ① 是否配置远端并 push（当前 REMOTES = 0）
+  ② 真实物理机复验 v0.5.1
+  ③ 回冲路径补测（D6/D7 均 HIT-RETRACT=0，该窗口未被实验覆盖）
+  ④ docs\ 根 16 项交接成组归档到 docs\handover\history\
+  ⑤ PHASE G 录屏
+  ⑥ 文档旧坐标 I:\PCMig 统一（铁律 18/21 与附录 A 仍写旧路径）
+
+■ 回退
+  删除的数据：make-dataset.ps1（42 GiB 级）+ ctl\lib-cases.ps1（小文件树）
+  移动的文件：按 archive\cleanup-20261006\MOVE-LOG.txt 逆向移回
+  新建的文件：删除即回退
+  产品源码与交付物：零改动，无需回退
+
+■ 纪律提醒（接手必读）
+  · 开工顺序：工作区 AGENTS.md → PCMig\AGENTS.md → docs\INDEX.md →
+    由 INDEX 指向的 Current Handover → 任务对应专项文档
+  · .ps1 必须 UTF-8 带 BOM（edit 工具会剥掉，改完立刻复核前三字节）
+  · 禁止 git reset --hard / checkout . / restore . / clean -fd
+  · 交接文档只增不覆；机器生成文档禁手改
+  · 权限放宽不构成豁免；「不再弹窗」≠「已获授权」
+  · 装饰层永不许影响 Value / Percent / ConfirmedBytes / Receipt /
+    Verifier / JobState
+  · 视觉终验永远是人工，不得用像素脚本代替
