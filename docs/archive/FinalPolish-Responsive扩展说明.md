@@ -1,7 +1,7 @@
 # Final Polish · 响应式扩展说明（Responsive Token 化 + Header / BottomBar / Step1 接线）
 
 - 执行者：实现子代理（响应式布局轨道）
-- 范围：**只改** `E:\Project\deepseek work\PCMig\src\PCMig.WinUI\`
+- 范围：**只改** `<仓库根>\src\PCMig.WinUI\`
 - 对应指令节：§5 / §6 / §7 / §8 / §36 / §37 / §38 / §39 / §54 / §55
 - 状态：**代码完成，未编译验证**（主控正在用运行中的 PCMig.WinUI 做 Motion 取证，构建会撞 exe 文件锁；按主控指令本轮不 build、不 test）
 

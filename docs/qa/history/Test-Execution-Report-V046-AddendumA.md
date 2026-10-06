@@ -2,7 +2,7 @@
 
 > 追加日期：2026-09-19 ｜ 基线 v0.4.6 ｜ 执行方式：免提权（Medium 完整性）
 > 配套主报告：`Test-Execution-Report-V046.md`（B0/B1 部分）
-> 证据根：`J:\pcmig-lab\runs\`
+> 证据根：`<外置实验室盘>\runs\`
 
 ---
 

@@ -16,7 +16,7 @@
 
 | 项 | 值 |
 |---|---|
-| 权威工作区 | `E:\Project\deepseek work\PCMig`（分支 `feature/winui-v0.5.0`） |
+| 权威工作区 | `<仓库根>`（分支 `feature/winui-v0.5.0`） |
 | HEAD | `862b0917f408c009bd4b9dbf61e0d8bcb0af0742`（用户已授权本地提交；**未 push / 未 tag / 未发版**） |
 | 工作树 | Round-2 的改动**全部未提交**（等返修验收后的再次明确授权） |
 | 构建 | `dotnet build PCMig.sln -c Release` ⇒ **成功 / 0 error / 3 warning**（= 基线 `Views\PCMigSurface.xaml:53/54/56` WMC1506） |
@@ -41,10 +41,10 @@
 1. **Reality Sync（只读，3 分钟）**：`git rev-parse HEAD` / `branch` / `status --porcelain`（当时 75 条 = 51 M + 24 ??）/ `diff --stat`（51 files, +2930 / -411）；确认候选 EXE `mtime 00:54:35` 晚于最新真实源 `00:54:03`（不陈旧）；无 robocopy 在飞；无失控 case runner。
 2. **清点失效自动化状态**：结论是**没有需要清理的**（无遗留 robocopy、无 fault injector、未启动新 runner）。理由记录：未对残留 `powershell`/`pwsh` 做无差别 kill —— 它们可能是 DSH 宿主/会话宿主，误杀风险高于收益。
 3. **Final Release build**：`dotnet build PCMig.sln -c Release` ⇒ 成功，当时 **0 error / 4 warning**（4 = 基线：3×WMC1506 + 1×既有）。
-4. **启动候选并交给用户**：用 `E:\PCMigLab\Staging\recovery-gate\launch-app.ps1 -WaitSec 12` 启动，PID 194664，停在初始界面。
-5. **落盘**：新建 `E:\PCMigLab\Evidence\Trust-Critical-Recovery\FINAL-FIX-CANDIDATE-IDENTITY-20261005-0151.txt`（含 6 个产物 SHA256）；在 `CURRENT-TRUST-CRITICAL-CHECKPOINT.txt` 尾部追加「2026-10-05 01:52 FINAL FIX CANDIDATE 移交记录」段。
+4. **启动候选并交给用户**：用 `<实验室根>\Staging\recovery-gate\launch-app.ps1 -WaitSec 12` 启动，PID 194664，停在初始界面。
+5. **落盘**：新建 `<实验室根>\Evidence\Trust-Critical-Recovery\FINAL-FIX-CANDIDATE-IDENTITY-20261005-0151.txt`（含 6 个产物 SHA256）；在 `CURRENT-TRUST-CRITICAL-CHECKPOINT.txt` 尾部追加「2026-10-05 01:52 FINAL FIX CANDIDATE 移交记录」段。
 6. **桌面复验包**：`PCMig-FinalFixCandidate-ManualAcceptance-20261005-0155\`（6 份证据副本 + `MANIFEST-复验清单.md`）。
-7. **二进制回退备份**：`E:\PCMigLab\Staging\final-candidate-backup-20261005-0152\`（`PCMig.WinUI.exe` / `PCMig.WinUI.dll` / `PCMig.Core.dll` / `PCMig.Diagnostics.dll`）。
+7. **二进制回退备份**：`<实验室根>\Staging\final-candidate-backup-20261005-0152\`（`PCMig.WinUI.exe` / `PCMig.WinUI.dll` / `PCMig.Core.dll` / `PCMig.Diagnostics.dll`）。
 8. **本轮零产品代码改动**。
 
 ### 第 2 轮：UI Closure 专项（02:22 → 03:00，用户 UI Closure 指令）
@@ -59,10 +59,10 @@
 - U6 视觉复验：**部分完成**（见 §5 的"没做什么"）。
 
 **并行委派的 4 个只读子代理（结果已落盘，主控已核验）**：
-1. 像素测量（`E:\PCMigLab\Evidence\UI-Closure-20261005\pixel-measure-report.md` + 24 个 `measure-*.py`）—— 给出 4 项改前实测值：底栏百分比可用宽 39..41 px（缺 4..6 / 14..16 px）、Popup 越出 59 px（底边口径 51 px）、下拉框圆角 r≈2..3 px vs 路径框 8..9 px、统计卡文字未贴边（证伪标注）。
-2. WinUI Composition 调研（`D:\Users\User\Desktop\_pcmig-motion-research\WinUI-Composition-Motion-Plan.md`，592 行）—— 实测 SDK = **WindowsAppSDK 2.5.1**、UI 节拍 **50 ms / 20 Hz**、`AccentGradientBrush` 是 45° Relative 渐变 ⇒ **结论：禁用 `Scale.X`（会拉伸渐变与圆角）、禁继续写 `Width`（20 Hz × 60 fps = 每秒 60 次布局），改用「满宽填充 + `InsetClip.RightInset` 标量动画」**；并给出 glow/sweep/粒子的挂载位置纪律。
-3. PMML 覆盖审计（`D:\Users\User\Desktop\_pcmig-pmml-audit\PMML-Coverage-Matrix.md`）—— 17 个目标章节里 5 个完全缺失、10 个部分存在、2 个重复分散；给出三份文档的同步落点。
-4. 单位与归零追踪（`D:\Users\User\Desktop\_pcmig-trace\units-and-pause-trace.md`）—— 定位唯一 formatter 与"暂停归零"三处根因链（`MarkInterrupted` 不实测 / 累计无单调下限 / `Report` fallback 置 in-flight 0）。
+1. 像素测量（`<实验室根>\Evidence\UI-Closure-20261005\pixel-measure-report.md` + 24 个 `measure-*.py`）—— 给出 4 项改前实测值：底栏百分比可用宽 39..41 px（缺 4..6 / 14..16 px）、Popup 越出 59 px（底边口径 51 px）、下拉框圆角 r≈2..3 px vs 路径框 8..9 px、统计卡文字未贴边（证伪标注）。
+2. WinUI Composition 调研（`<用户目录D>\Desktop\_pcmig-motion-research\WinUI-Composition-Motion-Plan.md`，592 行）—— 实测 SDK = **WindowsAppSDK 2.5.1**、UI 节拍 **50 ms / 20 Hz**、`AccentGradientBrush` 是 45° Relative 渐变 ⇒ **结论：禁用 `Scale.X`（会拉伸渐变与圆角）、禁继续写 `Width`（20 Hz × 60 fps = 每秒 60 次布局），改用「满宽填充 + `InsetClip.RightInset` 标量动画」**；并给出 glow/sweep/粒子的挂载位置纪律。
+3. PMML 覆盖审计（`<用户目录D>\Desktop\_pcmig-pmml-audit\PMML-Coverage-Matrix.md`）—— 17 个目标章节里 5 个完全缺失、10 个部分存在、2 个重复分散；给出三份文档的同步落点。
+4. 单位与归零追踪（`<用户目录D>\Desktop\_pcmig-trace\units-and-pause-trace.md`）—— 定位唯一 formatter 与"暂停归零"三处根因链（`MarkInterrupted` 不实测 / 累计无单调下限 / `Report` fallback 置 in-flight 0）。
 
 ### 第 3 轮：打包与交付（03:03 → 03:15，用户要求把改动文件与整版打成包）
 1. `PCMig-UI-Closure-改动代码-20261005-0303\`（桌面）：**28 个改动文件按原始相对路径镜像** + `01-清单`（21 个逐文件 diff + 340 KB 合并补丁 + 105 文件 SHA256 + manifest.csv + verify-summary）+ `03-仓库外新增产物`（48 项证据/夹具）+ `00-说明.md`。
@@ -160,18 +160,18 @@
 - 导航：`docs\INDEX.md`、`AGENTS.md`
 
 ### 实验室/证据侧（本会话新建）
-- `E:\PCMigLab\Evidence\Trust-Critical-Recovery\UI-CLOSURE-20261005\`：`measure-text-widths.py` / `text-widths.json`、`measure-text-widths2.py` / `text-widths2.json`（**"100.0%"@17 Bold = 61.0 px；"约 23 小时 59 分"@13 = 100.0 px**）、`measure-font-metrics.py` / `font-metrics.json`（**20→28 零余量、40→54 vs 配置 52 真裁 2 px**）、`shot-01-initial-step1.png`、`b10-full-transcript.txt`
-- `E:\PCMigLab\Evidence\UI-Closure-20261005\`：`pixel-measure-report.md` + 24 个 `measure-*.py` + `crop-*.png`（4 项改前实测）
-- `E:\PCMigLab\Evidence\Trust-Critical-Recovery\FINAL-FIX-CANDIDATE-IDENTITY-20261005-0151.txt`（第 1 轮候选身份）
-- `E:\PCMigLab\Evidence\Trust-Critical-Recovery\CURRENT-TRUST-CRITICAL-CHECKPOINT.txt`（尾部新增 01:52 移交段）
-- `E:\PCMigLab\Staging\recovery-gate\dump-texts.ps1`（**新**：全窗 Text 转储，用于验证状态路由）
-- `E:\PCMigLab\Staging\recovery-gate\build-ui-closure-package.ps1`（**新**：桌面「改动代码」包生成器；**已彻底 ASCII 化**）
-- `E:\PCMigLab\Staging\build-src-package.ps1`（**新**：整版源码包 staging 生成器；同样 ASCII 化）
-- `E:\PCMigLab\Staging\PCMig-v0.5.0-这一版源码-20261005\`（源码包 staging，可直接再压缩）
-- `E:\PCMigLab\Staging\final-candidate-backup-20261005-0152\`（二进制回退备份）
+- `<实验室根>\Evidence\Trust-Critical-Recovery\UI-CLOSURE-20261005\`：`measure-text-widths.py` / `text-widths.json`、`measure-text-widths2.py` / `text-widths2.json`（**"100.0%"@17 Bold = 61.0 px；"约 23 小时 59 分"@13 = 100.0 px**）、`measure-font-metrics.py` / `font-metrics.json`（**20→28 零余量、40→54 vs 配置 52 真裁 2 px**）、`shot-01-initial-step1.png`、`b10-full-transcript.txt`
+- `<实验室根>\Evidence\UI-Closure-20261005\`：`pixel-measure-report.md` + 24 个 `measure-*.py` + `crop-*.png`（4 项改前实测）
+- `<实验室根>\Evidence\Trust-Critical-Recovery\FINAL-FIX-CANDIDATE-IDENTITY-20261005-0151.txt`（第 1 轮候选身份）
+- `<实验室根>\Evidence\Trust-Critical-Recovery\CURRENT-TRUST-CRITICAL-CHECKPOINT.txt`（尾部新增 01:52 移交段）
+- `<实验室根>\Staging\recovery-gate\dump-texts.ps1`（**新**：全窗 Text 转储，用于验证状态路由）
+- `<实验室根>\Staging\recovery-gate\build-ui-closure-package.ps1`（**新**：桌面「改动代码」包生成器；**已彻底 ASCII 化**）
+- `<实验室根>\Staging\build-src-package.ps1`（**新**：整版源码包 staging 生成器；同样 ASCII 化）
+- `<实验室根>\Staging\PCMig-v0.5.0-这一版源码-20261005\`（源码包 staging，可直接再压缩）
+- `<实验室根>\Staging\final-candidate-backup-20261005-0152\`（二进制回退备份）
 - 子代理产物（桌面侧）：`_pcmig-motion-research\WinUI-Composition-Motion-Plan.md`、`_pcmml-audit`→`_pcmig-pmml-audit\PMML-Coverage-Matrix.md`、`_pcmig-trace\units-and-pause-trace.md`
 
-### 桌面交付（`D:\Users\User\Desktop\新建文件夹 (4)\`）
+### 桌面交付（`<用户目录D>\Desktop\<桌面交付根>\`）
 | 项 | 内容 |
 |---|---|
 | `PCMig-UI-Closure-这一版源码-20261005.zip` | **8.39 MB / 505 条目**（497 源码与文档 + `_交付清单`）；根目录 `PCMig-v0.5.0-这一版源码-20261005\` |
@@ -207,7 +207,7 @@
 1. **先只读同步现实**（≤3 分钟）：`git rev-parse HEAD` / `branch` / `status --porcelain=v1`（应为 82 条）/ 确认 `PCMig.WinUI.exe` 进程与路径（必须是 `bin\x64\Release\…`，**不要用** `bin\Release\…` 的旧产物）/ 确认没有遗留 robocopy。
 2. **问用户要指令**：本会话所有代码改动**已就位但未验收**，用户的下一条指令决定是"继续修 UI/动效"、"跑真机复验"、还是"回到上一轮的 Recovery 卡点"。
 3. 若继续 UI 线，按用户 §22 清单做**真实运行复验**：优先解决"运动类如何证明非跳帧"（可用连续帧截图 + 帧间像素差，或录屏）。
-4. 若回到 Recovery 线：**唯一未结卡点 = 缺陷#3**（case8 首次点「恢复任务」被吞），判定入口在 `E:\PCMigLab\Evidence\Trust-Critical-Recovery\recovery-gate\case08*.log` 与 `case08c-flyout-probe.ps1 -StopAfterAdopt` + `probe-focus-eat.ps1`；判定必须走 **Action Trigger Gate**（UI.UserActionObserved + 引擎事件双证），无 Action Event 一律判自动化无效，**不得**据此改产品。
+4. 若回到 Recovery 线：**唯一未结卡点 = 缺陷#3**（case8 首次点「恢复任务」被吞），判定入口在 `<实验室根>\Evidence\Trust-Critical-Recovery\recovery-gate\case08*.log` 与 `case08c-flyout-probe.ps1 -StopAfterAdopt` + `probe-focus-eat.ps1`；判定必须走 **Action Trigger Gate**（UI.UserActionObserved + 引擎事件双证），无 Action Event 一律判自动化无效，**不得**据此改产品。
 5. 任何新改动都要：改 → `dotnet build PCMig.sln -c Release`（0 error）→ 相关测试 → 启动新 EXE 截图 → 再交付；**保持"只增不覆"的交接文档与桌面交付包习惯**。
 
 ---
@@ -223,7 +223,7 @@
 7. **PS 5.1 陷阱（本会话踩了两次）**：pwsh 工具实为 Windows PowerShell 5.1 —— 含中文的 `.ps1` **必须 UTF-8 with BOM**；**无 BOM 的 UTF-8 脚本里连中文注释都会被按 GBK 解码并吞掉换行**，从而破坏相邻语句（本会话因此产出过 `02-仓库内文件` 这种残缺目录名）。写法：脚本**全 ASCII**，中文一律用 `[char]` 码位拼接，或写完后 `Set-Content -Encoding UTF8` 补 BOM 并彻查无 CJK。
 8. **编号口径提醒**：`docs\UI-CLOSURE-ISSUES-20261005.md` 的 `UI-01…UI-14` 是**该问题表内部编号**（按施工顺序 U1–U4 重排），与用户指令正文条目顺序**不完全对应** —— 引用时以"编号 + 描述性标题"并列，避免误导。
 9. **用户口令**：听到「进度暂停」立即停止并冻结落盘（只读待命）；听到「进度恢复」才继续。
-10. **桌面交付习惯**：每一大轮结束把本轮改动/相关/待核对文件复制到桌面「新建文件夹 (4)」的带日期子目录（**只复制不改源**）+ 清单/校验；本轮的命名与结构惯例是 `PCMig-<主题>-<日期或时间戳>\` + `00-说明.md` + `01-清单` + `02-仓库内改动文件` + `03-仓库外新增产物`。
+10. **桌面交付习惯**：每一大轮结束把本轮改动/相关/待核对文件复制到桌面「<桌面交付根>」的带日期子目录（**只复制不改源**）+ 清单/校验；本轮的命名与结构惯例是 `PCMig-<主题>-<日期或时间戳>\` + `00-说明.md` + `01-清单` + `02-仓库内改动文件` + `03-仓库外新增产物`。
 
 ---
 
@@ -232,7 +232,7 @@
 - **源码**：本会话全部改动**未 commit** ⇒ 在源仓按 `01-清单\diff-stat.txt` 清单执行 `git checkout -- <文件>` 就能整体回退；
 - **新增文件**需手工删除：`src\PCMig.WinUI\Presentation\ProgressMotionDriver.cs`、`docs\UI-CLOSURE-REPORT-20261005.md`、`docs\UI-CLOSURE-ISSUES-20261005.md`、`docs\工作交接-20261005-UI-Closure.md`（+ 本文件）；
 - **装饰层可软关闭**：把 `MainWindow.xaml.cs` / `Step3ProgressPage.xaml.cs` 里的 `new ProgressMotionDriver(...)` 置空即可（它不持有任何业务引用，业务真值路径不受影响）；
-- **二进制**：`E:\PCMigLab\Staging\final-candidate-backup-20261005-0152\`（第 1 轮备份）；`E:\PCMigLab\Staging\PCMig-v0.5.0-这一版源码-20261005\`（源码包 staging，可重新压缩）。
+- **二进制**：`<实验室根>\Staging\final-candidate-backup-20261005-0152\`（第 1 轮备份）；`<实验室根>\Staging\PCMig-v0.5.0-这一版源码-20261005\`（源码包 staging，可重新压缩）。
 
 ---
 
@@ -294,7 +294,7 @@
 1. **Win2D 的 `CanvasAnimatedControl.Update/Draw` 跑在游戏循环线程**，不是 UI 线程。在该线程读 DependencyProperty / `Application.Current.Resources` / `MotionDirector.SystemAnimationsEnabled` 会让应用以 `0xc000027b`（`RPC_E_WRONG_THREAD`，WER 报 `combase.dll`）**直接崩掉**（本轮已踩）。正解：UI 线程把值 + 调色板发布成**不可变快照**，渲染线程只读快照字段。
 2. **离屏逐像素自检必须在暂停画布之后做**（`CanvasAnimatedControl.Paused = true` → `Task.Delay(180)` → 绘制 → 还原）：同一批画刷被渲染线程就地改写，Win2D 画刷**不是线程安全的**，否则离屏目标会全透明。
 3. **Win2D 没有托管参考程序集**，API 形状只能靠编译器错误确证。已知坑：`CanvasLinearGradientBrush.Stops` 是**只读属性**（整体赋值报 `CS0200`），但返回列表的**索引器可写**，且其 `Count` 是**方法组**不是属性；`DrawCircle` **没有**弧线重载；`CanvasPathBuilder.AddArc` **只有**"终点 + 半径 + 旋转 + `CanvasSweepDirection` + `CanvasArcSize`"这一种重载；`Colors` 在 WinUI 3 属 **`Microsoft.UI`** 命名空间（要 `using Microsoft.UI;`）；WinUI 3 的 `IRangeValueProvider` **没有** `RangeValueChanged` 事件（用 `RaisePropertyChangedEvent(RangeValuePatternIdentifiers.ValueProperty, old, new)`）。
-4. **探针挂在环境变量上**：`PCMIG_IMMERSIVE_PROBE=1` ⇒ `MainWindow` 直接换成 `Views\ImmersiveProgressVisualProbe`（确定性序列 + Holding/Pause/Resume，输出 `frames\` 与 `timeline.csv`）；`PCMIG_IMMERSIVE_PROBE_DIR` 指定输出目录（采集脚本 `immersive-static-capture.ps1` 硬编码为 `E:\PCMigLab\Staging\phI-static\probe`）；`PCMIG_IMMERSIVE_SELFTEST=1` 追加离屏逐像素自检。**探针 AutomationId 写在 code-behind**（`AssignProbeAutomationIds()`），因为 `Diagnostics\ControlIds.cs` 是**生产**锚点登记表，`D63AutomationIdBindingTests` 会检查 XAML 字面量必须 ⊆ 该表且前缀受控。
+4. **探针挂在环境变量上**：`PCMIG_IMMERSIVE_PROBE=1` ⇒ `MainWindow` 直接换成 `Views\ImmersiveProgressVisualProbe`（确定性序列 + Holding/Pause/Resume，输出 `frames\` 与 `timeline.csv`）；`PCMIG_IMMERSIVE_PROBE_DIR` 指定输出目录（采集脚本 `immersive-static-capture.ps1` 硬编码为 `<实验室根>\Staging\phI-static\probe`）；`PCMIG_IMMERSIVE_SELFTEST=1` 追加离屏逐像素自检。**探针 AutomationId 写在 code-behind**（`AssignProbeAutomationIds()`），因为 `Diagnostics\ControlIds.cs` 是**生产**锚点登记表，`D63AutomationIdBindingTests` 会检查 XAML 字面量必须 ⊆ 该表且前缀受控。
 5. **`ensure-step3.ps1` 已过时**：它轮询的是已被替换掉的 `TotalProgressHost` ⇒ 现在报 `NOT-READY`；新控件在 UIA 里是 `ControlType.ProgressBar`、aid `TotalImmersiveProgress`。同理 `capture-progress-frames.ps1` 的 aid 回退会**静默选中底栏轻量条** ⇒ 取 ROI 必须显式按 `TotalImmersiveProgress`，否则取证对象是错的（本轮已踩）。
 6. **屏幕像素归因必须使用同一次运行的 UIA 原点**：我把上一轮窗口原点套到新一轮截图上，曾误判"轨道渲染成浅灰蓝"（真值：轨道 `#28446A`@α=0x6C 叠在页面 `#0B0E13` ⇒ `#172538`，与屏上 `#172333` 一致；填充不透明 `#368BF8` 与屏上逐字节相同）。同类错配还产生过"填充延伸到 640 DIP"的假结论。
 7. **PowerShell 老坑复现**：`$host` 是**只读自动变量**（当数值变量用会把脚本刷成一片报错并污染统计）；pwsh 里 `Set-Location` 之后 `[IO.File]::ReadAllText('相对路径')` 仍按**进程 CWD** 解析 ⇒ 文件 API 一律绝对路径；中文 `.ps1` 必须 UTF-8 **带 BOM**（`[IO.File]::WriteAllText($p,$t,[Text.UTF8Encoding]::new($true))`），否则 `powershell.exe` 5.1 报 `Unexpected token '}'`；`uia-lib.ps1` 的 `Invoke-RgClick` 参数口径是「元素, 点击次数」，**不是 aid 名**。

@@ -2,9 +2,9 @@
 
 > **新增档案，不覆盖任何历史交接。** 前置档案：`docs\工作交接-20260927-FinalPolish首批实现与验收阻塞.md`（首批实现，本会话的起点）。
 >
-> 权威工作区：`E:\Project\deepseek work\PCMig`
+> 权威工作区：`<仓库根>`
 > 分支：`feature/winui-v0.5.0` ｜ HEAD：`c9aef30454081fd81a13c8c9feef029f0629ad67`
-> 当前状态：**仍在既有脏工作树之上继续；未提交任何改动；未发版；未触碰交付区 `E:\Project\PCMig`、工作副本 `D:\PCMig`、`tools\*.ps1`、发版脚本。**
+> 当前状态：**仍在既有脏工作树之上继续；未提交任何改动；未发版；未触碰交付区 `<交付区>`、工作副本 `<发版工作副本>`、`tools\*.ps1`、发版脚本。**
 
 ---
 
@@ -160,7 +160,7 @@ Secondary 禁用态文字最低亮度 **131.7 → 161.1**（前景变暗确认�
 
 | 项 | 位置 / 结果 |
 |---|---|
-| 会话前整体基线 | tag `v0.5.0-before-final-polish-20260927` → `c9aef30454081fd81a13c8c9feef029f0629ad67`；镜像 `E:\Project\镜像备份源码\PCMig-v0.5.0-before-final-polish-20260927`（208 文件）+ bundle + `-清单.md` |
+| 会话前整体基线 | tag `v0.5.0-before-final-polish-20260927` → `c9aef30454081fd81a13c8c9feef029f0629ad67`；镜像 `<镜像备份根>\PCMig-v0.5.0-before-final-polish-20260927`（208 文件）+ bundle + `-清单.md` |
 | 中点基线（首批之后） | tag `v0.5.0-final-polish-firstbatch-20260927` → `8bf775332ed9d0677192a1c8ed14398b4fa6f52f`（由 `git stash create` 产生，**仅覆盖 tracked 改动，不含未跟踪新文件**）；镜像目录（214 文件）、bundle（6,140,626 B、49 refs、`git bundle verify` 通过）、11/11 关键文件 SHA256 MATCH、清单 `PCMig-v0.5.0-final-polish-firstbatch-20260927-清单.md` |
 | 归属提示 | 会话前镜像建在**首批实现之前**，因此**不包含首批与后半程改动**；后半程（本会话）**没有任何备份**，改动全部只在工作树里，**未提交**。 |
 
@@ -179,21 +179,21 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 # 1) 重建（必须先杀在跑的 EXE，否则 bin 被锁：MSB3026/MSB3027）
 Get-Process PCMig.WinUI -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 1500
-cd 'E:\Project\deepseek work\PCMig'
+cd '<仓库根>'
 dotnet build src\PCMig.WinUI\PCMig.WinUI.csproj -c Release
 
 # 2) 带 Motion 诊断启动（不设该变量则完全无副作用）
 $env:PCMIG_MOTION_TRACE='1'
-$exe='E:\Project\deepseek work\PCMig\src\PCMig.WinUI\bin\Release\net8.0-windows10.0.19041.0\win-x64\PCMig.WinUI.exe'
+$exe='<仓库根>\src\PCMig.WinUI\bin\Release\net8.0-windows10.0.19041.0\win-x64\PCMig.WinUI.exe'
 $p=Start-Process $exe -PassThru
 # 诊断日志: %TEMP%\pcmig-motion-trace.log   （BEGIN / SUPPRESS / END）
 
 # 3) 真实窗口截图（PrintWindow，失败自动降级 CopyFromScreen）
-& 'E:\Project\deepseek work\archive\scripts\uishot-winui.ps1' -ProcId $p.Id -Out 'D:\out.png' [-UseScreen]
+& '<工作区根>\archive\scripts\uishot-winui.ps1' -ProcId $p.Id -Out 'D:\out.png' [-UseScreen]
 #   输出 WINDOW/CAPTURE-METHOD/SHOT 三行，可判定用的是哪条路径
 
 # 4) DPI 验收（只读；改完系统缩放后跑）
-& 'E:\Project\deepseek work\archive\scripts\dpi-measure.ps1' -Out '...\dpi-matrix-results.txt'
+& '<工作区根>\archive\scripts\dpi-measure.ps1' -Out '...\dpi-matrix-results.txt'
 ```
 
 **导航与测量约定（本会话验证有效）**：UIA `AutomationId`（x:Name 即可）或 `NameProperty`；用 `InvokePattern` 触发，**不要靠鼠标坐标猜**。四页可见性判定可用各页副标题文本存在性（折叠页元素不在 UIA 树里）。
@@ -218,7 +218,7 @@ $p=Start-Process $exe -PassThru
 ## 9. 纪律遵守声明
 
 - 未发版；`tools\release.ps1` 与所有 `tools\*.ps1` **未编辑**；未改 `docs\更新日志.md` 版本内容。
-- 未删除/覆盖/移动交付区 `E:\Project\PCMig`、工作副本 `D:\PCMig`、镜像备份源码。
+- 未删除/覆盖/移动交付区 `<交付区>`、工作副本 `<发版工作副本>`、镜像备份源码。
 - 未执行任何破坏性 git 命令；未提交、未 stash 现有改动。
 - 未改动功能冻结范围内的业务代码（Core / CLI / ViewModel / Command / 绑定 / 迁移与 Robocopy / 状态机 / 存档格式 / 导航语义）。
 - 系统级改动（显示缩放）**未执行**，等用户当轮指令。

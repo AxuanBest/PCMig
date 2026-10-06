@@ -27,7 +27,7 @@ $txt = ($res.Lines | ForEach-Object { $_.Text }) -join [char]10
 # 脱敏：疑似密钥/口令一律打码
 $txt = $txt -replace '(?i)(apikey|api_key|token|password|passwd|sk-)[^\s]{6,}', '$1=***'
 $txt = $txt -replace '\b[A-Za-z0-9+/]{32,}={0,2}\b', '***'
-$txt = $txt -replace '(z00746|<口令已脱敏>|<口令已脱敏>)', '***'
+$txt = $txt -replace '(SRC-PC-2|<口令已脱敏>|<口令已脱敏>)', '***'
 [IO.File]::WriteAllText('E:\deepseek work\paste-ocr.txt', $txt, (New-Object Text.UTF8Encoding($true)))
 Write-Output $txt
 Write-Output 'OCR_DONE'

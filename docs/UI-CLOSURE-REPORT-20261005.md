@@ -28,7 +28,7 @@
 | **TESTS** | `PCMig.Core.Tests` 全量 **468 / 468 通过**（含 5 处随用户规格同步的断言更新，非放宽） |
 | **FINAL CANDIDATE** | `src\PCMig.WinUI\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\PCMig.WinUI.exe`（`PCMig.WinUI.dll` SHA256 `4A9E0744B0B47F9A1996A879A5095EF7F98C971E2CFC2D3EDE3DDD9821B28199` @ 02:52:14） |
 | **APP PID** | **223888**（标题 `PCMig 迁移工具 · v0.5.0`，停在正常初始页 Step1） |
-| **EVIDENCE** | `E:\PCMigLab\Evidence\Trust-Critical-Recovery\UI-CLOSURE-20261005\`（文本宽度/字体度量 JSON、初始页截图、全窗 Text 转储、编号核查留档）+ `E:\PCMigLab\Evidence\UI-Closure-20261005\pixel-measure-report.md`（4 项像素实测） |
+| **EVIDENCE** | `<实验室根>\Evidence\Trust-Critical-Recovery\UI-CLOSURE-20261005\`（文本宽度/字体度量 JSON、初始页截图、全窗 Text 转储、编号核查留档）+ `<实验室根>\Evidence\UI-Closure-20261005\pixel-measure-report.md`（4 项像素实测） |
 | **OPEN UI ISSUES** | UI-02 真机暂停/恢复复验；UI-06/UI-07 改后像素复核；UI-12 装饰在真实 Running 下目视；UI-14 编号口径（见 §五） |
 
 ---
@@ -134,4 +134,4 @@
 ## 六、开放项与回退
 
 - **开放**：UI-02 真机暂停/恢复复验；UI-06/UI-07 改后像素复核（改前值已存档：Δ=59 px、r≈2..3 px）；UI-12 装饰在真实 Running 目视；顺延的缺陷#3（case8 Resume 归属判定）、Case06/Case09–16、§16 物理预验收、§18 十五份交付文件 + ZIP；既有风险 R-011 / R-012 / R-014 / R-007。
-- **回退**：本轮未 commit ⇒ `git checkout -- <文件>`（20 个源码/测试 + 6 个文档）；手工删除新增文件 `src\PCMig.WinUI\Presentation\ProgressMotionDriver.cs`；装饰可置空（不持有任何业务引用），业务真值路径不受影响；二进制回退沿用 `E:\PCMigLab\Staging\final-candidate-backup-20261005-0152\`。
+- **回退**：本轮未 commit ⇒ `git checkout -- <文件>`（20 个源码/测试 + 6 个文档）；手工删除新增文件 `src\PCMig.WinUI\Presentation\ProgressMotionDriver.cs`；装饰可置空（不持有任何业务引用），业务真值路径不受影响；二进制回退沿用 `<实验室根>\Staging\final-candidate-backup-20261005-0152\`。

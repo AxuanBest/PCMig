@@ -1,6 +1,6 @@
 # scripts\ —— 用例库与文件生成器（副本）
 
-> 来源：`E:\PCMigLab\Staging\ctl\`（2026-10-06 复制，**canonical 仍在原处**）。
+> 来源：`<实验室根>\Staging\ctl\`（2026-10-06 复制，**canonical 仍在原处**）。
 > 定性：**测试能力脚本，§6 / §7 必留**。
 
 | 文件 | 作用 |
@@ -11,7 +11,7 @@
 ## canonical 位置
 
 ```
-E:\PCMigLab\Staging\ctl\
+<实验室根>\Staging\ctl\
 ├── cases\                    用例定义（Case matrix）
 ├── cases-backup-20261003-0415\
 ├── faults\                   故障注入（盘满 / 共享撤销 / 权限不足 / 锁文件 / 路径过长 / 域不可达）

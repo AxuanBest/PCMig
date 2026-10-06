@@ -9,7 +9,7 @@
 
 ## 〇、本轮审计已经产出的真实运行结果（不是计划）
 
-审计阶段**不仅仅是读代码**——已完成 3 项真实运行，证据已落盘 `J:\pcmig-lab\runs\`：
+审计阶段**不仅仅是读代码**——已完成 3 项真实运行，证据已落盘 `<外置实验室盘>\runs\`：
 
 | Scenario | 结果 | 等级 | 关键证据 |
 |---|---|---|---|
@@ -73,7 +73,7 @@
 | 已导出共享 | **13 个**：`ADMIN$ C$ D$ E$ F$ G$ H$ I$ J$ K$ IPC$ Users 项目` |
 | 当前 SMB 会话 | **0**（干净起点）｜ `net use` 空 ｜ `EnableInsecureGuestLogons=False` ｜ `LimitBlankPasswordUse=1` |
 
-> ⚠ **绝对禁碰**：`Users`(=C:\Users) 与 `项目`(=H:\项目) 是**真实数据共享**。
+> ⚠ **绝对禁碰**：`Users`(=C:\Users) 与 `项目`(=<移动盘>\项目) 是**真实数据共享**。
 
 > ⚠ **一处过时数据已更正**：交接文档记载 I 盘仅剩 17.9 GB —— 实测现为 **75.97 GB**（两个 API 一致复核）。磁盘条件比文档记录宽松。
 
@@ -88,17 +88,17 @@
 | `lab\unlock.ps1` | ⚠ **危险**：`Stop-Process` 杀掉所有非自身 powershell。不可直接复用 |
 | `lab\uia-changelog.ps1` | ✅ **可复用**：UIA 通过 `AutomationId` Invoke 实测成功（见 §五-3 的方法学缺陷） |
 | `lab\answer.iso` | ✅ 保留（应答盘，非安装源）|
-| `G:\HyperV\PCMig-OldPC\PCMig-OldPC.vhdx` | ⭐ **重大发现**：**18.0 GB 既有 Hyper-V 虚拟机**（12.0 GB 基盘 + 18.0 GB avhdx 差分盘 + 快照 + VMRS）。这是历史上真实建过的 PCMig 测试 VM |
-| `E:\Documents\Virtual Machines\` 8 台 VMware VM | ⚠ 见 §七 |
+| `<Hyper-V 镜像盘>\PCMig-OldPC\PCMig-OldPC.vhdx` | ⭐ **重大发现**：**18.0 GB 既有 Hyper-V 虚拟机**（12.0 GB 基盘 + 18.0 GB avhdx 差分盘 + 快照 + VMRS）。这是历史上真实建过的 PCMig 测试 VM |
+| `<本机文档>\Virtual Machines\` 8 台 VMware VM | ⚠ 见 §七 |
 
 ---
 
 ## 二、Lab 目录结构（设计）
 
-**不放在项目工作区内**（避免污染 git 与 4 GB 的 dist）。统一落在 **`J:\pcmig-lab\`**（128 GB 空闲、无任何既有占用、与 VM 盘物理分离）：
+**不放在项目工作区内**（避免污染 git 与 4 GB 的 dist）。统一落在 **`<外置实验室盘>\`**（128 GB 空闲、无任何既有占用、与 VM 盘物理分离）：
 
 ```
-J:\pcmig-lab\
+<外置实验室盘>\
 ├─ scenarios\        # 场景定义（每场景一个 .ps1 或 .json 描述）
 ├─ lib\             # 公共模块（Compare-Tree / 数据生成 / 证据落盘）—— 唯一实现，禁止复制
 ├─ fixtures\        # 证据素材（真实日志、编码标注）
@@ -113,9 +113,9 @@ J:\pcmig-lab\
 └─ cleanup\         # 清理脚本与清理记录
 ```
 
-**已创建并已使用**：`J:\pcmig-lab\runs\20260919-140131-SMB-LOOPBACK-T01\`（含 `environment.json` / `command.txt` / `pcmig.log` / `robocopy-object-00000{1,2}.log` / `evidence\`）。
+**已创建并已使用**：`<外置实验室盘>\runs\20260919-140131-SMB-LOOPBACK-T01\`（含 `environment.json` / `command.txt` / `pcmig.log` / `robocopy-object-00000{1,2}.log` / `evidence\`）。
 
-**结构决策 vs 用户建议**：用户提议的 `I:\PCMig-TestLab\` **不采用** —— 理由：① I 盘含 17.3 GB 备份镜像，磁盘满测试有挤爆备份的风险；② J 盘 128 GB 完全干净、与 G 盘 VM 物理分离、与 E 盘 TEMP 分离，避免 IO 互相污染。
+**结构决策 vs 用户建议**：用户提议的 `<旧镜像交付区>-TestLab\` **不采用** —— 理由：① I 盘含 17.3 GB 备份镜像，磁盘满测试有挤爆备份的风险；② J 盘 128 GB 完全干净、与 G 盘 VM 物理分离、与 E 盘 TEMP 分离，避免 IO 互相污染。
 
 ---
 
@@ -150,7 +150,7 @@ Setup → Run → Verify → Evidence → Cleanup
 5. **硬杀场景必须断言"无孤儿 robocopy"** —— 12 秒窗口内 `Get-Process robocopy` 为空 + CLI 日志无 `AssignProcessToJobObject 失败` + 目标字节冻结 + `status` 显示 Interrupted + `job.lock` 可独占获得。
    > ⚠ `ProcessJobGuard.cs:89` 挂接失败时**静默无日志** → 必须显式断言日志。
 6. **清理必须做基线比对** —— SMB 共享数/名字集合、`Get-SmbConnection` 数、`net use` 条目、VHD 挂载、测试用户，全部与 Setup 前快照比对，不一致报 `CLEANUP_FAIL`。
-7. **危险资源硬禁** —— 脚本头部断言拒绝 `-Root` 落在 `C:\Users` / `H:\项目` / `\\AXUAN\Users` / `\\AXUAN\项目`；禁止对非 `PCMigLab*` 前缀执行 `Remove-SmbShare`；禁止操作 C:–K: 真实盘的挂载/格式化。
+7. **危险资源硬禁** —— 脚本头部断言拒绝 `-Root` 落在 `C:\Users` / `<移动盘>\项目` / `\\AXUAN\Users` / `\\AXUAN\项目`；禁止对非 `PCMigLab*` 前缀执行 `Remove-SmbShare`；禁止操作 C:–K: 真实盘的挂载/格式化。
 
 ### 3.4 证据目录模板
 
@@ -247,13 +247,13 @@ pcmig preflight --target \\AXUAN\J$\x
 
 ### 一条被更正的旧结论（重要）
 
-**磁盘满（错误 112）的真实原始 robocopy 日志一直存在** —— 在 `C:\ProgramData\PCMig\Jobs\` 下 **21 个历史 job / 118.7 MB 真实日志**中。交接文档 §21.8-1 说"未留存"**应更正**。
+**磁盘满（错误 112）的真实原始 robocopy 日志一直存在** —— 在 `<本机程序数据目录>\Jobs\` 下 **21 个历史 job / 118.7 MB 真实日志**中。交接文档 §21.8-1 说"未留存"**应更正**。
 
 实测真实错误码分布（GBK/936 解码）：
 
 | 错误码 | 真实次数 | 原文样例 |
 |---|---|---|
-| **112** `0x70` 磁盘空间不足 | **18** | `2026/09/14 00:22:00 错误 112 (0x00000070) 正在复制文件 \\192.168.134.131\E$\迁移全量测试\大文件\大文件-2.bin` + `磁盘空间不足。` |
+| **112** `0x70` 磁盘空间不足 | **18** | `2026/09/14 00:22:00 错误 112 (0x00000070) 正在复制文件 \\192.0.2.131\E$\迁移全量测试\大文件\大文件-2.bin` + `磁盘空间不足。` |
 | **82** `0x52` 无法创建目录或文件 | **33849** | `错误 82 (0x00000052) 正在复制文件 …pic_021845.jpg` + `无法创建目录或文件。` + `错误: 超过重试限制。` |
 | **59** `0x3B` 网络意外错误 | 10 | `错误 59 (0x0000003B) …` |
 | **2** `0x02` 找不到文件 | 2 | `错误 2 (0x00000002) …` |
@@ -307,13 +307,13 @@ pcmig preflight --target \\AXUAN\J$\x
 | Hyper-V | **全栈已启用**：`Microsoft-Hyper-V-All`=1、`vmms` **Running**、`vmcompute` Running、`HvHost` Running | ✅ 可用（需提权管理）|
 | Hypervisor | **`HypervisorPresent=True`** | 权威判据为真 |
 | SLAT / VMMonitorMode | WMI 显示 False | ⚠ **不是硬件缺陷** —— Hyper-V 已接管时 Windows 隐藏这两项 |
-| 现有 Hyper-V VM | `C:\ProgramData\Microsoft\Windows\Hyper-V` 为空，**但 `G:\HyperV\PCMig-OldPC\PCMig-OldPC.vhdx` 存在（18.0 GB + avhdx 差分 + 快照 + VMRS）** | ⭐ **既有资产，待注册** |
-| VMware | 注册表 26.0.0，**但 `C:\Program Files\VMware\VMware Workstation` 目录不存在**（无 `vmware.exe`/`vmrun.exe`）｜服务与驱动仍在运行｜VMnet1 192.168.219.1/24 Up、VMnet8 192.168.134.1/24 Up | 🔴 **半损坏：现在无法启动任何 VMware VM** |
+| 现有 Hyper-V VM | `C:\ProgramData\Microsoft\Windows\Hyper-V` 为空，**但 `<Hyper-V 镜像盘>\PCMig-OldPC\PCMig-OldPC.vhdx` 存在（18.0 GB + avhdx 差分 + 快照 + VMRS）** | ⭐ **既有资产，待注册** |
+| VMware | 注册表 26.0.0，**但 `C:\Program Files\VMware\VMware Workstation` 目录不存在**（无 `vmware.exe`/`vmrun.exe`）｜服务与驱动仍在运行｜VMnet1 198.51.100.1/24 Up、VMnet8 192.0.2.1/24 Up | 🔴 **半损坏：现在无法启动任何 VMware VM** |
 | VirtualBox / Docker / Podman / Windows Sandbox | **全部未安装** | — |
 | WSL | 已装 wsl.exe，**无任何发行版** | — |
 | Windows 安装介质 | ✅ **已有**：Win11 25H2 (8.54 GB)、Win11 24H2 商业版 (7.73 GB)、**Win10 22H2 商业版 (6.99 GB)** | 客户端 VM 可建 |
 | **Windows Server 介质** | 🔴 **没有**（全盘 iso/esd 扫描无 Server 版本）| **AD/DNS/GPO 的前置阻塞** |
-| 宿主网络 | 有线 192.168.1.250/24（家用路由 NAT 后），WLAN Disconnected，DNS 192.168.1.1 | 隔离可行 |
+| 宿主网络 | 有线 192.0.2.250/24（家用路由 NAT 后），WLAN Disconnected，DNS 192.0.2.1 | 隔离可行 |
 
 ### 7.2 推荐拓扑（**两阶段，不一次上 4 台**）
 
@@ -329,7 +329,7 @@ pcmig preflight --target \\AXUAN\J$\x
 **阶段 B（L3，2 台 VM —— 推荐起点）**
 
 ```
-        ┌──────────────── host-only：192.168.219.0/24（VMnet1，已就绪）──────────┐
+        ┌──────────────── host-only：198.51.100.0/24（VMnet1，已就绪）──────────┐
         │                                                                        │
    ┌────┴─────┐        ┌──────────┐        ┌──────────────┐                      │
    │  DC01    │◄──────►│  FS01    │◄──────►│  PC01(源)     │                      │
@@ -343,7 +343,7 @@ pcmig preflight --target \\AXUAN\J$\x
                                            │  运行 PCMig     │                     │
                                            └────────────────┘                     │
         └────────────────────────────────────────────────────────────────────────┘
-                    宿主 192.168.1.x 家用网络完全不受影响（不用 Bridged）
+                    宿主 192.0.2.x 家用网络完全不受影响（不用 Bridged）
 ```
 
 | 节点 | 角色 | 规格 | 来源 |
@@ -353,10 +353,10 @@ pcmig preflight --target \\AXUAN\J$\x
 | **PC01** | **源电脑**（被拉取端）：Win10/11 客户端，加域，装被迁移的用户数据 | 2 vCPU / 4 GB / 60 GB | ✅ **本机已有 Win10/Win11 ISO** |
 | **PC02** | **目标电脑**（跑 PCMig）：`Win11 Client + 宿主 SMB 服务` —— **或用宿主直接扮演** | 2 vCPU / 4 GB / 60 GB | ✅ 已有 ISO；**也可用宿主节省一台** |
 
-**网络**：**VMnet1（host-only, 192.168.219.0/24）** —— 天然隔离、不干扰宿主上网、与宿主网段 192.168.1.x 无冲突。
-⚠ 不要把 VM 接入宿主 192.168.1.x，不要用 Bridged。
+**网络**：**VMnet1（host-only, 198.51.100.0/24）** —— 天然隔离、不干扰宿主上网、与宿主网段 192.0.2.x 无冲突。
+⚠ 不要把 VM 接入宿主 192.0.2.x，不要用 Bridged。
 
-**资源**：2 台仅需 **6–8 GB 内存**（当前可用 13.5 GB ✅）；磁盘用 dynamic 精简后实际约 **80 GB**（放 `G:\PCMigLab\VMs\`，177.6 GB 空闲，与 J 盘测试数据物理分离）。
+**资源**：2 台仅需 **6–8 GB 内存**（当前可用 13.5 GB ✅）；磁盘用 dynamic 精简后实际约 **80 GB**（放 `<实验室镜像盘>\VMs\`，177.6 GB 空闲，与 J 盘测试数据物理分离）。
 
 **为什么 2 台足够**：据审计测算，**2 台（Server DC+FS ＋ Client）即可覆盖约 90% 可模拟企业特征**；4 台需 12–16 GB 内存，**必须串行启动**，而增量收益仅约 5%。
 
@@ -407,9 +407,9 @@ pcmig preflight --target \\AXUAN\J$\x
 | **1** | **是否提权执行 B2 批次**（VHD：FAT32 / Disk Full） | `New-VHD`/`Mount-VHD`/`Format-Volume` 全部需管理员；本会话审批已禁用，不会请求提权。→ 三选一：(a) 你手动管理员 PowerShell 跑我给的脚本；(b) 你另起提权会话；(c) 先做免提权批次 |
 | **2** | **Candidate Bug #1（WarnTextColor）如何处置** | 涉及生产代码修改 → 需批准走 7 步流程；且**必须先加回归测试** |
 | **3** | **Candidate Bug #2（UNC 目标 CLI/GUI 不一致）是否算 Bug** | 属"设计未定义"边界，需拍板是否拦截/是否统一 |
-| **4** | **测试根 `J:\pcmig-lab\` 是否确认**（替代你提议的 `I:\PCMig-TestLab\`） | 理由：I 盘有 17.3 GB 备份镜像，磁盘满测试会挤爆备份区 |
+| **4** | **测试根 `<外置实验室盘>\` 是否确认**（替代你提议的 `<旧镜像交付区>-TestLab\`） | 理由：I 盘有 17.3 GB 备份镜像，磁盘满测试会挤爆备份区 |
 | **5** | **Defender 排除是否允许**（`Add-MpPreference -ExclusionPath`） | 10 万文件场景下 Defender 实时扫描是最大瓶颈；但**这会改本机安全配置** |
-| **6** | **L3 平台与介质**：(a) 是否允许下载 Windows Server 评估版 ISO（无它则 AD/DNS/GPO 全做不了）；(b) 是否重装 VMware Workstation（现无 `vmware.exe`，8 台旧 VM 无法启动）还是统一用 Hyper-V；(c) 是否允许注册已有的 `G:\HyperV\PCMig-OldPC` VM | L3 前置条件 |
+| **6** | **L3 平台与介质**：(a) 是否允许下载 Windows Server 评估版 ISO（无它则 AD/DNS/GPO 全做不了）；(b) 是否重装 VMware Workstation（现无 `vmware.exe`，8 台旧 VM 无法启动）还是统一用 Hyper-V；(c) 是否允许注册已有的 `<Hyper-V 镜像盘>\PCMig-OldPC` VM | L3 前置条件 |
 | **7** | **高 DPI 测试窗口** | 125%/150%/200% 切换**需要注销会话**（会中断你当前的 DSH 会话），必须安排独立时间窗 |
 | **8** | **Agent B 保留的 4 个探测 job 是否保留** | `JOB-20260919-135802-b0c4`（UNC 目标阻断证据）、`-135808-f031`（直拉成功）、`-135857-50b5`（不存在共享）、`-135946-e813`（**含 robocopy 命令行证据**） |
 
@@ -440,7 +440,7 @@ pcmig preflight --target \\AXUAN\J$\x
 2. **未创建 VHD、未创建 SMB 共享、未创建测试用户、未装域控、未建 VM**。
 3. **未执行 Disk Full / Kill-Resume / 大文件 / 10 万文件 / GUI Smoke / 高 DPI**（全部为设计完成、实施未开始）。
 4. **未验证**：`Get-Help Mount-VHD` 参数实跑、256MB VHDX 能否格式化为 NTFS、真实 112 逐字行在 v0.4.6 下的熔断行为、L2 抽样率调整后的行为。
-5. **保留的现场**：`J:\pcmig-lab\runs\20260919-140131-SMB-LOOPBACK-T01\`（证据）、`J:\pcmig-lab\jobs-probe\`（1 个 job）。
+5. **保留的现场**：`<外置实验室盘>\runs\20260919-140131-SMB-LOOPBACK-T01\`（证据）、`<外置实验室盘>\jobs-probe\`（1 个 job）。
 6. `lab\` 下 Agent 遗留的 `answer.iso` 等**未删未动**。
 
 ---

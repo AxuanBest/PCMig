@@ -7,7 +7,7 @@
 
 | # | 位置 | 性质 |
 | --- | --- | --- |
-| 1 | `E:\Project\deepseek work\AGENTS.md` | 工作区最高约束（根目录纪律） |
+| 1 | `<工作区根>\AGENTS.md` | 工作区最高约束（根目录纪律） |
 | 2 | `PCMig\AGENTS.md` | 项目约束（十一条死律、权限条款、PMML 入口） |
 | 3 | `docs\发版铁律.md` | 发版最高约束（五道闸门） |
 | 4 | **`docs\INDEX.md`（本文件）** | 文档导航（无规则效力） |
@@ -22,8 +22,8 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 当前发布版本 | **v0.5.1** —— **2026-10-06 正式发布**（v0.5.0 的**可信度紧急修正版**，功能与界面与 v0.5.0 一致）：release commit `8d38f3b` + annotated tag `v0.5.1`；安装包 `E:\Project\PCMig\PCMigSetup-0.5.1.exe`（**93,276,509 B / 88.96 MB**，SHA256 `4255FBD6E77CCEE1190ACDC05FC66F8A4843BE197FE993BDBE78FE495B329937`）；Portable **538 文件 / 274,430,131 B**（不再含 `PCMig-classic.exe`）；逐文件哈希 **7 组**全 MATCH；发版后三验通过。版本号 **10 处** = 四个 csproj + 两个窗口标题（Gui 与 WinUI）+ **WinUI 两处运行时可见徽章（`Text="vX.Y.Z"` 字面量，v0.5.0 曾漏改，本版新增第 10 条 Patch + 反向自查）** + `README.md` + `installer\pcmig.iss` 两处。**上一发布版本 v0.5.0**：release commit `022377e` + annotated tag `v0.5.0`，`PCMigSetup-0.5.0.exe` 158,468,801 B（SHA256 `8392B701…`）—— **两者均未被移动/覆盖，v0.5.0 与 v0.5.1 作为两个独立正式版本并列保留**（交付区并列安装包共 15 个） |
-| 当前开发线 | **无在研版本 —— 等人工指令**（**下一版版本号未定，不得自行推断**）。v0.5.1 已于 2026-10-06 正式发布（分支 `feature/winui-v0.5.0`）。**未 push**（`git remote` = 0 个，本仓库无远端）。**工作树 = 0 项（v0.5.1 发版后）**：v0.5.0 发布后陆续产生的改动已分**四笔**本地 commit 落库 —— **`66d8ced`** `chore(p3): P3 三项裁决落地 + 交接与索引同步`（11 文件 / +445 −841）、**`1594fe0`** `fix(core): 修复场景 H「盘满虚报 42 GiB / 99.9%」—— 隔离 UI 订阅者异常，恢复回冲与熔断`（3 文件 / +44 −4）、**`43718ce`** `docs(handover): 新增「委托链修复与 P3 裁决」交接 + 同步 INDEX/AGENTS 指针`（4 文件 / +475 −14）、**`0fcc2a7`** `docs(status): 补记第三笔 commit 43718ce…`（2 文件）；其后 **`8d38f3b`** `release: PCMig v0.5.1`（18 文件 / +302 −53）为独立 release commit。`tests\PCMig.Diagnostics.Tests\TestResults\*.trx` 已随 `.gitignore` 增加 `**/TestResults/` 不再出现在工作树。**✅ 修复 commit `1594fe0` 已随 v0.5.1 进入正式发布物**（v0.5.0 发行包不含该修复，故 v0.5.1 为可信度紧急修正版）**。**2026-10-06 另完成「工作区整理 / 清理」轮**（按用户执行书 §0–§19 的文件系统整理，**未改产品源码、未改发版脚本、未提交 commit**）：释放 **427.8 GB**（C +45.3 / D +168.1 / E +214.4）；synthetic payload 424.48 GB、临时 publish 2.83 GB、构建测试产物 770.81 MB 全部按明确路径清除；桌面 `新建文件夹 (4)` 的 PCMig 条目 **38 → 2**（只留 v0.5.1 发版复验包）；三 VM 框架归位 `PCMig\lab\three-vm\`；**随后又完成「桌面整理（第二轮）」轮**（按用户《PCMig / Desktop 第二轮整理执行书》整理整个桌面：桌面 **53 项 → 6 项**、MOVE 42 项 / DELETE 9 项、PCMig 归档 30 项、个人文件分类归位 `D:\Users\User\Documents\Desktop-Archive\2026\`（未知个人文件**一项未删**）、§9 一次性脚本二次精简 **KEEP 11 / DELETE 88**（真删 179 文件）；**未改产品源码、未改发版脚本、未提交 commit**）⇒ **当前工作树 = 69 项**（4 个 ` M`，其中 2 个为机器生成文档的时间戳行；+ **65 个 `??`** ＝ `lab\three-vm\` 60 + `lab\smoke-data\README.md` 1 + 两轮交接共 4 份，待授权后提交） |
+| 当前发布版本 | **v0.5.1** —— **2026-10-06 正式发布**（v0.5.0 的**可信度紧急修正版**，功能与界面与 v0.5.0 一致）：release commit `8d38f3b` + annotated tag `v0.5.1`；安装包 `<交付区>\PCMigSetup-0.5.1.exe`（**93,276,509 B / 88.96 MB**，SHA256 `4255FBD6E77CCEE1190ACDC05FC66F8A4843BE197FE993BDBE78FE495B329937`）；Portable **538 文件 / 274,430,131 B**（不再含 `PCMig-classic.exe`）；逐文件哈希 **7 组**全 MATCH；发版后三验通过。版本号 **10 处** = 四个 csproj + 两个窗口标题（Gui 与 WinUI）+ **WinUI 两处运行时可见徽章（`Text="vX.Y.Z"` 字面量，v0.5.0 曾漏改，本版新增第 10 条 Patch + 反向自查）** + `README.md` + `installer\pcmig.iss` 两处。**上一发布版本 v0.5.0**：release commit `022377e` + annotated tag `v0.5.0`，`PCMigSetup-0.5.0.exe` 158,468,801 B（SHA256 `8392B701…`）—— **两者均未被移动/覆盖，v0.5.0 与 v0.5.1 作为两个独立正式版本并列保留**（交付区并列安装包共 15 个） |
+| 当前开发线 | **无在研版本 —— 等人工指令**（**下一版版本号未定，不得自行推断**）。v0.5.1 已于 2026-10-06 正式发布（分支 `feature/winui-v0.5.0`）。**未 push**（`git remote` = 0 个，本仓库无远端）。**工作树 = 0 项（v0.5.1 发版后）**：v0.5.0 发布后陆续产生的改动已分**四笔**本地 commit 落库 —— **`66d8ced`** `chore(p3): P3 三项裁决落地 + 交接与索引同步`（11 文件 / +445 −841）、**`1594fe0`** `fix(core): 修复场景 H「盘满虚报 42 GiB / 99.9%」—— 隔离 UI 订阅者异常，恢复回冲与熔断`（3 文件 / +44 −4）、**`43718ce`** `docs(handover): 新增「委托链修复与 P3 裁决」交接 + 同步 INDEX/AGENTS 指针`（4 文件 / +475 −14）、**`0fcc2a7`** `docs(status): 补记第三笔 commit 43718ce…`（2 文件）；其后 **`8d38f3b`** `release: PCMig v0.5.1`（18 文件 / +302 −53）为独立 release commit。`tests\PCMig.Diagnostics.Tests\TestResults\*.trx` 已随 `.gitignore` 增加 `**/TestResults/` 不再出现在工作树。**✅ 修复 commit `1594fe0` 已随 v0.5.1 进入正式发布物**（v0.5.0 发行包不含该修复，故 v0.5.1 为可信度紧急修正版）**。**2026-10-06 另完成「工作区整理 / 清理」轮**（按用户执行书 §0–§19 的文件系统整理，**未改产品源码、未改发版脚本、未提交 commit**）：释放 **427.8 GB**（C +45.3 / D +168.1 / E +214.4）；synthetic payload 424.48 GB、临时 publish 2.83 GB、构建测试产物 770.81 MB 全部按明确路径清除；桌面 `<桌面交付根>` 的 PCMig 条目 **38 → 2**（只留 v0.5.1 发版复验包）；三 VM 框架归位 `PCMig\lab\three-vm\`；**随后又完成「桌面整理（第二轮）」轮**（按用户《PCMig / Desktop 第二轮整理执行书》整理整个桌面：桌面 **53 项 → 6 项**、MOVE 42 项 / DELETE 9 项、PCMig 归档 30 项、个人文件分类归位 `<用户目录D>\Documents\Desktop-Archive\2026\`（未知个人文件**一项未删**）、§9 一次性脚本二次精简 **KEEP 11 / DELETE 88**（真删 179 文件）；**未改产品源码、未改发版脚本、未提交 commit**）⇒ **当前工作树 = 69 项**（4 个 ` M`，其中 2 个为机器生成文档的时间戳行；+ **65 个 `??`** ＝ `lab\three-vm\` 60 + `lab\smoke-data\README.md` 1 + 两轮交接共 4 份，待授权后提交） |
 | PMML | **v1.0 — FROZEN**（UI 冻结） |
 | Diagnostics | **D6.1 — COMPLETE · D6.2 — EXECUTED · D6.3 — FINAL CLOSED**（2026-10-02；**Independent Verification = COMPLETED / PASSED**；收口报告 + **最终 Closure Report（已登记，见 §四）**：R-1…R-7 全部 CLOSED，Known Trust-Critical Risk = 0；**真机运行 = 2 轮**；改动已按 **2 个本地 Commit** 落库，**未 push / 未 release**） |
 | D6.2 Real World Validation | **EXECUTED**（结论：Deep Trace E2E FAIL 限定 / Secret PASS / 2-9 Action 全链路 / 跨包隐私 FAIL 限定 / Stage B NOT READY） |
@@ -97,15 +97,15 @@
 
 - `docs\诊断系统实施-D6.2真实验证报告.md` —— **D6.2 最终报告**（16 项问答 + 14 个 Known Gap + Stage B 就绪建议）
 - `docs\诊断系统实施-Reserved事件分级.md` —— 23 个 Reserved 事件分级（A 4 / B 14 / C 5）及实现顺序建议
-- 机器证据（**工作区根目录，不在 Git 仓库内**）：`E:\Project\deepseek work\archive\evidence\diagnostics-d62-20261001\`（69 文件 / 717,430 B；含 `20-d62-evidence-digest.txt` 摘要、`10-package-analysis.txt` 四包复算、`tools\ui.ps1` UIA 工具、`evidence\runs\run-01-input-canary\` 原始事件）—— **禁止删除**
+- 机器证据（**工作区根目录，不在 Git 仓库内**）：`<工作区根>\archive\evidence\diagnostics-d62-20261001\`（69 文件 / 717,430 B；含 `20-d62-evidence-digest.txt` 摘要、`10-package-analysis.txt` 四包复算、`tools\ui.ps1` UIA 工具、`evidence\runs\run-01-input-canary\` 原始事件）—— **禁止删除**
 
 **D6.3 产物（2026-10-02，可信度收口 Trust Closure）**：
 
 - `docs\诊断系统实施-D6.3可信度收口报告.md` —— **D6.3 可信度收口报告（Trust Closure 阶段报告）**（§二十四 逐项 PASS/FAIL 终报；含缺口①②③ 红灯证明与真机复验）；其后的最终口径见 §四 末「D6.3 剩余风险关闭 ⇒ 最终收尾」
 - `docs\诊断系统实施-Reserved事件分级.md` —— 口径更新：Reserved **23 → 22**（`UI.NavigationChanged` 已转 Produced，见该文末「附：D6.3 轮口径更新」）
 - 机器证据（**工作区根目录，不在 Git 仓库内**）—— **禁止删除**：
-  - `E:\Project\deepseek work\archive\evidence\diagnostics-d63-20261001\`（D6.2→D6.3 真机证据；含 `tools\{ui,d63-tree,d63-dump}.ps1`、`d63-synthetic-source-manifest.tsv`(20,306 行)、`chains\`、`chain9-export-010341\`、`defect18-feedback-correlation\`）
-  - `E:\Project\deepseek work\archive\evidence\d63-o2-gap-fixes\`（`red-proof.md` 三处红灯逐字证明；`real-export-013026\` 缺口①修复后的实机导出包解包）
+  - `<工作区根>\archive\evidence\diagnostics-d63-20261001\`（D6.2→D6.3 真机证据；含 `tools\{ui,d63-tree,d63-dump}.ps1`、`d63-synthetic-source-manifest.tsv`(20,306 行)、`chains\`、`chain9-export-010341\`、`defect18-feedback-correlation\`）
+  - `<工作区根>\archive\evidence\d63-o2-gap-fixes\`（`red-proof.md` 三处红灯逐字证明；`real-export-013026\` 缺口①修复后的实机导出包解包）
 
 **D6.3 剩余风险关闭 ⇒ 最终收尾（2026-10-02，Remaining Risk Closure · D6.3 = FINAL CLOSED）**：
 
@@ -115,7 +115,7 @@
 - `docs\工作交接-20261006-v0.5.0正式发版.md` —— 更早一份 Current Handover（v0.5.0 正式发版，见 §七）；短卡 `docs\工作交接-20261006-v0.5.0正式发版-QUICK.txt`
 - `docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md` —— 上一份产品 Current Handover（仍在 `docs\` 根，未归档，原因见 §七）
 - **变更范围权威口径**：D6.3 最终变更文件范围与行数，**以 Final Closure Commit 的 `git show --name-status` / `git show --stat` 为权威**；文档中出现的 `17 files changed, 520 insertions(+), 15 deletions(-)`、`18 项改动`、`工作树 17 M + 3 ??` 等数字一律为**当时阶段快照**（取自更新指针之前的工作树），**不得当作当前最终工作树描述**。
-- 机器证据（**工作区根目录，不在 Git 仓库内**）—— **禁止删除**：`E:\Project\deepseek work\archive\evidence\d63-remaining-risk-closure\`（`red-proof.md`、`red-proof-r2-silent.md`、`tests\`、`build\`、`real-export-030312\`、`real-export-r2-113637\`、`git\`）
+- 机器证据（**工作区根目录，不在 Git 仓库内**）—— **禁止删除**：`<工作区根>\archive\evidence\d63-remaining-risk-closure\`（`red-proof.md`、`red-proof-r2-silent.md`、`tests\`、`build\`、`real-export-030312\`、`real-export-r2-113637\`、`git\`）
 
 **机器生成，禁止手工编辑**（由 Contract Test 重算覆盖）：
 
@@ -160,18 +160,18 @@
 **实验室 / 工具链**
 
 - `tools\l3-*.ps1`、`tools\pcmiglab-vm.ps1`、`tools\l3\*` —— L3 实验室部署与场景工具
-- `E:\Project\deepseek work\PCMig\archive\scripts\diagnostics-audit-20261001\`（**仓库内** archive）—— 独立诊断探针工程（`AuditProbe.csproj` / `Program.cs` / `ComponentAudit.cs` / `PackageAudit.cs`）
+- `<仓库根>\archive\scripts\diagnostics-audit-20261001\`（**仓库内** archive）—— 独立诊断探针工程（`AuditProbe.csproj` / `Program.cs` / `ComponentAudit.cs` / `PackageAudit.cs`）
 - `tools\stability-test.ps1`、`tools\uishot.ps1` —— 稳定性台与 UI 截图
 
 **故障注入 / 证据**
 
-- `E:\Project\deepseek work\PCMig\archive\evidence\diagnostics-audit-20261001\*`、`E:\Project\deepseek work\PCMig\archive\evidence\diagnostics-d61-20261001\*`（**仓库内** archive；events / incidents / metrics / snapshots / flight）—— **原始机器证据，禁止删除；其中的空目录是证据结构，不是垃圾**
+- `<仓库根>\archive\evidence\diagnostics-audit-20261001\*`、`<仓库根>\archive\evidence\diagnostics-d61-20261001\*`（**仓库内** archive；events / incidents / metrics / snapshots / flight）—— **原始机器证据，禁止删除；其中的空目录是证据结构，不是垃圾**
 
 **Route A 三 VM 回归实验室（实验室侧，2026-10-04 实读）**
 
-- 实验室根：`E:\PCMigLab\`（规格 `Staging\RouteA-Spec.md`、夹具/用例 `Staging\ctl\{cases,host,faults}\`、证据 `Evidence\RouteA\`）；三台 VM：LAB-DC01 / LAB-SRC01 / LAB-DST01（源 `\\LAB-SRC01\D`，目标 `D:\*Target`，Runner 在 guest 会话 1）。
+- 实验室根：`<实验室根>\`（规格 `Staging\RouteA-Spec.md`、夹具/用例 `Staging\ctl\{cases,host,faults}\`、证据 `Evidence\RouteA\`）；三台 VM：LAB-DC01 / LAB-SRC01 / LAB-DST01（源 `\\LAB-SRC01\D`，目标 `D:\*Target`，Runner 在 guest 会话 1）。
 - **进度**：GROUP A = CLEAN/CLOSED；GROUP B = CLEAN/CLOSED；GROUP C = CLEAN/CLOSED（C01–C11 全部 VALID）；**GROUP D = IN PROGRESS**（gd-r1/gd-r2/gd-r3 已跑，D01/D02/D04 因夹具缺陷 INVALID、修复已就绪）；Full Route A Round 1/2/3 尚未开始；PRODUCT BUGS OPEN = 0。
-- 实验室侧当前交接（**唯一入口**，随路线推进更新）：`E:\PCMigLab\Evidence\RouteA\SESSION-HANDOFF-GROUP-D-INPROGRESS-20261004-1125.md`（短卡 `…-1125-QUICK.txt`）、检查点 `…\CURRENT-ROUTE-A-CHECKPOINT.txt`、权威账本 `…\Route-A-Bug-Ledger.md`、历史归档 `…\history\`。
+- 实验室侧当前交接（**唯一入口**，随路线推进更新）：`<实验室根>\Evidence\RouteA\SESSION-HANDOFF-GROUP-D-INPROGRESS-20261004-1125.md`（短卡 `…-1125-QUICK.txt`）、检查点 `…\CURRENT-ROUTE-A-CHECKPOINT.txt`、权威账本 `…\Route-A-Bug-Ledger.md`、历史归档 `…\history\`。
 - 该实验室交接与本文档 §七 的「Current Handover」**不是同一条轨道**：§七 管产品治理（D6.3 收口），实验室交接管 Route A 回归执行；两者互不覆盖。
 
 **未来 Stage B**：未开始，等授权。
@@ -182,7 +182,7 @@
 
 ## 七、【Current Handover】当前工作交接
 
-**当前**：`docs\工作交接-20261006-桌面整理.md`（2026-10-06 —— **桌面整理（第二轮）**轮：按用户《PCMig / Desktop 第二轮整理执行书》整理整个桌面，桌面 **53 项 → 6 项**、MOVE 42 / DELETE 9、PCMig 归档 30 项、个人文件分类归位 `D:\Users\User\Documents\Desktop-Archive\2026\`、§9 脚本二次精简 **KEEP 11 / DELETE 88**；**未改产品源码、未提交 commit**；短卡 `docs\工作交接-20261006-桌面整理-QUICK.txt`）。**上一份**：`docs\工作交接-20261006-工作区整理与清理.md`（**工作区整理 / 清理**轮：按执行书 §0–§19 做有原则的清理与归档，释放 **427.8 GB**、桌面 PCMig 条目 **38 → 2**、三 VM 框架归位 `PCMig\lab\three-vm\`；短卡 `…-QUICK.txt`）
+**当前**：`docs\工作交接-20261006-桌面整理.md`（2026-10-06 —— **桌面整理（第二轮）**轮：按用户《PCMig / Desktop 第二轮整理执行书》整理整个桌面，桌面 **53 项 → 6 项**、MOVE 42 / DELETE 9、PCMig 归档 30 项、个人文件分类归位 `<用户目录D>\Documents\Desktop-Archive\2026\`、§9 脚本二次精简 **KEEP 11 / DELETE 88**；**未改产品源码、未提交 commit**；短卡 `docs\工作交接-20261006-桌面整理-QUICK.txt`）。**上一份**：`docs\工作交接-20261006-工作区整理与清理.md`（**工作区整理 / 清理**轮：按执行书 §0–§19 做有原则的清理与归档，释放 **427.8 GB**、桌面 PCMig 条目 **38 → 2**、三 VM 框架归位 `PCMig\lab\three-vm\`；短卡 `…-QUICK.txt`）
 （上一份 Current `docs\工作交接-20261006-v0.5.1正式发版.md`、更早的 `docs\工作交接-20261006-委托链修复与P3裁决.md` 与 `docs\工作交接-20261006-v0.5.0正式发版.md` 仍在 `docs\` 根、未归档，原因见下）
 （上一份 Current `工作交接-20261002-D6.3可信度收口完成.md` 已于 2026-10-02 按本节规则移入 `docs\handover\history\`，只作历史追溯；更早的 `工作交接-20261001-D6.2真实验证完成.md`、`工作交接-20261001-Workspace治理完成与D6.2起点.md` 亦已在历史目录。）
 
@@ -195,7 +195,7 @@
   —— 用户 **UI Closure** 专项（14 项已确认问题 UI-01…UI-14 + §19 的 PMML 17 章节同步）。全部 14 项**代码级 FIXED**，
   Release 构建 0 error / 3 warning（= 基线）。真实运行证据：Step1 连接 `localhost` ⇒ **发现 8 个共享**、表单内状态行
   **空**（流程级提示已按 UI-10 改投左侧提示卡通道）。证据目录
-  `E:\PCMigLab\Evidence\Trust-Critical-Recovery\UI-CLOSURE-20261005\`（含像素测量报告、字体度量、截图）。
+  `<实验室根>\Evidence\Trust-Critical-Recovery\UI-CLOSURE-20261005\`（含像素测量报告、字体度量、截图）。
   PMML 已同步（`PCMig-Visual-Motion-Language.md` 新增附录 A §19–§24 + R16–R31；`PMML-Implementation-Audit.md`
   新增 Progress 族 UI Closure 更新与 Token 增量；`PMML-Legacy-Deviations.md` 更新 L-07/G-04 并新增 L-17/L-18）。
   改动全部**未 commit / 未 push / 未 tag**。交付报告见 `docs\UI-CLOSURE-REPORT-20261005.md`（含 §25 汇报字段、逐项修复说明、PMML diff summary、人工复验清单）。**会话级交接（做了什么 / 没做什么 / 文件坐标 / 下一步）见 `docs\工作交接-20261005-UI-Closure-会话交接.md`；可直接粘贴给新会话的短卡见 `docs\工作交接-20261005-UI-Closure-QUICK.txt`。**
@@ -205,13 +205,13 @@
   `RECOVERY GATE` 的 **case1/2/3/4/5/7 = CLEAN**（三层真值 + Action Causality）。改动全部**未 commit**（工作树 51 modified + 23 untracked = 74 条）。
   **唯一未结卡点 = 缺陷#3**（进程被杀→重启→采纳中断任务后，第一次点「恢复任务」被完全吞掉、零反馈；已确定性复现，
   「产品浮层 light-dismiss」与「夹具强制激活吞点击」两种解释**尚未判定**）。完整细节与恢复后顺序见实验室侧
-  `E:\PCMigLab\Evidence\Trust-Critical-Recovery\SESSION-HANDOFF-TRUST-CRITICAL-RECOVERY-20261005-0200.md`（+ `…-QUICK.txt`）
+  `<实验室根>\Evidence\Trust-Critical-Recovery\SESSION-HANDOFF-TRUST-CRITICAL-RECOVERY-20261005-0200.md`（+ `…-QUICK.txt`）
   与现场账本 `CURRENT-TRUST-CRITICAL-CHECKPOINT.txt`（尾部 `PAUSE / FREEZE RECORD` 2026-10-05 01:44）。
 - 历史（只增不覆保留）：`docs\工作交接-20261004-Trust-Critical-Recovery.md`
   —— 2026-10-04 真实物理机 200+ GB 验收暴露 P0 暂停失效 / 诊断假绿 / 进度真值 / UI 布局问题后开启的
   **Trust-Critical Recovery Campaign** 会话交接（只读调查已完成并交付，修复战役仅完成 baseline，产品源码零改动）。
 
-权威指令与证据在实验室侧 `E:\PCMigLab\Evidence\Trust-Critical-Recovery\`。上述并行轨道交接按"只增不覆"新增，
+权威指令与证据在实验室侧 `<实验室根>\Evidence\Trust-Critical-Recovery\`。上述并行轨道交接按"只增不覆"新增，
 **不改变**本节的"当前工作交接"归属，故未触发历史归档流程。
 
 规则（与 `AGENTS.md` 铁律 10 一致）：
@@ -235,9 +235,9 @@
   - `现场验证清单-v0.3.8.txt` —— v0.3.8 期现场清单（已被首日 / 公司清单取代）
 - `docs\工作区治理\` —— Workspace Cleanup & Governance 过程报告（含第一轮盘点报告，其路径口径为**治理前快照**，属历史事实，不再更新）。
 - **证据 / 归档有三个不同的根，不得混用**（2026-10-02 定案）：
-  - **工作区权威证据根（当前 D6.x 本地原始证据的权威归档根，在 Git 仓库之外）**：`E:\Project\deepseek work\archive\` —— 其下 `E:\Project\deepseek work\archive\evidence\*`、`E:\Project\deepseek work\archive\screenshots\*`、`E:\Project\deepseek work\archive\packages\*` 等**一律不得删除**（**绝对保护区**：`E:\Project\deepseek work\archive\backup-*`、`...\archive\evidence\*`、`...\archive\screenshots\*`、`...\archive\pmm-l-audit\*`、`...\archive\baseline-*`、`...\archive\packages\*`）。
-  - **仓库内历史 / 本地遗留证据目录（非当前权威证据根，不纳入 Git，已被 `.gitignore` 的 `/archive/` 规则保护）**：`E:\Project\deepseek work\PCMig\archive\` —— 仓库内备份、证据、截图、历史安装包（`PCMigSetup-*.exe`）、审计材料（`backup-*`、`baseline-A5-*`、`packages\*.nupkg`、`evidence\`、`screenshots\`、`pmm-l-audit\`、`scripts\`、`a5-rollback\`）。**同样不得删除、不得移动、不得与工作区根那棵合并。**
-  - **桌面交付根**：`D:\Users\User\Desktop\新建文件夹 (4)\` —— 每大轮复验包的落点，**只复制、不改源文件**。
+  - **工作区权威证据根（当前 D6.x 本地原始证据的权威归档根，在 Git 仓库之外）**：`<工作区根>\archive\` —— 其下 `<工作区根>\archive\evidence\*`、`<工作区根>\archive\screenshots\*`、`<工作区根>\archive\packages\*` 等**一律不得删除**（**绝对保护区**：`<工作区根>\archive\backup-*`、`...\archive\evidence\*`、`...\archive\screenshots\*`、`...\archive\pmm-l-audit\*`、`...\archive\baseline-*`、`...\archive\packages\*`）。
+  - **仓库内历史 / 本地遗留证据目录（非当前权威证据根，不纳入 Git，已被 `.gitignore` 的 `/archive/` 规则保护）**：`<仓库根>\archive\` —— 仓库内备份、证据、截图、历史安装包（`PCMigSetup-*.exe`）、审计材料（`backup-*`、`baseline-A5-*`、`packages\*.nupkg`、`evidence\`、`screenshots\`、`pmm-l-audit\`、`scripts\`、`a5-rollback\`）。**同样不得删除、不得移动、不得与工作区根那棵合并。**
+  - **桌面交付根**：`<用户目录D>\Desktop\<桌面交付根>\` —— 每大轮复验包的落点，**只复制、不改源文件**。
 
 ---
 
@@ -267,8 +267,8 @@
 
 - 第一轮（Workspace Inventory，只读）：`docs\工作区治理\第一轮-Workspace-Inventory-20261001.md`
 - 第二轮（Workspace Cleanup & Governance，执行）：`docs\工作区治理\第二轮-Workspace-Cleanup-Report-20261001.md`
-- 治理证据与脚本：`E:\Project\deepseek work\archive\pcmig-governance-20261001\`
-- 治理前增量备份：`E:\Project\deepseek work\PCMig\archive\backup-pre-governance-20261001-133659\`（**仓库内** archive；341 文件 = 336 项目文件 + 5 份证据，SHA256 336/336 MATCH）
+- 治理证据与脚本：`<工作区根>\archive\pcmig-governance-20261001\`
+- 治理前增量备份：`<仓库根>\archive\backup-pre-governance-20261001-133659\`（**仓库内** archive；341 文件 = 336 项目文件 + 5 份证据，SHA256 336/336 MATCH）
 
 ---
 
@@ -297,7 +297,7 @@
 1. **【已完成 · 2026-10-02】D6.3 Final Repository Closure（提交 + 文档收口）**：按人工拍板采用 **2 个本地 Commit**（`fix(diagnostics): close D6.3 trust-critical risks` + `docs(diagnostics): finalize D6.3 closure handover`；**逐文件白名单 staging，禁止 `git add .` / `git add -A`**）；最终 Closure Report 已登记进本 INDEX（§四）；`PCMig\archive\` 已由 `.gitignore` 的 `/archive/` 规则保护；**未 push / 未 tag / 未 release**。D6.3 权威变更范围以 Final Closure Commit 的 `git show --name-status` / `git show --stat` 为准。
 2. **D6.2 遗留修复项**：G-1/G-3 Deep Trace 出口（`DIA.RingTriggered`/`DIA.RingSealed` → 真正写进包）**仍未做**（D6.3 只做到"诚实地说 `included=false`"）；**G-2 跨包隐私令牌化 / G-4 显式 AutomationId 绑定 / G-9 `UI.NavigationChanged` 已在 D6.3 完成**
 3. **Stage B**（未授权；D6.2 结论为 **NOT READY**；D6.3 的**独立复验已完成 / PASSED**；前置清单见 D6.2 报告 §十五）
-4. **三 VM 企业模拟实验室**（**已建成并在用 —— 2026-10-04 实读修正**：实验室根 `E:\PCMigLab\`，Route A 回归执行中）—— GROUP A/B/C = CLEAN/CLOSED，GROUP D = IN PROGRESS（D01/D02/D04 待用修复后的夹具重跑），PRODUCT BUGS OPEN = 0；Full Route A Round 1/2/3 未开始。实验室侧当前交接与证据见 §六「Route A 三 VM 回归实验室」。原始口径「未开始」已作废。
+4. **三 VM 企业模拟实验室**（**已建成并在用 —— 2026-10-04 实读修正**：实验室根 `<实验室根>\`，Route A 回归执行中）—— GROUP A/B/C = CLEAN/CLOSED，GROUP D = IN PROGRESS（D01/D02/D04 待用修复后的夹具重跑），PRODUCT BUGS OPEN = 0；Full Route A Round 1/2/3 未开始。实验室侧当前交接与证据见 §六「Route A 三 VM 回归实验室」。原始口径「未开始」已作废。
 5. **Release Governance**（登记未改）：`tools\release.ps1` 交付清单、`首日实测检查表.md` 陈旧口径、`AGENTS.md` 版本号与 INDEX 指针
 6. **Harness / DSH Workspace Cleanup**（工作区根 174 散落文件 + 12 重复目录，明确不碰）
 

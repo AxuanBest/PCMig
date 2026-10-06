@@ -1,7 +1,7 @@
 # 工作交接 — 20260928 — U62 PCMig Fluid Zoom Transition（Matched-Geometry）
 
 > 交接对象：接手 PCMig Utility Panel 动效 / Responsive Motion 工作的下一位（或下一个会话）
-> 权威工作区：`E:\Project\deepseek work\PCMig`（唯一事实来源）
+> 权威工作区：`<仓库根>`（唯一事实来源）
 > 本轮起点：上一会话交接的「P0 Utility Panel Origin Reveal 待人工确认」
 > 本轮终点状态：**已实现并量化验证 Matched-Geometry Fluid Zoom，构建通过；等人工目视验收**
 > 前置交接：`docs\工作交接-20260928-Responsive与Motion全阶段.md`（U56–U61，仍然有效）
@@ -193,7 +193,7 @@ GIF（24 ms/帧 = 慢放 3× 原速回放，每个都通过 GDI+ 回读校验）
 | 用途 | 位置 |
 |---|---|
 | **改动前快照（本轮）** | `archive\tmp\MainWindow.xaml.before-u62-fluidzoom.xaml`、`MainWindow.xaml.cs.before-u62-fluidzoom.cs`、`MotionDirector.cs.before-u62-fluidzoom.cs`、`Motion.xaml.before-u62-fluidzoom.xaml`、`DeveloperTuningPanel.xaml.before-u62-fluidzoom.xaml`、`ChangelogPanel.xaml.before-u62-fluidzoom.xaml` |
-| **主文件级快照（勿删）** | `E:\Project\镜像备份源码\PCMig-v0.5.0-pre-responsive-motion-20260928-131622` |
+| **主文件级快照（勿删）** | `<镜像备份根>\PCMig-v0.5.0-pre-responsive-motion-20260928-131622` |
 | 只回退本轮 | 删除 `Presentation\FluidZoomTransitionCoordinator.cs`，还原上面 4 个文件（`Views\*.xaml` 本轮**未改**，快照仅作对照） |
 | 关闭新机制 | 无 env 开关：**删掉协调器文件 + 还原 MainWindow 的 `OpenPanel/ClosePanel`** 即回到 Origin Reveal。运行期没有开关（这是有意的：它是产品功能，不是 Spike） |
 | 慢放取证 | `PCMIG_MOTION_SLOWMO=<倍数>`（默认 1，不影响产品） |
@@ -251,4 +251,4 @@ GIF（24 ms/帧 = 慢放 3× 原速回放，每个都通过 GDI+ 回读校验）
 5. 侧栏 Step Card 的 **Hover 零反馈**（历史根因未定位）用户未要求恢复 —— **保持现状**；
 6. Reduced Motion / 系统关动画路径仍未实机实测（代码路径完备），保持如实记录，不要宣称已验证。
 
-**验收时的证据位置**：`D:\Users\User\Desktop\新建文件夹 (4)\`（U62 十场景 GIF + 关键帧；U63 四页与快速切换截图 + 蓝色块聚类报告；文档 00–05）。
+**验收时的证据位置**：`<用户目录D>\Desktop\<桌面交付根>\`（U62 十场景 GIF + 关键帧；U63 四页与快速切换截图 + 蓝色块聚类报告；文档 00–05）。

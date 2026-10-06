@@ -102,17 +102,17 @@
 ## E. 真机证据
 
 ### E1 Stop / Resume 连续性（PHASE 1）
-- job `JOB-20261005-131031-919e`（41 对象 / 42 GB，PCMIG-DS2 → `E:\PCMigLab\Staging\phStop-target`），PID 234680
+- job `JOB-20261005-131031-919e`（41 对象 / 42 GB，PCMIG-DS2 → `<实验室根>\Staging\phStop-target`），PID 234680
 - 时间线（UIA 读 `TotalPercentText` / `TotalBytesText`）：running `0.0% / 0 B` → `7.5% / 3.14 GB` → **STOP-BEFORE `9.2% / 3.84 GB`** → **stop+1…stop+30 恒 `99.9% / 41.96 GB`** → resume 前 3 次恒 `99.9%` → **R+1…R+16 恒 `99.9% / 41.96 GB`**
 - `UnexpectedProgressRegression` 日志条目：**0**
-- CSV：`E:\PCMigLab\Staging\phStop\stop-samples.csv`；摘要：`stop-continuity-summary.txt`
+- CSV：`<实验室根>\Staging\phStop\stop-samples.csv`；摘要：`stop-continuity-summary.txt`
 - 诚实说明：本机真值在 UI 采样仍为 9.2% 时已达 41.96 GB（UIA 采样 + 80 ms 节拍滞后于 2.7 GB/s 传输），Stop 捕获的是**真实高水位**，强于"不低于曾显示值"的承诺
 
 ### E2 提示卡固定高度（PHASE 3）
 - 同一进程 PID 96712，窗口 `208,208 1440x900`
 - 短消息「就绪」：`HintScroll y=889 h=57`；长消息「计划已生成（Job …）：41 个对象，共 42 GB。」：`HintScroll y=889 h=57`（**完全相同**）；运行中（OperationalStatus + 两行 CurrentObjectStatus）：`HintScroll y=889 h=57`（**完全相同**）
 - 几何校验：176 − 32 Padding − 20 标题 − 8 − 16 状态 − 8 − 5 分隔线 − 8 − 14 署名 = **57 DIP**，与实测吻合
-- 证据：`E:\PCMigLab\Staging\phH-hint\hint-card-fixedheight.txt`；截图 `phH-hint\short\running-00.png`、`phH-hint\long\running-00.png`（modlens 读图：无可见滚动条、文字未溢出、卡形稳定）
+- 证据：`<实验室根>\Staging\phH-hint\hint-card-fixedheight.txt`；截图 `phH-hint\short\running-00.png`、`phH-hint\long\running-00.png`（modlens 读图：无可见滚动条、文字未溢出、卡形稳定）
 
 ### E3 顶部摘要共面（PHASE 4）
 - 宽窗口 `208,208 1440x900`：`TotalPercentText y=276 h=51` ⇒ centerY **301.5**；`TotalBytesText y=291 h=20` ⇒ **301.0**；`StateLineText y=294 h=14` ⇒ **301.0** ⇒ maxΔ = **0.5 DIP**（判据 ≤ 2）
@@ -125,7 +125,7 @@
 - 前沿序列（每 50 帧 ≈2.5 s）：`8 → 117 → 297 → 385 → 475 → 558 → 651 → 743 → 825 → 914 → 1004（满）` ⇒ 单调平滑推进
 - 装饰物修复后 Running 期探针 `sweep=True glow=True particles=True marker=True`；`Pause/Stop/Completed` 后装饰物 `False`
 - **PHASE 2 复测（同日稍晚，`PCMIG_PROGRESS_DEBUG=1` + `PCMIG_PROGRESS_TRACE=1`，job `JOB-20261005-123358-c1da`，ROI `x=544 y=503 w=1010 h=8`）**：`FRAMES=567 sampledEdges=558 distinctEdges=403 backwardSteps=96 maxStepPx=34`
-  - 探针日志（`E:\PCMigLab\Staging\phE-frames\probe.log`，117 行 @250 ms）证明：真值到达间隔 `intervalEmaMs` 为 **97–200 ms**、`lastGapMs` 85–236 ms（旧的"约 2 s 一个台阶"已不再成立，`span≈0.2 s` 即足够）
+  - 探针日志（`<实验室根>\Staging\phE-frames\probe.log`，117 行 @250 ms）证明：真值到达间隔 `intervalEmaMs` 为 **97–200 ms**、`lastGapMs` 85–236 ms（旧的"约 2 s 一个台阶"已不再成立，`span≈0.2 s` 即足够）
   - `visual < confirmed` 在多数采样点成立（如 `visual=27.276% confirmed=28.022%`、`visual=30.274% confirmed=30.712%`、`visual=99.896% confirmed=99.9%`）⇒ **无过预测**
   - 在途计数实时生效（`raw: pct=28.0 displayed=12637437952 committed=0 inFlight=12637437952 src=WorkerIoCounters retry=Retrying`）
   - 顶部 `uiPercent` 与协调器 `timeline visual` **同步移动**（27.3/27.276、30.8/30.812）⇒ §3.3"数字与条同源"在真机成立
@@ -137,13 +137,13 @@
 - 隔离探针 6 变体 × 7 样本 = 42 段，**`anyClipped` 全部 False**；净空：A 4–5 / B 5–6 / C 4–6 / D 6–8 / E 2–4 / **F（生产变体）9–10** 物理像素
 - 逐行 luma 交叉验证（A 变体样本 0 `5.04 GB/s`）：洋红线 y=134 → 纯背景 y=135..139 → 首行墨迹 y=140 ⇒ 净空 **5 物理像素**
 - 离屏 DPI 矩阵（96/120/144/168/192 = 100/125/150/175/200%）：净空 **8 / 10 / 12 / 15 / 17 物理像素**（换算 8.0–8.57 DIP），`UseLayoutRounding` 开与关**完全相同**
-- 证据：`E:\PCMigLab\Staging\phI-metric\probe-clearance.csv`、`dpi\dpi-clearance.csv`、`probe-full.png`、`crop-A0.png`、`crop-F0.png`、`metric-typography-summary.txt`
+- 证据：`<实验室根>\Staging\phI-metric\probe-clearance.csv`、`dpi\dpi-clearance.csv`、`probe-full.png`、`crop-A0.png`、`crop-F0.png`、`metric-typography-summary.txt`
 
 ---
 
 ### E5B 字形顶部轮廓真机测量与生产字重修复（PHASE 5B）
 - **动机**：E5 的"净空探针"只找**整行第一条墨迹**，能证明"整行没被裁"，但**无法检测字形顶部弧度被拍平成一条水平切线**——而用户的投诉正是"顶部被削平"。故改用**逐列首墨迹 y** 测顶部轮廓。
-- 工具：`src\PCMig.WinUI\Views\GlyphContourProbe.xaml(.cs)`（`PCMIG_GLYPH_PROBE=1`）+ `E:\PCMigLab\Staging\recovery-gate\glyph-shot.ps1`（截图 + dump 元素矩形）/ `glyph-contour-analyze.ps1`（逐列首墨迹扫描）/ `glyph-crop.ps1`（8× 最近邻放大）。
+- 工具：`src\PCMig.WinUI\Views\GlyphContourProbe.xaml(.cs)`（`PCMIG_GLYPH_PROBE=1`）+ `<实验室根>\Staging\recovery-gate\glyph-shot.ps1`（截图 + dump 元素矩形）/ `glyph-contour-analyze.ps1`（逐列首墨迹扫描）/ `glyph-crop.ps1`（8× 最近邻放大）。
 - **真机数据（96 DPI，`Microsoft YaHei UI`，FontSize 20）**：`topRange` = 顶部墨迹跨行数（越大＝弧线越完整），`ratio` = 最顶行覆盖的墨迹列占比（越大＝顶部越像水平切线）
 
 | 字重 | `2` topRange / ratio | `G` topRange / ratio | `S` topRange / ratio |
@@ -157,7 +157,7 @@
 - **`FontSize 96` 对照**：`2` 的 `topRange` 升到 **64–68**、`ratio` 降到 **0.24–0.27** ⇒ **字体轮廓本身完好**，顶部变平是**低字号栅格化**的产物，与父级裁切无关（与 E5 的净空结论一致）。
 - **生产样式 A/B**：改前 `Glyph_STYLE_20_*`（`2`/`G`/`S`）= `12 / 0.6000`、`5 / 0.5385`、`3 / 0.6667` ⇒ **与探针 `SemiBold(600)` 行逐字段完全相同**；改 `FontWeight="Normal"` 后 = `13 / 0.5000`、`5 / 0.5000`、`3 / 0.5556` ⇒ **与探针 `Normal(400)` 行逐字段完全相同**。
 - 诚实口径：这是**渐进改善**（`2` 的 ratio 0.6000→0.5000、`S` 0.6667→0.5556），不是"从削平变回圆弧"的戏剧性变化；`Medium(500)` 与 `Normal(400)` 真机完全等价，故取 `Normal`；`GlyphContourProbe` 长期保留以便复核。
-- 证据：`E:\PCMigLab\Staging\phK-glyph-shot\`（`glyph-elements.csv` / `origin-*.txt` / `*.png`）、`E:\PCMigLab\Staging\phJ-glyph\glyph-top-profile.log`。
+- 证据：`<实验室根>\Staging\phK-glyph-shot\`（`glyph-elements.csv` / `origin-*.txt` / `*.png`）、`<实验室根>\Staging\phJ-glyph\glyph-top-profile.log`。
 - **两条环境限制（本轮实测，影响后续取证方式）**：
   1. 本机 `SetForegroundWindow` / `SetWindowPos(HWND_TOPMOST)` / `PrintWindow` **三条路都拿不到 WinUI 3 窗口的真实画面**（`GetWindowRect` 报 `26,26 1440x900`、`IsIconic=False`、`IsWindowVisible=True`、`DwmGetWindowAttribute(DWMWA_CLOAKED)=0`、`GetForegroundWindow` 也返回该窗口，但屏幕像素读到的却是浏览器内容）。`glyph-shot.ps1` 只能靠 `Shell.Application.MinimizeAll()` + 恢复窗口才成功，并内置 `SELFCHECK maxLuma=… verdict=OK-DARK-PROBE|WARN-NOT-PROBE` 守卫。**结论：屏幕捕获必须带自检，否则会产出"全部 topRange=0"的假数据。**
   2. `RenderTargetBitmap.RenderAsync` 与 `Translation`（MotionDirector 的入场动画）**不兼容**，会抛 `ArgumentException: The specified property was not found or cannot be animated. Context: Translation`（对 `StatCard0..3`、`StatCardsGrid`、四个 `ValueText` 全部如此）⇒ 应用内导出生产卡 PNG 的探针 `PCMIG_STATCARD_EXPORT` 已落地但**未能产出图片**，故生产卡的像素证据仍以探针的**生产样式段（E 段）**为准。

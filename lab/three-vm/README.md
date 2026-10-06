@@ -1,6 +1,6 @@
 # 三 VM 实验室框架（lab\three-vm）
 
-> 本目录是**索引与框架说明**；大体积数据与正式证据的 canonical 位置在仓库外的实验室根 `E:\PCMigLab\`。
+> 本目录是**索引与框架说明**；大体积数据与正式证据的 canonical 位置在仓库外的实验室根 `<实验室根>\`。
 > 建立：2026-10-06（PCMig v0.5.1 发版后工作区整理）。
 > 纪律来源：用户《PCMig 发版后工作区整理 / 清理执行书（修订版）》§6「三 VM 框架必须完整保留」——**保留框架 ≠ 保留大体积数据**。
 
@@ -23,14 +23,14 @@ PCMig 的**域环境 / SMB 共享 / 故障注入 / UI 自动操作**测试框架
 - 虚拟交换机：`PCMig-Lab-Switch`
 - MAC：DC01 `00155DFC4304` / SRC01 `00155DFC4302` / DST01 `00155DFC4303`
 - ⚠ 三个 VM 当前**全部挂在检查点差分盘（`.avhdx`）**上 ⇒ 存在 Hyper-V 检查点。合并 / 移除检查点可回收约 **315 GB**，但会丢失回滚点，属破坏性动作 —— **需人工明确授权后才可执行**，本次未动。
-- canonical 路径：`E:\PCMigLab\VMs\<VM名>\`
+- canonical 路径：`<实验室根>\VMs\<VM名>\`
 
 ## 三、宿主共享（2026-10-06 实测，完整输出见 `configs\host-shares-20261006.txt`）
 
 | 共享名 | 路径 | 用途 |
 |---|---|---|
-| `PCMIG-DS1` | `C:\Users\User\PCMigLab-RG\ds-small` | 12,000 文件小文件树（Scan / Plan 压力、进度粒度） |
-| `PCMIG-DS2` | `C:\Users\User\PCMigLab-RG\ds-large` | 大文件 payload 根（`\big`），场景 H 的 42 GiB 源 |
+| `PCMIG-DS1` | `<宿主共享根>\ds-small` | 12,000 文件小文件树（Scan / Plan 压力、进度粒度） |
+| `PCMIG-DS2` | `<宿主共享根>\ds-large` | 大文件 payload 根（`\big`），场景 H 的 42 GiB 源 |
 | `Users` | `C:\Users` | 用户目录直连场景 |
 
 > `ds-large\big` 与 `src\big` 的 42 GiB / 3.3 GiB payload 已于 2026-10-06 按 §7 删除（保留目录骨架），需要时用 `scenarios\make-dataset.ps1` 重新生成。
@@ -51,12 +51,12 @@ PCMig 的**域环境 / SMB 共享 / 故障注入 / UI 自动操作**测试框架
 
 | 资产 | canonical 位置 |
 |---|---|
-| VM 磁盘与配置 | `E:\PCMigLab\VMs\` |
-| 用例矩阵（Case matrix）与故障注入 | `E:\PCMigLab\Staging\ctl\`（`cases\` / `faults\` / `host\` / `lib-cases.ps1` / `run-*.ps1`） |
-| 场景执行库与 UI 自动化主库 | `E:\PCMigLab\Staging\recovery-gate\`（`uia-lib.ps1` / `round3-scenario-*.ps1` / `pause-resume-continuity.ps1` / `case0*.ps1`） |
-| 小型 smoke 夹具（≤100 MB，唯一一套） | `E:\PCMigLab\smoke-data\` |
-| 正式证据 | `E:\PCMigLab\Evidence\`（`RouteA\` 等，禁删） |
-| 三 VM 复验包 | `E:\PCMigLab\three-vm\review-packages\` |
+| VM 磁盘与配置 | `<实验室根>\VMs\` |
+| 用例矩阵（Case matrix）与故障注入 | `<实验室根>\Staging\ctl\`（`cases\` / `faults\` / `host\` / `lib-cases.ps1` / `run-*.ps1`） |
+| 场景执行库与 UI 自动化主库 | `<实验室根>\Staging\recovery-gate\`（`uia-lib.ps1` / `round3-scenario-*.ps1` / `pause-resume-continuity.ps1` / `case0*.ps1`） |
+| 小型 smoke 夹具（≤100 MB，唯一一套） | `<实验室根>\smoke-data\` |
+| 正式证据 | `<实验室根>\Evidence\`（`RouteA\` 等，禁删） |
+| 三 VM 复验包 | `<实验室根>\three-vm\review-packages\` |
 | 仓库内 L3 编排脚本 | `tools\l3-*.ps1` / `tools\l3-*.cmd` / `tools\pcmiglab-vm.ps1` |
 | 仓库内历史证据批次 | `PCMig\archive\evidence\`（`a6-pause-resume` / `a7-two-ui-bugs` / `diagnostics-d61-20261001` 等） |
 | 仓库内历史自动化脚本 | `PCMig\archive\scripts\` |
@@ -66,10 +66,10 @@ PCMig 的**域环境 / SMB 共享 / 故障注入 / UI 自动操作**测试框架
 **删除**（424.48 GB synthetic payload，§7 / §12）：
 
 ```
-E:\PCMigLab\Staging\{phE-run2, handoff-look, phA5-gate, phA4-gate, phE-gate, pcmig-publish}
-D:\PCMigLab-R3\{scenG, shotcheck, shotcheck2, bc-check}
-C:\Users\User\PCMigLab-RG\ds-large\big\*.bin   (6 个)
-C:\Users\User\PCMigLab-RG\src\big\*.bin        (3 个)
+<实验室根>\Staging\{phE-run2, handoff-look, phA5-gate, phA4-gate, phE-gate, pcmig-publish}
+<实验室根-R3>\{scenG, shotcheck, shotcheck2, bc-check}
+<宿主共享根>\ds-large\big\*.bin   (6 个)
+<宿主共享根>\src\big\*.bin        (3 个)
 ```
 
 **保留**：VM 本体与配置、全部场景脚本与生成器、用例矩阵、故障注入库、UI 自动化 Runner、smoke 夹具、证据目录。

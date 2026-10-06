@@ -18,7 +18,7 @@
 6. **非 UI diff audit 已完成**：与 `PCMig-winui-poc-before-20260924` 镜像对比，Core、原 WPF GUI、CLI、tools、matrix、`PCMig.sln` 共 85 文件 `DIFF=0 / MISSING=0`。本轮没有对 SMB/共享/原业务 Service 做新增改动。
 7. **Visual Pass 1（Shell Structure Baseline）完成**：Product Header、品牌身份、Source→Target Capsule、四步 Step Rail、Ambient Layer、Workspace Shell、Global Status Bar 的结构方向已由用户确认保留。
 8. **Visual Pass 2（Design System）已开始并实际运行**：新增 `Colors.xaml` / `Typography.xaml` / `Controls.xaml`，重构 `Materials.xaml`，将全屏近不透明 Gradient 改为低 Alpha Base + 四个 Ambient Blob；建立 BaseBackdrop / Shell / Primary / Secondary / Inset / Elevated / Interactive / Selected 八层语义材质、Border/Edge 分离、ThemeShadow Elevation、Primary Button 状态模板与 Inset 输入控件 Style。最终视觉验收仍未完成。
-9. **已删除用户授权的诊断残留**：`E:\Project\镜像备份源码\_rcprobe_20260924` 已删除，实际释放 `3,351,675,829` 字节；它不是有效备份，删除不可回退。
+9. **已删除用户授权的诊断残留**：`<镜像备份根>\_rcprobe_20260924` 已删除，实际释放 `3,351,675,829` 字节；它不是有效备份，删除不可回退。
 
 ---
 
@@ -26,9 +26,9 @@
 
 | 项 | 事实 |
 |---|---|
-| 权威工作区 | `E:\Project\deepseek work\PCMig` |
-| 交付区 | `E:\Project\PCMig`（本会话未触碰） |
-| 工作副本 | `D:\PCMig`（本会话未触碰） |
+| 权威工作区 | `<仓库根>` |
+| 交付区 | `<交付区>`（本会话未触碰） |
+| 工作副本 | `<发版工作副本>`（本会话未触碰） |
 | 当前分支 | `feature/winui-v0.5.0` |
 | HEAD | `c9aef30454081fd81a13c8c9feef029f0629ad67` |
 | HEAD 主题 | `v0.5.0 WinUI technical baseline before visual reconstruction` |
@@ -107,18 +107,18 @@ WinUI 自包含 PoC 的已知发布性质：约 523 文件 / 220.7MB。WinUI 不
 | 重 | 位置 | 验证 |
 |---|---|---|
 | tag | `winui-pass2-before-handover-20260925` | annotated；解析 commit = `c9aef30` = HEAD |
-| 镜像 | `E:\Project\镜像备份源码\PCMig-winui-pass2-before-handover-20260925` | 174 文件 / 72,427,328 字节；全量 SHA256 **174/174 MATCH** |
-| bundle | `E:\Project\镜像备份源码\PCMig-winui-pass2-before-handover-20260925.bundle` | `git bundle verify` exit 0、complete history、43 refs；并已从 bundle 临时 clone 复核 |
-| 清单 | `E:\Project\镜像备份源码\winui-pass2-before-handover-20260925-清单.md` | 记录时间、HEAD、tag、bundle、回退与限制 |
+| 镜像 | `<镜像备份根>\PCMig-winui-pass2-before-handover-20260925` | 174 文件 / 72,427,328 字节；全量 SHA256 **174/174 MATCH** |
+| bundle | `<镜像备份根>\PCMig-winui-pass2-before-handover-20260925.bundle` | `git bundle verify` exit 0、complete history、43 refs；并已从 bundle 临时 clone 复核 |
+| 清单 | `<镜像备份根>\winui-pass2-before-handover-20260925-清单.md` | 记录时间、HEAD、tag、bundle、回退与限制 |
 
 ### 6.2 回退命令与限制
 
 ```powershell
 # 未提交的 Pass 1/2 状态必须以镜像回档：
-robocopy "E:\Project\镜像备份源码\PCMig-winui-pass2-before-handover-20260925" "E:\Project\deepseek work\PCMig" /E
+robocopy "<镜像备份根>\PCMig-winui-pass2-before-handover-20260925" "<仓库根>" /E
 
 # 已提交的技术基线可从 tag / bundle 重建：
-git clone "E:\Project\镜像备份源码\PCMig-winui-pass2-before-handover-20260925.bundle" <新目录>
+git clone "<镜像备份根>\PCMig-winui-pass2-before-handover-20260925.bundle" <新目录>
 ```
 
 **禁止**把 tag 当作当前未提交 Pass 2 的完整回档点；也禁止 `git reset --hard`、`git checkout .`、`git restore .`、`git clean -fd`。
@@ -148,11 +148,11 @@ git clone "E:\Project\镜像备份源码\PCMig-winui-pass2-before-handover-20260
 4. 每个 Pass 必跑：
 
 ```powershell
-cd "E:\Project\deepseek work\PCMig"
+cd "<仓库根>"
 dotnet build src\PCMig.WinUI\PCMig.WinUI.csproj -c Release --no-restore -p:NuGetAudit=false
 dotnet test tests\PCMig.Core.Tests\PCMig.Core.Tests.csproj -c Release --no-restore
 # 启动刚 Build 的 WinUI exe 后截图：
-powershell -NoProfile -ExecutionPolicy Bypass -File "E:\Project\deepseek work\archive\scripts\winui-poc-screencap.ps1" -Out "E:\Project\deepseek work\archive\screenshots\<下一张>.png"
+powershell -NoProfile -ExecutionPolicy Bypass -File "<工作区根>\archive\scripts\winui-poc-screencap.ps1" -Out "<工作区根>\archive\screenshots\<下一张>.png"
 ```
 
 5. Step 1 达到完整视觉门槛后，再重新 self-contained Publish、确认 `PCMig.WinUI.pri` 在 publish 目录、独立启动并截图。

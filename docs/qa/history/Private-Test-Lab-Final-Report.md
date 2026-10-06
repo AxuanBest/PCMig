@@ -20,7 +20,7 @@
 | **COMPANY_ONLY** | **15 项**（见 `..\First-Day-Company-Test-Checklist.md`：C-01…C-15） |
 | **合计有效场景** | **27**（含 B2 全部收敛） |
 
-> 另有 60 个"脚手架调试期"run（修测试脚本 bug 过程中的中间结果），**不作为产品结论**；每个 run 目录内含 `classification.json`，索引见 `J:\pcmig-lab\reports\run-index.json`。
+> 另有 60 个"脚手架调试期"run（修测试脚本 bug 过程中的中间结果），**不作为产品结论**；每个 run 目录内含 `classification.json`，索引见 `<外置实验室盘>\reports\run-index.json`。
 
 ### 1.2 单元测试
 
@@ -39,7 +39,7 @@
 | 项 | 结果 |
 |---|---|
 | 64 → **85** 用例全绿 | **PASS / RUNTIME_VERIFIED** |
-| 真实日志 Fixture 建库（错误 **112 / 82 / 59 / 2** 逐字原文，GBK 原件） | **PASS**，`J:\pcmig-lab\fixtures\robocopy\` |
+| 真实日志 Fixture 建库（错误 **112 / 82 / 59 / 2** 逐字原文，GBK 原件） | **PASS**，`<外置实验室盘>\fixtures\robocopy\` |
 | 正则/控制字符防复发回归（`SourceTreeHygieneTests`，5 用例） | **PASS**，已并入 release 闸门 0 |
 | 覆盖性质分类 | 真实日志样本 5→**21** ｜ 真实运行时 7 ｜ 纯逻辑 15 |
 
@@ -76,7 +76,7 @@
 **★ 本轮最重要的新证据（把磁盘满分支从 CODE_VERIFIED 抬到 RUNTIME_VERIFIED）**：
 
 ```
-2026/09/19 14:53:54 错误 112 (0x00000070) 正在复制文件 J:\pcmig-lab\test-data\overflow\large\large.bin
+2026/09/19 14:53:54 错误 112 (0x00000070) 正在复制文件 <外置实验室盘>\test-data\overflow\large\large.bin
 磁盘空间不足。
 ```
 
@@ -123,7 +123,7 @@
 | 上一版/下一版按钮、关闭按钮 | **FAIL（脚手架定位问题，见 §四-S17）** |
 | ScrollBar 溢出触发（主窗实时日志 / 更新日志窗口） | **NOT_RUN**（前者需"有数据状态"，后者窗口不可 Resize） |
 | Secondary Dialog | **NOT_RUN**（无运行中任务，触发条件不足，**不伪造**） |
-| 截图基线 | 7 张 → `J:\pcmig-lab\screenshots\20260919-145711-GUI-SMOKE-01\` |
+| 截图基线 | 7 张 → `<外置实验室盘>\screenshots\20260919-145711-GUI-SMOKE-01\` |
 
 ### 2.8 Corporate Simulation（L3）
 
@@ -156,7 +156,7 @@
 | **S1** | 旧 `Compare-Tree` **>16MB 不哈希** | **大文件场景"完整性 PASS"在内容层面是空的** | 改**全量 SHA256** |
 | **S2** | 旧 `Compare-Tree` **不比对目录** | **空目录丢失完全检测不到** | 加目录集合双向比对（实测删空目录立刻 FAIL） |
 | S3 | 退出码陷阱 | `CompletedWithErrors`（含盘满）也返回 0 | 判定一律读 `job-state.json` |
-| S4 | 无 job 隔离 | 任务落进生产 `%ProgramData%\PCMig\Jobs` | 强制 `--jobs J:\pcmig-lab\jobs` |
+| S4 | 无 job 隔离 | 任务落进生产 `%ProgramData%\PCMig\Jobs` | 强制 `--jobs <外置实验室盘>\jobs` |
 | **S5** | `write`/`edit` 工具**丢 BOM** | PS 5.1 按 GBK 读 UTF-8 中文脚本 → **字符串闭合被破坏、解析失败**（铁律 8 经典事故） | 改后复查补 `EF BB BF`；`.ps1` 用精确编辑 |
 | S6 | PS 5.1 用 `$(if ...)` / `$args` / `$Pid` | 语法错或只读变量冲突 | 改 if/else 赋值 + 重命名 |
 | S7 | `Complete-LabRun` 用 `Write-Output` | 汇总文本污染返回值 → **场景结果误报** | 改 `Write-Host` |
@@ -222,12 +222,12 @@
 
 | 文件 | 说明 |
 |---|---|
-| `J:\pcmig-lab\reports\run-index.json` | 全部 run 的索引（含 `classification`：最终有效 / 脚手架调试期） |
+| `<外置实验室盘>\reports\run-index.json` | 全部 run 的索引（含 `classification`：最终有效 / 脚手架调试期） |
 | 各 `runs\<RunId>\result.json` | 该场景的七种结果类型统计 + 全部断言 + cleanup 结果 |
 | 各 `runs\<RunId>\environment.json` | 环境快照（含 **CLI SHA256** + git HEAD + 是否管理员） |
 | 各 `runs\<RunId>\classification.json` | 该 run 是否"最终有效" |
 
-### 8.2 工具与脚本（全部在 `J:\pcmig-lab\`）
+### 8.2 工具与脚本（全部在 `<外置实验室盘>\`）
 
 | 路径 | 作用 |
 |---|---|
@@ -244,7 +244,7 @@
 | `fixtures\robocopy\error-{112,82,59,2}.txt` | 真实错误日志 GBK 原件 + `README.encoding.txt` |
 | `screenshots\<RunId>\` | GUI 基线截图 |
 
-### 8.3 工作区文档（`I:\deepseek work\PCMig\docs\`）
+### 8.3 工作区文档（`<旧镜像根>\PCMig\docs\`）
 
 | 文件 | 内容 |
 |---|---|

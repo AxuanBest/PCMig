@@ -1,7 +1,7 @@
 # 工作交接 — 20260928 — Responsive Uniform Scaling 与 Motion 全阶段（U56–U61）
 
 > 交接对象：接手 PCMig v0.5.0 UI Motion / Responsive 工作的下一位（或下一个会话）
-> 权威工作区：`E:\Project\deepseek work\PCMig`（唯一事实来源）
+> 权威工作区：`<仓库根>`（唯一事实来源）
 > 本轮起点：上一会话交接的「UniformScaleHost Spike」施工卡（D1–D6）
 > 本轮终点状态：**应用可编译、可运行、Uniform Scaling 与整页 Push 已通过人工验收；Utility Panel Motion 已实现待人工确认**
 
@@ -39,7 +39,7 @@
 | 1 | `FindName` 名字作用域 | 新增 `ApplicationRoot => UniformScaleHost.ApplicationRoot ?? Content as FrameworkElement`，响应式与浮层定位都改用它 | 不传它会让 `FindName` 全 null ⇒ 响应式整链**静默失效** |
 | 2 | 浮层定位坐标系 | `PositionOverlayPanels` 的 root 用 `ApplicationRoot`（尺寸恒 1424×892） | 面板设计坐标 (476.6, 115.3) vs 生产 1.00 的 (477, 116) |
 | 3 | 自定义标题栏拖动区 | 不把标题栏排除在缩放外 | 设计 x=60 处拖动 → 窗口位移 (37,23) |
-| 4 | 输入坐标 + 视口自校正 | 见下 | 点击视觉中心 → 聚焦 + 回读 `192.168.1.10` |
+| 4 | 输入坐标 + 视口自校正 | 见下 | 点击视觉中心 → 聚焦 + 回读 `192.0.2.10` |
 
 ### 阶段 3：启动视口修正
 - Uniform 模式下原根尺寸恒等于设计面 ⇒ 其 `SizeChanged` 不再代表视口 ⇒ `OnRootSizeChanged` 的观测值改读 `XamlRoot.Size`。
@@ -184,7 +184,7 @@
 
 | 用途 | 位置 |
 |---|---|
-| **主文件级快照（勿删）** | `E:\Project\镜像备份源码\PCMig-v0.5.0-pre-responsive-motion-20260928-131622`（2963 文件 / 700 条 SHA256） |
+| **主文件级快照（勿删）** | `<镜像备份根>\PCMig-v0.5.0-pre-responsive-motion-20260928-131622`（2963 文件 / 700 条 SHA256） |
 | 本轮各阶段改动前快照 | `archive\tmp\*.before-u56-uniformhost.*` / `*.before-u57-push.*` / `*.before-u58-rapidfix.*` / `*.after-u58-rapidfix.*` / `*.before-u59-takeover.*` |
 | 桌面归档目录的三次清空前全量备份 | `archive\backup-影响面代码-清空前-20260928\`、`archive\backup-新建文件夹4-分类目录-20260928\`、`archive\backup-新建文件夹4-20260928-u59\`、`archive\backup-新建文件夹4-20260928-u61\` |
 | 关闭新特性 | 不设 `PCMIG_UNIFORM_HOST` 重启（Motion 默认生效，无法用 env 关闭） |
@@ -196,11 +196,11 @@
 
 ## 九、新会话接手第一件事
 
-1. **读**：`D:\Users\User\Desktop\新建文件夹 (4)\判断文档\` 里的 6 份文档（尤其 `Phase-A-施工卡.md` 与本交接文档）
+1. **读**：`<用户目录D>\Desktop\<桌面交付根>\判断文档\` 里的 6 份文档（尤其 `Phase-A-施工卡.md` 与本交接文档）
 2. **不要重新侦察**：本轮所有结论、参数、坑都在上面
 3. **先确认构建与运行**：
    ```powershell
-   cd "E:\Project\deepseek work\PCMig"
+   cd "<仓库根>"
    dotnet build src\PCMig.WinUI\PCMig.WinUI.csproj -c Release -m:1     # 必须 -m:1
    ```
    （`.sln` **不包含** WinUI 项目，必须单独构建这个 csproj）

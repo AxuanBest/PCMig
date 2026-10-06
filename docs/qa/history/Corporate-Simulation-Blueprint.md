@@ -18,13 +18,13 @@
 | 5 | **VMware** | 🔴 **半损坏**：注册表 26.0.0、服务（VMAuthdService / NAT）Running，但 **`C:\Program Files\VMware\VMware Workstation` 下无 `vmware.exe` / `vmrun.exe`** | **当前无法启动任何 VMware VM** |
 | 6 | **Hyper-V** | ✅ **全栈可用**：`vmms` / `vmcompute` / `HvHost` 全 **Running**；`Microsoft-Hyper-V-All`=1 | **推荐平台**（`Get-VM` 需提权） |
 | 7 | **VT-x / AMD-V** | `VirtualizationFirmwareEnabled`=**True**；SLAT / VMMonitor 显示 False（**因 Hyper-V 已接管，非硬件缺失**）；**VBS = 2（Running）** | ✅ 虚拟化可用 |
-| 8 | **已有 VM** | Hyper-V 在册目录为空；**`G:\HyperV\PCMig-OldPC\` 有 12.0 GB vhdx + 18.0 GB avhdx + Snapshots + VMRS**（历史真实建过的 PCMig 测试 VM，未在册）；`E:\Documents\Virtual Machines\` 有 **7 台 VMware 格式**（Win10×3 / Win11×2 / CentOS×2，共约 67 GB） | ⭐ **既有资产可复用/待注册** |
+| 8 | **已有 VM** | Hyper-V 在册目录为空；**`<Hyper-V 镜像盘>\PCMig-OldPC\` 有 12.0 GB vhdx + 18.0 GB avhdx + Snapshots + VMRS**（历史真实建过的 PCMig 测试 VM，未在册）；`<本机文档>\Virtual Machines\` 有 **7 台 VMware 格式**（Win10×3 / Win11×2 / CentOS×2，共约 67 GB） | ⭐ **既有资产可复用/待注册** |
 | 9 | **lab 的 vm-*.ps1** | `vm-deep.ps1`（704B，\\?\ 深路径）、`vm-gen-massdata.ps1`（2.6KB，5 万小文件/40 层/锁文件）、`unlock.ps1`（危险：杀所有 powershell） | 见 §三 复用判定 |
 | 10 | **VM Answer ISO** | `lab\answer.iso`（1.18 MB）+ `lab\answer\autounattend.xml`（5.5 KB，自动装 Win10 专业版 + **`LocalAccountTokenFilterPolicy=1`**） | ⭐ **高价值可复用**（⚠ 含明文密码需处理） |
-| 11 | **现有虚拟网络** | VMnet1 **192.168.219.1/24 Up**（host-only）｜VMnet8 **192.168.134.1/24 Up**（NAT）｜`vEthernet (Default Switch)` **192.168.48.1/20** | **隔离网络已就绪** |
+| 11 | **现有虚拟网络** | VMnet1 **198.51.100.1/24 Up**（host-only）｜VMnet8 **192.0.2.1/24 Up**（NAT）｜`vEthernet (Default Switch)` **198.51.100.1/20** | **隔离网络已就绪** |
 | 12 | **已有 Windows Client VM** | VMware 格式有 Win10×3 / Win11×2（**因 VMware 用户态缺失暂不可用**）；Hyper-V 侧无在册 VM | ⚠ 需修复平台或重装 |
 | 13 | **Windows Server ISO** | 🔴 **无任何 Server 介质**（全盘扫描仅 Win10 22H2 / Win11 24H2 客户端镜像） | **需从官方评估中心获取** |
-| — | 宿主网络 | 有线 2.5GbE `192.168.1.250/24`（家用路由 NAT 后），DNS 192.168.1.1；WLAN Disconnected | 隔离方案见 §四 |
+| — | 宿主网络 | 有线 2.5GbE `192.0.2.250/24`（家用路由 NAT 后），DNS 192.0.2.1；WLAN Disconnected | 隔离方案见 §四 |
 
 ---
 
@@ -45,8 +45,8 @@
 
 | 项 | 建议 |
 |---|---|
-| 存放位置 | **`G:\PCMigLab\ISO\`**（G 盘 177 GB 空闲，与 J 盘测试数据物理分离） |
-| 记录 SHA256 | 下载后立即记录，写入 `G:\PCMigLab\ISO\MANIFEST.md` |
+| 存放位置 | **`<实验室镜像盘>\ISO\`**（G 盘 177 GB 空闲，与 J 盘测试数据物理分离） |
+| 记录 SHA256 | 下载后立即记录，写入 `<实验室镜像盘>\ISO\MANIFEST.md` |
 | 空间预算 | ISO ≈ 6 GB + VM 磁盘（见 §五） |
 
 > ⚠ **本轮未下载任何介质**（用户要求：先 Blueprint）。本节仅为可执行准备清单。
@@ -65,16 +65,16 @@
 | `lab\fill-e.ps1` | ❌ **不可复用（有风险）**：会填**真实物理 E 盘**。只保留 `fsutil createnew` +"填充到剩 N MB"思路。 |
 | `lab\unlock.ps1` | ❌ **危险**：`Stop-Process` 杀所有非自身 powershell。 |
 | `lab\uia-changelog.ps1` | ✅ 已在本轮 GUI Smoke 复用并验证（UIA 按 AutomationId Invoke）。 |
-| **`G:\HyperV\PCMig-OldPC\`** | ⭐ **待提权校验后决定**：若可用可直接当 Client VM（省一次 Win10 安装，约 30 分钟）。 |
-| **`E:\Documents\Virtual Machines\` 7 台** | ⚠ 依赖已损坏的 VMware 用户态 → 暂不可用；若改用 Hyper-V 需转换（不建议，成本高） |
-| **PCMig Test Lab（`J:\pcmig-lab\`）** | ⭐ **L3 场景直接复用**：`lib\LabCommon.ps1`（全量 SHA256 核对 / 环境快照 / job-state 判定 / 安全护栏）、`lib\testdata.ps1`、`scenarios\*.ps1` 生命周期模板 |
+| **`<Hyper-V 镜像盘>\PCMig-OldPC\`** | ⭐ **待提权校验后决定**：若可用可直接当 Client VM（省一次 Win10 安装，约 30 分钟）。 |
+| **`<本机文档>\Virtual Machines\` 7 台** | ⚠ 依赖已损坏的 VMware 用户态 → 暂不可用；若改用 Hyper-V 需转换（不建议，成本高） |
+| **PCMig Test Lab（`<外置实验室盘>\`）** | ⭐ **L3 场景直接复用**：`lib\LabCommon.ps1`（全量 SHA256 核对 / 环境快照 / job-state 判定 / 安全护栏）、`lib\testdata.ps1`、`scenarios\*.ps1` 生命周期模板 |
 
 ---
 
 ## 四、网络结构（隔离，用户明确要求）
 
 ```
-宿主机 AXUAN  192.168.1.250（家用网络，保持不动，VM 不桥接）
+宿主机 AXUAN  192.0.2.250（家用网络，保持不动，VM 不桥接）
 
   ┌────────────── 隔离虚拟网络：PCMigLab.local 内部段 ──────────────┐
   │                                                                  │
@@ -94,7 +94,7 @@
 - ❌ **不让真实公司账号进入测试域**
 - ❌ **不把测试 VM 加入公司生产域**
 - ✅ 只用 **Lab-only**：accounts / shares / DNS / domain / VHD
-- ✅ 不用 Bridged（宿主 192.168.1.x 完全不受影响）
+- ✅ 不用 Bridged（宿主 192.0.2.x 完全不受影响）
 
 ---
 
@@ -133,7 +133,7 @@
 | **VM-2 FS01** | 文件服务：普通共享 + **管理共享 `D$`** + NTFS ACL 模型 | 2 vCPU / 2 GB | ~44 GB | 同上 |
 | **VM-3 CLIENT01** | 加域客户端，模拟普通员工 PC | 2 vCPU / 4 GB | ~60 GB | ✅ **本机已有 Win10 22H2 ISO + `autounattend.xml`** |
 
-**资源合计**：内存 **9 GB**（当前可用 12.1 GB ✅）｜磁盘精简后 **约 120–150 GB** → 放 **`G:\PCMigLab\VMs\`**（177 GB 空闲）。
+**资源合计**：内存 **9 GB**（当前可用 12.1 GB ✅）｜磁盘精简后 **约 120–150 GB** → 放 **`<实验室镜像盘>\VMs\`**（177 GB 空闲）。
 
 ### 为什么**不**默认 4 台（PC02）
 
@@ -214,11 +214,11 @@ Firewall ｜ UAC ｜ Restricted User ｜ 更复杂的 GPO
 
 | # | 事项 | 说明 |
 |---|---|---|
-| 1 | **下载 Windows Server 2025 Evaluation ISO** | 用户已批准；建议存 `G:\PCMigLab\ISO\` 并记录 SHA256 |
+| 1 | **下载 Windows Server 2025 Evaluation ISO** | 用户已批准；建议存 `<实验室镜像盘>\ISO\` 并记录 SHA256 |
 | 2 | **虚拟化平台二选一** | 建议 **Hyper-V**（已全栈可用；VMware 用户态缺失需重装），或先修 VMware |
-| 3 | 是否注册/复用 **`G:\HyperV\PCMig-OldPC`** | 需提权 `Get-VHD` 校验后决定（可省一次 Win10 安装） |
+| 3 | 是否注册/复用 **`<Hyper-V 镜像盘>\PCMig-OldPC`** | 需提权 `Get-VHD` 校验后决定（可省一次 Win10 安装） |
 | 4 | 是否允许创建 **Hyper-V Private 交换机**（隔离网段） | 需管理员 |
-| 5 | 磁盘位置确认：**`G:\PCMigLab\VMs\`** | 177 GB 空闲，与 J 盘测试数据物理分离 |
+| 5 | 磁盘位置确认：**`<实验室镜像盘>\VMs\`** | 177 GB 空闲，与 J 盘测试数据物理分离 |
 
 ---
 
@@ -249,7 +249,7 @@ Get-VHD        : ✘ You do not have the required permission
 **"用户以管理员身份启动窗口"不会改变本会话进程的令牌** —— 那是两个独立进程。
 因此 L3 的**任何 VM 创建/管理动作**都必须经由"**自我提升脚本 + 用户同意一次 UAC**"完成。
 
-> 这条已在 L0–L2 阶段被验证有效：`J:\pcmig-lab\scenarios\run-elevated.cmd` 就是这个模式，
+> 这条已在 L0–L2 阶段被验证有效：`<外置实验室盘>\scenarios\run-elevated.cmd` 就是这个模式，
 > 用户双击一次即跑完 B2 全部 VHD 场景（含自动清理与汇总）。
 
 **这不是缺陷，也不影响交付**：本会话能做的是"写工具 + 审计 + 设计 + 验证非特权部分"，
@@ -260,7 +260,7 @@ Get-VHD        : ✘ You do not have the required permission
 | 入口 | 用途 | 状态 |
 |---|---|---|
 | **`tools\pcmiglab-vm.ps1`** | L3 VM 创建/管理（DC01 / FS01 / CLIENT01） | ✅ **已写并干跑验证** |
-| `J:\pcmig-lab\scenarios\run-elevated.cmd` | L0–L2 的 VHD/FAT32/DiskFull 批次 | ✅ 已验证可用 |
+| `<外置实验室盘>\scenarios\run-elevated.cmd` | L0–L2 的 VHD/FAT32/DiskFull 批次 | ✅ 已验证可用 |
 
 `pcmiglab-vm.ps1` 的设计要点：
 
@@ -268,7 +268,7 @@ Get-VHD        : ✘ You do not have the required permission
 |---|---|
 | 1 | **默认只干跑**（不加 `-Execute` 绝不创建任何东西） |
 | 2 | 创建需管理员令牌；非管理员时**打印自我提升指引并 exit 5**（不静默失败） |
-| 3 | **完整隔离**：VM 名带 `PCMigLab-` 前缀、VHD 固定放 `G:\PCMigLab\VMs\`、交换机 `PCMigLab-Sw`（Internal） |
+| 3 | **完整隔离**：VM 名带 `PCMigLab-` 前缀、VHD 固定放 `<实验室镜像盘>\VMs\`、交换机 `PCMigLab-Sw`（Internal） |
 | 4 | **不碰宿主网络**：只创建 Internal 交换机，**不自动改宿主 IP/DNS** |
 | 5 | 删除需 `-Remove -Execute` **双确认**，且只删 `PCMigLab-` 前缀的对象 |
 | 6 | 前置检查：Hyper-V 可用性、交换机是否存在、ISO 是否就位、盘空间、**同名 VM 冲突** |
@@ -293,8 +293,8 @@ G: 可用空间 177.2 GB ✔ ｜ 无同名 VM 冲突 ✔
 | **形式** | 64-bit **ISO**（另有 VHD 形式） |
 | **流程** | 需**注册表单**后下载（官方设计，**无免登录直链**）→ **必须由用户操作** |
 | **建议版本** | **Standard + Desktop Experience**（有 GUI，便于配置 AD/DNS） |
-| **存放位置** | **`G:\PCMigLab\ISO\`**（目录已建，当前为空） |
-| **下载后** | 记录 SHA256 至 `G:\PCMigLab\ISO\MANIFEST.md` |
+| **存放位置** | **`<实验室镜像盘>\ISO\`**（目录已建，当前为空） |
+| **下载后** | 记录 SHA256 至 `<实验室镜像盘>\ISO\MANIFEST.md` |
 
 > ⚠ 本会话**未下载任何介质**：官方页面需注册，且按纪律不由 AI 代下第三方来源。
 
@@ -302,7 +302,7 @@ G: 可用空间 177.2 GB ✔ ｜ 无同名 VM 冲突 ✔
 
 | # | 动作 | 由谁做 | 说明 |
 |---|---|---|---|
-| 1 | **下载 Windows Server 2025 Eval ISO** 到 `G:\PCMigLab\ISO\` | **你** | 需注册表单，官方无直链 |
+| 1 | **下载 Windows Server 2025 Eval ISO** 到 `<实验室镜像盘>\ISO\` | **你** | 需注册表单，官方无直链 |
 | 2 | **同意一次 UAC** 跑 `tools\pcmiglab-vm.ps1 -Execute` | **你**（一次） | 之后 3 台 VM 由脚本创建，**无需再逐台手工操作** |
 
 **其余全部由本会话完成**（不需提权）：AD/DNS 配置脚本、FS01 共享与 ACL 脚本、
@@ -312,4 +312,4 @@ CLIENT01 加域脚本、L3-01…L3-11 场景脚本、证据体系接入 `LabComm
 
 - [ ] 虚拟化平台是否确定用 **Hyper-V**（现状推荐：已全栈可用；VMware 用户态缺失需重装）
 - [ ] 是否允许创建 **Internal 交换机** `PCMigLab-Sw`（脚本会创建；不碰宿主网络设置）
-- [ ] 是否注册复用 `G:\HyperV\PCMig-OldPC`（可省一次 Win10 安装；**需提权校验**）
+- [ ] 是否注册复用 `<Hyper-V 镜像盘>\PCMig-OldPC`（可省一次 Win10 安装；**需提权校验**）

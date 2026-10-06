@@ -7,10 +7,10 @@
 | 主题 | 权威位置 |
 |---|---|
 | 框架总览 / canonical 路径表 | `PCMig\lab\three-vm\README.md` |
-| Route A 规格（验收范围与用例边界） | `E:\PCMigLab\Staging\RouteA-Spec.md` |
-| 用例矩阵（Case matrix） | `E:\PCMigLab\Staging\ctl\cases\` |
-| 故障注入定义 | `E:\PCMigLab\Staging\ctl\faults\` |
-| VM 执行说明 | `E:\PCMigLab\VMs\` + 本框架 `configs\` 快照 |
+| Route A 规格（验收范围与用例边界） | `<实验室根>\Staging\RouteA-Spec.md` |
+| 用例矩阵（Case matrix） | `<实验室根>\Staging\ctl\cases\` |
+| 故障注入定义 | `<实验室根>\Staging\ctl\faults\` |
+| VM 执行说明 | `<实验室根>\VMs\` + 本框架 `configs\` 快照 |
 | 场景 → 脚本 → 证据 映射 | `PCMig\lab\three-vm\scenarios\README.md` |
 | 证据采集格式 | `PCMig\lab\three-vm\evidence-template\README.md` |
 
@@ -18,10 +18,10 @@
 
 | 文档 | 路径 |
 |---|---|
-| Route A 全会话交接 | `E:\PCMigLab\Evidence\RouteA\SESSION-HANDOFF-ROUTE-A-FULL-CLEAN.md`（+ `-QUICK.txt`） |
-| Route A 当前检查点 | `E:\PCMigLab\Evidence\RouteA\CURRENT-ROUTE-A-CHECKPOINT.txt` |
-| Route A Bug 账本 | `E:\PCMigLab\Evidence\RouteA\Route-A-Bug-Ledger.md` |
-| Trust-Critical Recovery 施工指令 | `E:\PCMigLab\Evidence\Trust-Critical-Recovery\INSTRUCTION-Trust-Critical-Recovery-Campaign.md` |
+| Route A 全会话交接 | `<实验室根>\Evidence\RouteA\SESSION-HANDOFF-ROUTE-A-FULL-CLEAN.md`（+ `-QUICK.txt`） |
+| Route A 当前检查点 | `<实验室根>\Evidence\RouteA\CURRENT-ROUTE-A-CHECKPOINT.txt` |
+| Route A Bug 账本 | `<实验室根>\Evidence\RouteA\Route-A-Bug-Ledger.md` |
+| Trust-Critical Recovery 施工指令 | `<实验室根>\Evidence\Trust-Critical-Recovery\INSTRUCTION-Trust-Critical-Recovery-Campaign.md` |
 | 场景 H 根因（**定论**） | `…\Trust-Critical-Recovery\SCENARIO-H-ROOT-CAUSE-20261006-REV2.md` |
 | 委托链修复报告 | `…\Trust-Critical-Recovery\FIX-DELEGATION-CHAIN-20261006.md` |
 | P3 三项裁决证据 | `…\Trust-Critical-Recovery\P3-DECISIONS-20261006.md` |
@@ -32,7 +32,7 @@
 
 ## 三、三 VM 复验包
 
-`E:\PCMigLab\three-vm\review-packages\`（原桌面副本，2026-10-06 归位）：
+`<实验室根>\three-vm\review-packages\`（原桌面副本，2026-10-06 归位）：
 - `PCMig-ThreeVM-EnvironmentBuild-20261002-234157`
 - `PCMig-ThreeVM-Phase0-Readiness-20261002-220044`
 

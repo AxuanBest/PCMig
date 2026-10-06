@@ -1,7 +1,7 @@
 # 第二轮 — Workspace Cleanup & Governance 报告（2026-10-01）
 
 > 执行依据：用户 2026-10-01 Phase 2 正式执行指令（§一 裁决 D-1…D-6；§二–§二十九 执行顺序与禁止事项）。
-> 权威工作区：`E:\Project\deepseek work\PCMig`。本轮作用域**仅此目录**。
+> 权威工作区：`<仓库根>`。本轮作用域**仅此目录**。
 > 执行窗口：2026-10-01 13:35 → 13:50（+08:00）。
 
 ---
@@ -221,18 +221,18 @@ tracked 100 → 390 由 checkpoint `2c0183b` 完成（`M 46 / A 290`，explicit 
 5. **Diagnostics 事件口径遗留**（承接 D6.1）：23 个事件仍 `Reserved`；`DIA.SerializationFailed` 只有计数器没有事件；`FS.FileReadFailure` 口径缺失；Preflight 用中文检查名派生 code；1 条偶发未复现测试。
 6. **未做的真实环境验证**：Deep Trace 端到端 / 高 DPI / 面板动效逐帧、性能实测（现数字全是候选值）、Stage B、三 VM、210 万文件级迁移。
 7. **`archive\` 有意不纳管**：2238 个未跟踪文件全部位于 `archive\`，属用户 §四明示决定。
-8. **Mnemon 记忆更新：已通过 Mnemon Documents 完成**（Memory Space 路径仍阻塞）。写入 Document `57fe2a88-20ee-4c6b-ac7a-6cacf95cb4d1` = `C:\Users\User\.mnemon\documents\active\pcmig-workspace-d6-2-2026-10-01-phase-2-57fe2a88.md`（7,514 B，工作区 `E:\Project\deepseek work`），内容覆盖用户 §二十二 要求的全部事实（开工顺序 / 产品冻结状态 / 构建测试基线 / 治理提交 / 两道闸门），与 `docs\工作交接-20261001-Workspace治理完成与D6.2起点.md`、`docs\INDEX.md` 一致。仍不可用的是 Memory Space 与运行时热记忆路径：本机缺 `mnemon.exe`（`mnemon_status.commandFound = false`、`spawn mnemon ENOENT`、`catalog=0, writable=0`）；解锁动作 = 安装官方 Mnemon Windows 版或设置 `MNEMON_CLI_PATH`。
+8. **Mnemon 记忆更新：已通过 Mnemon Documents 完成**（Memory Space 路径仍阻塞）。写入 Document `57fe2a88-20ee-4c6b-ac7a-6cacf95cb4d1` = `<用户目录C>\.mnemon\documents\active\pcmig-workspace-d6-2-2026-10-01-phase-2-57fe2a88.md`（7,514 B，工作区 `<工作区根>`），内容覆盖用户 §二十二 要求的全部事实（开工顺序 / 产品冻结状态 / 构建测试基线 / 治理提交 / 两道闸门），与 `docs\工作交接-20261001-Workspace治理完成与D6.2起点.md`、`docs\INDEX.md` 一致。仍不可用的是 Memory Space 与运行时热记忆路径：本机缺 `mnemon.exe`（`mnemon_status.commandFound = false`、`spawn mnemon ENOENT`、`catalog=0, writable=0`）；解锁动作 = 安装官方 Mnemon Windows 版或设置 `MNEMON_CLI_PATH`。
 
 ---
 
 ## 十二 Harness / DSH 排除范围（用户裁决 D-5，本轮完全未碰）
 
-`E:\Project\deepseek work\` 下的：
+`<工作区根>\` 下的：
 
 - 174 个散落文件 / 22,792,055 B（`.ps1` 93、`.py` 31、`.txt` 21、`.js` 14 等；其中 171/174 与 `archive\` 下同哈希）；
 - 12 个与归档目录逐字节相同的重复目录（`TreeTest`、`BalanceTest`、`RepairTest`、`ErrorReasonTest`、`repair-lab`、`robo-lab`、`dlss5-payload`、`_tools`、`_prev`、`UserData`(817 文件)、`thin-search-src`、`pinkllo-src`）；
 - `UserData`、`.dsh*`、`.openviking`、`dsh-session-recovery`、`.preset-square` 等疑似 DSH / Harness 数据；
-- 以及 `E:\Project\PCMig`（交付区）、`D:\PCMig`（工作副本）、`I:\K\deepseek work`（旧镜像）。
+- 以及 `<交付区>`（交付区）、`<发版工作副本>`（工作副本）、`<旧镜像根>`（旧镜像）。
 
 即使 SHA256 完全相同也**未删除任何一项**。理由：刚从第三方 DSH 切换到官方 DeepSeek Harness，Mnemon / MCP / Harness 数据是否仍活跃尚未完成识别。后续单开 **Harness / DSH Workspace Cleanup** 处理。
 
@@ -243,9 +243,9 @@ tracked 100 → 390 由 checkpoint `2c0183b` 完成（`M 46 / A 290`，explicit 
 | 内容 | 路径 |
 |---|---|
 | 治理前增量封存（341 文件，SHA256 336/336 MATCH） | `PCMig\archive\backup-pre-governance-20261001-133659\` |
-| 治理脚本与日志 | `E:\Project\deepseek work\archive\pcmig-governance-20261001\`（`g0-backup.ps1`、`g0-baseline.ps1/.log`、`git-checkpoint-allowlist.txt`、`stage-paths.txt`、`modified-tracked.txt`、`status-before.txt`、`untracked-all.txt`、`s1-build.log`、`s1-test.log`、`g2-staged-secret-scan.txt`） |
+| 治理脚本与日志 | `<工作区根>\archive\pcmig-governance-20261001\`（`g0-backup.ps1`、`g0-baseline.ps1/.log`、`git-checkpoint-allowlist.txt`、`stage-paths.txt`、`modified-tracked.txt`、`status-before.txt`、`untracked-all.txt`、`s1-build.log`、`s1-test.log`、`g2-staged-secret-scan.txt`） |
 | 治理前 git 快照 | 同上封存内 `git-status-before.txt`、`git-diff-before.patch`、`untracked-project-files-before.txt` |
-| 第一轮盘点证据 | `E:\Project\deepseek work\archive\pcmig-inventory-20261001\` |
+| 第一轮盘点证据 | `<工作区根>\archive\pcmig-inventory-20261001\` |
 | 第一轮盘点报告 | `docs\工作区治理\第一轮-Workspace-Inventory-20261001.md` |
 | 当前交接 | `docs\工作交接-20261001-Workspace治理完成与D6.2起点.md` |
 

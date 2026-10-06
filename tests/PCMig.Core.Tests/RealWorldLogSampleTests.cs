@@ -31,11 +31,11 @@ public class RealWorldLogSampleTests
     // ============================================================
 
     // ---- [真实] 来源：测试报告 L82（T4 共享不存在，2026-09-15 真机）----
-    // 原文：报错："源共享连接失败：\\10.0.15.23\nosuchshare_xyz（错误 67）…到旧电脑运行 net share 确认"
+    // 原文：报错："源共享连接失败：\\192.0.2.23\nosuchshare_xyz（错误 67）…到旧电脑运行 net share 确认"
     [Fact]
     public void ExtractWin32Error_RealSharedMissingMessage_Returns67()
     {
-        var real = new Exception(@"源共享连接失败：\\10.0.15.23\nosuchshare_xyz（错误 67）请到旧电脑运行 net share 确认");
+        var real = new Exception(@"源共享连接失败：\\192.0.2.23\nosuchshare_xyz（错误 67）请到旧电脑运行 net share 确认");
         Assert.Equal(67, PreflightChecker.ExtractWin32Error(real));
     }
 
@@ -68,13 +68,13 @@ public class RealWorldLogSampleTests
 
     // ---- [真实] 来源：JOB-20260914-002001-5b64 / object-000001.log ----
     // 逐字原文（GBK 解码后）：
-    //   2026/09/14 00:22:00 错误 112 (0x00000070) 正在复制文件 \\192.168.134.131\E$\迁移全量测试\大文件\大文件-2.bin
+    //   2026/09/14 00:22:00 错误 112 (0x00000070) 正在复制文件 \\192.0.2.131\E$\迁移全量测试\大文件\大文件-2.bin
     //   磁盘空间不足。
     //   正在等待 5 秒... 正在重试...
     [Fact]
     public void IsSpaceErrorText_RealDiskFull112Line_ReturnsTrue()
     {
-        var real = @"2026/09/14 00:22:00 错误 112 (0x00000070) 正在复制文件 \\192.168.134.131\E$\迁移全量测试\大文件\大文件-2.bin";
+        var real = @"2026/09/14 00:22:00 错误 112 (0x00000070) 正在复制文件 \\192.0.2.131\E$\迁移全量测试\大文件\大文件-2.bin";
         Assert.True(TransferOrchestrator.IsSpaceErrorText(real));
     }
 
@@ -99,12 +99,12 @@ public class RealWorldLogSampleTests
     // ============================================================
 
     // ---- [真实] 来源：JOB-20260913-130046-e486 / object-000001.log ----
-    //   2026/09/13 13:03:21 错误 82 (0x00000052) 正在复制文件 \\192.168.134.131\E\迁移全量测试\海量小文件\pic_021845.jpg
+    //   2026/09/13 13:03:21 错误 82 (0x00000052) 正在复制文件 \\192.0.2.131\E\迁移全量测试\海量小文件\pic_021845.jpg
     //   无法创建目录或文件。
     [Fact]
     public void IsSpaceErrorText_RealError82Line_ReturnsFalse()
     {
-        var real = @"2026/09/13 13:03:21 错误 82 (0x00000052) 正在复制文件 \\192.168.134.131\E\迁移全量测试\海量小文件\pic_021845.jpg";
+        var real = @"2026/09/13 13:03:21 错误 82 (0x00000052) 正在复制文件 \\192.0.2.131\E\迁移全量测试\海量小文件\pic_021845.jpg";
         Assert.False(TransferOrchestrator.IsSpaceErrorText(real));
     }
 
@@ -116,7 +116,7 @@ public class RealWorldLogSampleTests
     [Fact]
     public void IsSpaceErrorText_RealError59Line_ReturnsFalse()
     {
-        var real = @"2026/09/14 00:20:46 错误 59 (0x0000003B) 正在复制文件 \\192.168.134.131\E$\迁移全量测试\海量小文件\pic_002133.jpg";
+        var real = @"2026/09/14 00:20:46 错误 59 (0x0000003B) 正在复制文件 \\192.0.2.131\E$\迁移全量测试\海量小文件\pic_002133.jpg";
         Assert.False(TransferOrchestrator.IsSpaceErrorText(real));
     }
 
@@ -124,7 +124,7 @@ public class RealWorldLogSampleTests
     [Fact]
     public void IsSpaceErrorText_RealError2Line_ReturnsFalse()
     {
-        var real = @"2026/09/14 00:20:46 错误 2 (0x00000002) 正在复制文件 \\192.168.134.131\E$\迁移全量测试\海量小文件\pic_002131.jpg";
+        var real = @"2026/09/14 00:20:46 错误 2 (0x00000002) 正在复制文件 \\192.0.2.131\E$\迁移全量测试\海量小文件\pic_002131.jpg";
         Assert.False(TransferOrchestrator.IsSpaceErrorText(real));
     }
 

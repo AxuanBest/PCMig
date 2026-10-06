@@ -15,7 +15,7 @@ public class QuoteArgTests
     [InlineData("\\\\host\\share", "\"\\\\host\\share\"")]
     [InlineData("C:\\Program Files\\App", "\"C:\\Program Files\\App\"")]
     [InlineData("D:\\数据 目录\\文件.txt", "\"D:\\数据 目录\\文件.txt\"")]
-    [InlineData("\\\\10.0.15.25\\d\\", "\"\\\\10.0.15.25\\d\\\\\"")]
+    [InlineData("\\\\192.0.2.25\\d\\", "\"\\\\192.0.2.25\\d\\\\\"")]
     public void QuoteArg_HandlesTrailingAndInternalBackslashes(string input, string expected)
         => Assert.Equal(expected, RobocopyRunner.QuoteArg(input));
 

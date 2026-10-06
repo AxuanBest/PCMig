@@ -2,7 +2,7 @@
 
 > 执行日期：**2026-10-01** ｜ 任务来源：用户下达的 **PCMig Workspace Cleanup & Governance**
 > 本轮性质：**纯只读盘点**。全文所有数字均为实测；**本轮零删除、零移动、零重命名、零改名**。
-> 证据与中间产物目录：`E:\Project\deepseek work\archive\pcmig-inventory-20261001\`
+> 证据与中间产物目录：`<工作区根>\archive\pcmig-inventory-20261001\`
 > 基线：HEAD `c9aef30`（分支 `feature/winui-v0.5.0`）
 > 产品代码、`tools\*` 脚本、`AGENTS.md`、任何 `.ps1`、任何历史交接文档 **本轮一字未动**。
 
@@ -36,16 +36,16 @@
 
 | 用途 | 路径 |
 |---|---|
-| 权威工作区（唯一事实来源） | `E:\Project\deepseek work\PCMig` |
-| 交付区（对外交付物只落这里） | `E:\Project\PCMig` |
-| 源码镜像备份 | `E:\Project\镜像备份源码\PCMig` |
-| 工作副本（发版脚本自动建） | `D:\PCMig` |
+| 权威工作区（唯一事实来源） | `<仓库根>` |
+| 交付区（对外交付物只落这里） | `<交付区>` |
+| 源码镜像备份 | `<镜像备份根>\PCMig` |
+| 工作副本（发版脚本自动建） | `<发版工作副本>` |
 | 发版脚本 | `PCMig\tools\release.ps1` |
-| 旧移动硬盘镜像 | `I:\K\deepseek work` —— **只作覆盖目标，永不作事实依据/代码来源** |
+| 旧移动硬盘镜像 | `<旧镜像根>` —— **只作覆盖目标，永不作事实依据/代码来源** |
 
-### 1.2 工作区根 `E:\Project\deepseek work`（项目外，越界观察）
+### 1.2 工作区根 `<工作区根>`（项目外，越界观察）
 
-`E:\Project\deepseek work\AGENTS.md`（2791 B，2026-09-21）与 `INDEX.md`（4963 B）已经立过规矩：
+`<工作区根>\AGENTS.md`（2791 B，2026-09-21）与 `INDEX.md`（4963 B）已经立过规矩：
 
 > 根目录只允许 `PCMig\`、`AGENTS.md`、`INDEX.md` 与 `labs\` / `archive\` / `projects\` / `dsh-data` 四个分类目录；一次性脚本一律写进 `archive\scripts\`。
 
@@ -422,7 +422,7 @@ docs\A5-节流与竞态修复设计.md → docs\architecture\A5-节流与竞态�
 > 铁律全文：docs\发版铁律.md ｜ 项目指令：..\AGENTS.md
 
 ## 必读链
-1. E:\Project\deepseek work\AGENTS.md            （工作区坐标 + 权限不豁免）
+1. <工作区根>\AGENTS.md            （工作区坐标 + 权限不豁免）
 2. PCMig\AGENTS.md                                （11 条死律 + PMML 硬规则）
 3. docs\发版铁律.md                               （最高约束）
 4. docs\工作交接-<最新>.md                        （当前状态唯一入口）
@@ -450,7 +450,7 @@ docs\A5-节流与竞态修复设计.md → docs\architecture\A5-节流与竞态�
 
 **第一层（任何新会话，开工前 15 分钟内必须读完）**
 
-1. `E:\Project\deepseek work\AGENTS.md` —— 工作区坐标、三条最易搞错的路径、权限放宽不构成豁免。
+1. `<工作区根>\AGENTS.md` —— 工作区坐标、三条最易搞错的路径、权限放宽不构成豁免。
 2. `PCMig\AGENTS.md` —— 项目强制开工指令：十一条死律 + 三点五权限条款 + 三点六 PMML 入口硬规则。
 3. `PCMig\docs\发版铁律.md` —— **最高约束**，死条律全文（冲突时以它为准）。
 4. `PCMig\docs\工作交接-20261001-D6.1诊断收口与全量验收.md` —— **当前状态的唯一入口**（做了什么 / 没做什么 / 未决问题 P-1…P-15 / 接手首小时清单 / 回退路径）。
@@ -497,7 +497,7 @@ docs\A5-节流与竞态修复设计.md → docs\architecture\A5-节流与竞态�
 - 禁 `git reset --hard` / `git checkout .` / `git restore .` / `git clean -fd`（死律 9）；撤销只用 `git stash` / `git revert`。
 - 任何移动前先落「old→new→references→required update」映射行，移动后 `grep` 旧名必须 0 命中。
 - 每完成一批**立即跑一次 `dotnet test`**，确认 **576 通过 / 0 失败** 不退化。
-- 不碰交付区 `E:\Project\PCMig`、不碰 `D:\PCMig`、不碰 `I:\K\deepseek work`、不碰 `tools\release.ps1`。
+- 不碰交付区 `<交付区>`、不碰 `<发版工作副本>`、不碰 `<旧镜像根>`、不碰 `tools\release.ps1`。
 
 ---
 
@@ -511,7 +511,7 @@ docs\A5-节流与竞态修复设计.md → docs\architecture\A5-节流与竞态�
 | **D6.2 后续工作** | 未开始；起点 = `方案-诊断中心与自诊断架构.md` + 23 项 Reserved | 只影响「文档在哪」，不影响内容 | ✅ 安全 |
 | **Stage B 规划** | 授权边界写在 `方案-20260928-业务接线与可信度修复.md`（阶段 B 待单独授权、阶段 D 不得缩减） | 该文档**建议保持原位** | ✅ 安全 |
 | **备份与正式证据** | `archive\*` 342.7 MB、`dist\PCMigSetup-*.exe` ×48、`archive\evidence\*` | **全部列入 Keep**；`archive\scripts\...\bin|obj` 只清构建产物 | ✅ 安全 |
-| **交付区 / 非权威副本** | `E:\Project\PCMig`、`D:\PCMig`、`I:\K\deepseek work` | 本方案**完全不涉及** | ✅ 安全 |
+| **交付区 / 非权威副本** | `<交付区>`、`<发版工作副本>`、`<旧镜像根>` | 本方案**完全不涉及** | ✅ 安全 |
 | **工作树未提交成果** | 190 条改动（M 46 / ?? 144），无一条被提交 | 第二阶段严禁任何 git 清理命令 | ⚠️ 需持续盯防 |
 
 ---

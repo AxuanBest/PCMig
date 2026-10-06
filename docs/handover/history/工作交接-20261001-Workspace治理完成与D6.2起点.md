@@ -4,9 +4,9 @@
 > 它取代 `docs\handover\history\工作交接-20261001-D6.1诊断收口与全量验收.md`（已归档，只作追溯，不再作为当前状态入口）。
 >
 > - 新增日期：2026-10-01（Phase 2 — Workspace Cleanup & Governance 收口）
-> - 权威工作区：`E:\Project\deepseek work\PCMig`
+> - 权威工作区：`<仓库根>`
 > - 阅读顺序：`..\AGENTS.md` → `docs\发版铁律.md` → `docs\INDEX.md` → 本文档
-> - 交付区 `E:\Project\PCMig`、工作副本 `D:\PCMig`、旧镜像 `I:\K\deepseek work` **本轮一字未碰**
+> - 交付区 `<交付区>`、工作副本 `<发版工作副本>`、旧镜像 `<旧镜像根>` **本轮一字未碰**
 
 ---
 
@@ -65,7 +65,7 @@ c9aef30  v0.5.0 WinUI technical baseline before visual reconstruction   ← 治�
 - 完整 hash：checkpoint `2c0183beebcd6b06d3c1c2e903204a739f1bc104`；solution `7ba2bc19bbd42229be798b3ce43087cde459bc31`；governance `c5e668cda016801427b329fd3e45ec21205fd952`；最终交接 `73fcb05c005a10d80f6f6e486f58f28089fcbe5a`。
 
 > 上表为**本轮治理的功能提交**。其后一次纯文档同步提交（"docs: sync commit hashes"）仅修正本报告与交接文档中的 hash 引用，不含任何内容变更。
-- 分支：`feature/winui-v0.5.0`；仓库根 = `E:\Project\deepseek work\PCMig` 本身。
+- 分支：`feature/winui-v0.5.0`；仓库根 = `<仓库根>` 本身。
 - `2c0183b` 的含义：**"Workspace Cleanup 开始之前，真实、可恢复的 PCMig 当前产品状态"**——PMML v1.0、Diagnostics D1–D6.1、当前 WinUI/Core、当前测试、当前正式文档全部进入 Git。
 - 治理后 `git status --porcelain` 仅剩 `?? archive/`：`archive/`（备份、证据、截图、历史安装包、探针工程）**有意不纳管**，按用户明令"不要为了全部纳管把数百 MB raw evidence 强塞进 Git"。
 - `core.autocrlf=true`（无 `.gitattributes`）⇒ 索引内按 LF 存储，工作区文件字节未变。
@@ -96,7 +96,7 @@ ProjectReference 图：`Core → Diagnostics.Abstractions`；`Cli → Core`；`G
 | `dotnet build PCMig.sln -c Release --no-incremental` | 退出 0；**0 error / 4 warning**（`A5PresentationRegressionTests.cs:1634` xUnit2031 ×1 + `PCMigSurface.xaml:53,54,56` WMC1506 ×3）——全部是既有 warning，无新增 |
 | `dotnet test PCMig.sln -c Release` | 退出 0；**Core 290 / 0 失败，Diagnostics 286 / 0 失败，合计 576 / 0** |
 
-日志：`E:\Project\deepseek work\archive\pcmig-governance-20261001\s1-build.log`、`s1-test.log`。
+日志：`<工作区根>\archive\pcmig-governance-20261001\s1-build.log`、`s1-test.log`。
 
 ---
 
@@ -167,10 +167,10 @@ docs\
 4. **P-G7（未修，属 Release Governance）**：`docs\首日实测检查表.md` 仍是旧口径（内容停留在 v0.2 期），本轮按用户明令"只登记、不修改"。
 5. **P-G8（未修，属 Release Governance）**：`tools\release.ps1` 交付复制清单问题，本轮未动 `release.ps1` 一个字节。
 6. **`AGENTS.md` 未更新（决策保留）**：其 `:10` 仍写 v0.4.8（现发布线 0.4.9），且未提及 `docs\INDEX.md`。用户本轮只授权"文档状态纠正"到 PMML 与诊断架构两篇；`AGENTS.md` 属最高规则文件，**未经明示授权不得改**。建议后续在 Release Governance Fix 中一并处理。
-7. **Harness / DSH 未清理**：`E:\Project\deepseek work\` 下的 174 个散落文件、12 个重复目录、`UserData`、`.dsh*`、`.openviking`、`dsh-session-recovery`、`.preset-square` 等**本轮完全未碰**（用户 D-5 裁决），另开 "Harness / DSH Workspace Cleanup" 处理。
+7. **Harness / DSH 未清理**：`<工作区根>\` 下的 174 个散落文件、12 个重复目录、`UserData`、`.dsh*`、`.openviking`、`dsh-session-recovery`、`.preset-square` 等**本轮完全未碰**（用户 D-5 裁决），另开 "Harness / DSH Workspace Cleanup" 处理。
 8. **工作树非治理性脏项**：`PCMig\archive\` 有意留在 Git 之外（2238 个未跟踪文件全部位于 `archive\` 下）。
 9. **Release 治理债（P-G7/P-G8）与 `AGENTS.md` 版本口径**未闭环 —— 见第 4/5/6 条。
-10. **Mnemon 记忆更新：已通过 Mnemon Documents 写入（Memory Space 路径仍不可用）**。用户 §二十二 要求把当前状态写入 Mnemon；实测 Memory Space 路径不可用（见下），**改走本机可用的 Documents 路径并成功落库**：Document `57fe2a88-20ee-4c6b-ac7a-6cacf95cb4d1` —— `documents/active/pcmig-workspace-d6-2-2026-10-01-phase-2-57fe2a88.md`（7,514 B，工作区 `E:\Project\deepseek work`，内容覆盖开工顺序 / 产品状态 / 基线 / 治理提交 / 闸门）。实测 `mnemon_status` → `healthy: true` 但 `commandFound: false`、Memory Spaces `total: 0`；`mnemon_runtime_memory` 写入被拒（`runtime memory archival requires an existing active writable Memory Space ... catalog=0, authorized=0, writable=0`），`mnemon_memory_body_create` 亦失败（`spawn mnemon ENOENT`，PATH 与默认安装目录均无 `mnemon.exe`）。**Memory Space 路径仍阻塞**：本机缺 `mnemon.exe`（`mnemon_status.commandFound = false`；`spawn mnemon ENOENT`），`mnemon_memory_body_create` 与 `mnemon_runtime_memory` 均被拒（`catalog=0, authorized=0, writable=0`）。**解锁动作**：安装官方 Mnemon Windows 版或设置 `MNEMON_CLI_PATH`，之后再补写 Memory Space；持久记录 = Mnemon Document `57fe2a88` + 本交接文档 + `docs\INDEX.md`。
+10. **Mnemon 记忆更新：已通过 Mnemon Documents 写入（Memory Space 路径仍不可用）**。用户 §二十二 要求把当前状态写入 Mnemon；实测 Memory Space 路径不可用（见下），**改走本机可用的 Documents 路径并成功落库**：Document `57fe2a88-20ee-4c6b-ac7a-6cacf95cb4d1` —— `documents/active/pcmig-workspace-d6-2-2026-10-01-phase-2-57fe2a88.md`（7,514 B，工作区 `<工作区根>`，内容覆盖开工顺序 / 产品状态 / 基线 / 治理提交 / 闸门）。实测 `mnemon_status` → `healthy: true` 但 `commandFound: false`、Memory Spaces `total: 0`；`mnemon_runtime_memory` 写入被拒（`runtime memory archival requires an existing active writable Memory Space ... catalog=0, authorized=0, writable=0`），`mnemon_memory_body_create` 亦失败（`spawn mnemon ENOENT`，PATH 与默认安装目录均无 `mnemon.exe`）。**Memory Space 路径仍阻塞**：本机缺 `mnemon.exe`（`mnemon_status.commandFound = false`；`spawn mnemon ENOENT`），`mnemon_memory_body_create` 与 `mnemon_runtime_memory` 均被拒（`catalog=0, authorized=0, writable=0`）。**解锁动作**：安装官方 Mnemon Windows 版或设置 `MNEMON_CLI_PATH`，之后再补写 Memory Space；持久记录 = Mnemon Document `57fe2a88` + 本交接文档 + `docs\INDEX.md`。
 
 ---
 
@@ -181,7 +181,7 @@ docs\
 - 结构变更全部是 rename + 索引 + 文档 metadata + solution membership；代码业务逻辑零改动、PMML 正文零改动、Diagnostics 行为零改动。
 - 若不满意本轮治理，可 `git revert 73fcb05 c5e668c 7ba2bc1`（checkpoint `2c0183b` 保留全部工作成果，不会丢失）。
 - 本轮**未发版**、**未跑 `tools\release.ps1`**、**未改 tools 三脚本**、**未执行任何破坏性 git 命令**。
-- 交付区 `E:\Project\PCMig`、工作副本 `D:\PCMig`、镜像 `I:\K\deepseek work` 本轮完全未动。
+- 交付区 `<交付区>`、工作副本 `<发版工作副本>`、镜像 `<旧镜像根>` 本轮完全未动。
 
 ---
 
@@ -204,7 +204,7 @@ D6.2 的既有事实（承接 D6.1 交接，见 `docs\handover\history\工作交
 2. 当前交接就是本文档；`docs\handover\history\` 里的 41 篇**只作追溯**，不能覆盖当前规则。
 3. 两条路径硬约束（移动即断）：Contract Test / 源码注释 / csproj 内嵌 / `release.ps1` / `installer\pcmig.iss` 引用的文档路径都不可随意改名或移动；改动前先跑 INDEX §九 的"移动即断"硬路径总表核对。
 4. 机器生成文档禁手改：`诊断系统实施-事件覆盖矩阵.md`、`诊断系统实施-配置项接线审计.md`。
-5. 证据与日志：`E:\Project\deepseek work\archive\pcmig-governance-20261001\`（本轮）、`archive\pcmig-inventory-20261001\`（第一轮盘点）、`archive\backup-pre-governance-20261001-133659\`（治理前封存）。
+5. 证据与日志：`<工作区根>\archive\pcmig-governance-20261001\`（本轮）、`archive\pcmig-inventory-20261001\`（第一轮盘点）、`archive\backup-pre-governance-20261001-133659\`（治理前封存）。
 6. 发版前必读 `docs\发版铁律.md`；发版必须走 `tools\release.ps1`，一个版本号只发一次。
 7. **不要**为了"看起来整齐"移动文档；信息架构由 `docs\INDEX.md` 表达。
 

@@ -186,8 +186,8 @@
 | 项 | 位置 |
 |---|---|
 | 精修前标签 | `v0.5.0-before-final-polish-20260927` → `c9aef304…` |
-| 源码镜像 | `E:\Project\镜像备份源码\PCMig-v0.5.0-before-final-polish-20260927` + `.bundle` + `-清单.md`（18 项 SHA256 MATCH） |
-| 用户标注图只读副本 | `archive\annotations\new-folder-5\`（与 `D:\Users\User\Desktop\新建文件夹 (5)\` 原图 SHA256 一致，**原图未被改动**） |
+| 源码镜像 | `<镜像备份根>\PCMig-v0.5.0-before-final-polish-20260927` + `.bundle` + `-清单.md`（18 项 SHA256 MATCH） |
+| 用户标注图只读副本 | `archive\annotations\new-folder-5\`（与 `<用户目录D>\Desktop\新建文件夹 (5)\` 原图 SHA256 一致，**原图未被改动**） |
 
 ⚠ **重要提醒**：`archive\` 目录**不在 git 内**，且 `Themes\` / `Views\` / `Presentation\*.cs` 多为**未跟踪文件**。
 `git clean -fd` 或 `git checkout .` 会瞬间销毁本会话全部成果（死律 9 已禁止）。

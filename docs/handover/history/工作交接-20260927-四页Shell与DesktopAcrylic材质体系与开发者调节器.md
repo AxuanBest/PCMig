@@ -2,7 +2,7 @@
 
 > 本文件为**新增**交接文档（不覆盖任何历史交接）。
 > 会话时间：2026-09-26 ~ 2026-09-27 ｜ 分支 `feature/winui-v0.5.0` ｜ HEAD `c9aef30`（**本会话全部改动未提交**）
-> 权威工作区：`E:\Project\deepseek work\PCMig` ｜ 交付区：`E:\Project\PCMig` ｜ 工作副本：`D:\PCMig`
+> 权威工作区：`<仓库根>` ｜ 交付区：`<交付区>` ｜ 工作副本：`<发版工作副本>`
 > **本会话未发版、未触碰交付区与工作副本、未执行任何破坏性 git 命令。**
 
 ---
@@ -229,7 +229,7 @@ tests\PCMig.Core.Tests\WinUiStep1ContractTests.cs      按新架构更新断言
 | 关闭 Desktop Acrylic（回到 XAML Mica） | 运行时设 `PCMIG_BACKDROP=mica`；或设 `PCMIG_BACKDROP=off` 完全不接管 |
 | 关闭开发者调节器 | 删 `MainWindow.xaml.cs` 中 `TuningPanel.Attach(...)` / `LoadIfExists()` 两行；或删面板 XAML 元素 |
 | 完全回到四页 Shell 之前 | git tag **`v0.5.0-before-4page-shell-20260926`**（= HEAD `c9aef30`）；或快照 `archive\step1-fidelity-20260926-r2\stage12-shell\before\` |
-| 桌面包回退 | `E:\Project\deepseek work\archive\desktop-package-history\` 下按时间戳选目录，整目录复制回 `D:\Users\User\Desktop\新建文件夹 (4)` |
+| 桌面包回退 | `<工作区根>\archive\desktop-package-history\` 下按时间戳选目录，整目录复制回 `<用户目录D>\Desktop\<桌面交付根>` |
 | 视觉参数回默认 | 调参面板「恢复默认」；或删除 `%LocalAppData%\PCMig\DeveloperVisualSettings.json` |
 
 **禁止**：`git reset --hard` / `git checkout .` / `git restore .` / `git clean -fd`（会不可逆抹掉本会话未提交成果，撤销请用 `git stash`）。
@@ -238,16 +238,16 @@ tests\PCMig.Core.Tests\WinUiStep1ContractTests.cs      按新架构更新断言
 
 ## 九、纪律与坐标（发版相关，务必继续遵守）
 
-- 发版只能跑 `E:\Project\deepseek work\PCMig\tools\release.ps1`，**先写日志再打包**，五道闸门全绿，一个版本号只发一次；**本会话未发版**。
+- 发版只能跑 `<仓库根>\tools\release.ps1`，**先写日志再打包**，五道闸门全绿，一个版本号只发一次；**本会话未发版**。
 - 交付四件套 + 逐文件 SHA256 全 MATCH；发版后三验；故障类连续复现 3 次 + 回归 3 次。
 - 功能冻结范围（Core/Robocopy/SMB/UNC/Scan/Planner/Verify/Repair/Resume/Migration Engine/CLI/WPF）继续冻结，本会话产品代码 0 改动。
 - 所有 `.ps1` 必须 UTF-8 **带 BOM**。
-- `I:\K\deepseek work` 是旧镜像，**只可作覆盖目标，绝不可作事实依据或代码来源**。
+- `<旧镜像根>` 是旧镜像，**只可作覆盖目标，绝不可作事实依据或代码来源**。
 - 敏感凭据一律"见某处"引用，不复制明文（本文件无任何凭据）。
 
 ---
 
-## 十、桌面判断包（`D:\Users\User\Desktop\新建文件夹 (4)`）
+## 十、桌面判断包（`<用户目录D>\Desktop\<桌面交付根>`）
 
 当前结构（**旧内容已清空重建**）：
 - `本次改动文件\`：**32 个**改动源文件（按原路径）+ `改动文件清单.json`（逐文件 SHA256）

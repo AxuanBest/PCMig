@@ -1,7 +1,7 @@
 # 工作交接 — 20260928 — U64 Hover Lift / Pressed Sink 恢复（UI 收尾冻结）
 
 > 交接对象：接手 PCMig v0.5.0 UI 收尾工作的下一位（或下一个会话）
-> 权威工作区：`E:\Project\deepseek work\PCMig`
+> 权威工作区：`<仓库根>`
 > 本轮范围：**恢复历史交互反馈**（Hover 上浮 / Pressed 下沉）——用户明确"这不是新设计需求，是恢复 v0.4.5 已定义过、v0.5.0 大改中丢失的能力"
 > 本轮终点：**已实现 · 构建 0 错误 · 单元测试 130 通过 / 0 失败 · 用户人工确认"全部完美" → PCMig v0.5.0 UI 全面冻结**
 > 前置交接：`docs\工作交接-20260928-U62-FluidZoomTransition.md`（U62/U63，其中已追加"人工验收结论"节）
@@ -65,7 +65,7 @@
 | **U64** | Hover Lift / Pressed Sink 恢复 | ✅ 人工确认"全部完美" · **冻结** | 新增 `InteractionFeedback.cs`；改 `MainWindow.xaml.cs`、`Themes\Motion.xaml`、`Themes\Controls.xaml` |
 
 **本会话共动 8 个文件**（2 个新增 + 6 个修改）。可对照的完整代码副本与逐文件改动明细见
-`D:\Users\User\Desktop\新建文件夹 (4)\复验说明.md`（含 47 个 UI 源码 + 3 个 UI 契约测试，已逐位校验与工作区一致）。
+`<用户目录D>\Desktop\<桌面交付根>\复验说明.md`（含 47 个 UI 源码 + 3 个 UI 契约测试，已逐位校验与工作区一致）。
 
 ---
 
@@ -97,7 +97,7 @@ Utility Panel · 颜色体系 · Selected 状态 · Hover/Pressed 的位移量�
 
 **改动前快照**：`archive\tmp\*.before-u62-fluidzoom.*`、`*.before-u63-selectionstate.*`（U64 的改动全部是纯增量或可精确还原的小删除，步骤见上表与复验说明）。
 **清空前的上一版桌面归档**：`archive\backup-新建文件夹4-20260928-u64\`（131 文件，含 U62/U63 的全部证据与文档）。
-**主文件级快照（勿删）**：`E:\Project\镜像备份源码\PCMig-v0.5.0-pre-responsive-motion-20260928-131622`。
+**主文件级快照（勿删）**：`<镜像备份根>\PCMig-v0.5.0-pre-responsive-motion-20260928-131622`。
 **Git：HEAD 仍 `c9aef30`（不含本会话成果）。不要 `reset --hard` / `checkout .` / `clean -fd`。**
 
 ---
@@ -105,7 +105,7 @@ Utility Panel · 颜色体系 · Selected 状态 · Hover/Pressed 的位移量�
 ## 六、复验与验证命令
 
 ```powershell
-cd "E:\Project\deepseek work\PCMig"
+cd "<仓库根>"
 dotnet build src\PCMig.WinUI\PCMig.WinUI.csproj -c Release -m:1   # 必须 -m:1；.sln 不含 WinUI 项目
 dotnet test tests\PCMig.Core.Tests\PCMig.Core.Tests.csproj -c Release -m:1   # 130 通过 / 0 失败
 ```

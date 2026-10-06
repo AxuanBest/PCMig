@@ -184,7 +184,7 @@ public sealed class GroupDFixBatchTests
 
     /// <summary>D03 真机原文（LAB-DST01：任务状态目录被拒绝写入）。</summary>
     private const string D03Raw =
-        "Access to the path 'C:\\ProgramData\\PCMig\\Jobs\\JOB-20261004-082429-630b\\receipts\\" +
+        "Access to the path '<本机程序数据目录>\\Jobs\\JOB-20261004-082429-630b\\receipts\\" +
         "object-000005-20261004002454.json.tmp-22f1abab' is denied.";
 
     [Fact]
@@ -193,7 +193,7 @@ public sealed class GroupDFixBatchTests
         var ui = TransferFailureTranslator.Explain(new UnauthorizedAccessException(D03Raw));
 
         Assert.Contains("任务状态目录", ui);                       // 哪个存储：不是笼统一句"传输异常"
-        Assert.Contains(@"C:\ProgramData\PCMig\Jobs\JOB-20261004-082429-630b\receipts", ui);
+        Assert.Contains(@"<本机程序数据目录>\Jobs\JOB-20261004-082429-630b\receipts", ui);
         Assert.Contains("没有写入权限", ui);
         Assert.Contains("已复制到目标的数据不会重传", ui);          // 用户最关心的：数据有没有白拷
         Assert.Contains("恢复任务", ui);                           // 怎么办
@@ -208,7 +208,7 @@ public sealed class GroupDFixBatchTests
     public void F5_LogPathDenied_NamesTheLogStore()
     {
         var ui = TransferFailureTranslator.Explain(new UnauthorizedAccessException(
-            "Access to the path 'C:\\ProgramData\\PCMig\\Logs\\pcmig-20261004.log' is denied."));
+            "Access to the path '<本机程序数据目录>\\Logs\\pcmig-20261004.log' is denied."));
         Assert.Contains("日志目录", ui);
         Assert.DoesNotContain("is denied", ui);
     }
@@ -393,7 +393,7 @@ public sealed class GroupDF12ProgressTruthTests
 /// <summary>
 /// F13（D03 真机现场，2026-10-04，Final Critical Matrix 相 D）：**准备阶段**的失败文案
 /// 把原始 .NET 英文异常直接抛给用户：
-///   `准备失败：Access to the path 'C:\ProgramData\PCMig\Jobs\JOB-20261004-125525-e73a\receipts' is denied.`
+///   `准备失败：Access to the path '<本机程序数据目录>\Jobs\JOB-20261004-125525-e73a\receipts' is denied.`
 /// F5 只修了传输路径（TransferOrchestrator 的写回执失败），Prepare 路径（MigrationSessionViewModel
 /// 的 catch）漏掉了——同一个产品面家族的同类缺陷。
 ///
@@ -405,7 +405,7 @@ public sealed class GroupDF12ProgressTruthTests
 public sealed class GroupDF13PrepareMessageTests
 {
     private const string D03PrepareRaw =
-        "Access to the path 'C:\\ProgramData\\PCMig\\Jobs\\JOB-20261004-125525-e73a\\receipts' is denied.";
+        "Access to the path '<本机程序数据目录>\\Jobs\\JOB-20261004-125525-e73a\\receipts' is denied.";
 
     [Fact]
     public void F13_PrepareDenied_SaysWhereAndWhatToDo()
@@ -415,7 +415,7 @@ public sealed class GroupDF13PrepareMessageTests
         Assert.Contains("任务状态目录", ui);
         // 位置说到"哪个任务的状态目录"即可：Where() 取的是该路径的父目录（D03 真机那条引号里本身就是
         // …\JOB-…\receipts 目录，再往上才是任务目录），所以断言到 JOB 目录这一层，不要求尾部 \receipts。
-        Assert.Contains(@"C:\ProgramData\PCMig\Jobs\JOB-20261004-125525-e73a", ui);
+        Assert.Contains(@"<本机程序数据目录>\Jobs\JOB-20261004-125525-e73a", ui);
         Assert.Contains("没有写入权限", ui);
         Assert.Contains("准备", ui);                       // 怎么办：重新点「准备」
 

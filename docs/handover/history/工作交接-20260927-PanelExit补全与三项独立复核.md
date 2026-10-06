@@ -229,7 +229,7 @@ MP4 技术有效，但**作为"看得见动效"的证据力度弱**，这是**�
 ## 九、备份与回退
 
 - 标签：`v0.5.0-before-final-polish-20260927` → `c9aef304…`
-- 镜像：`E:\Project\镜像备份源码\PCMig-v0.5.0-before-final-polish-20260927` + `.bundle` + `-清单.md`（18 项 SHA256 MATCH）
+- 镜像：`<镜像备份根>\PCMig-v0.5.0-before-final-polish-20260927` + `.bundle` + `-清单.md`（18 项 SHA256 MATCH）
 - **⚠️ 重要提醒**：该标签只覆盖**已跟踪**改动；`archive\` 完全在 git 之外，
   本轮所有 WinUI 动效/响应式成果都在这个**未受保护**的工作树里
   （porcelain 112 项，`Themes\`、`Views\`、`Presentation\*.cs` 多为未跟踪）。

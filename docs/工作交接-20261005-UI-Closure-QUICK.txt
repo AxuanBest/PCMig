@@ -9,17 +9,17 @@ PCMig v0.5.0（WinUI 开发线）刚刚完成一轮 **UI Closure 收口**：用�
 Core 测试 468/468；候选程序已在运行（PID 227500，停在正常初始页）。**改动未 commit / 未 push / 未 tag**。
 
 ■ 坐标
-仓库        : E:\Project\deepseek work\PCMig（分支 feature/winui-v0.5.0）
+仓库        : <仓库根>（分支 feature/winui-v0.5.0）
 HEAD        : d1aefb2fb8b36b135cf136afc71532c3450226a8（本会话无 commit）
 工作树      : git status --porcelain = 82 条（55 M + 27 ??）—— 含上一轮遗留 + 本会话 28 个文件
 本会话改动  : 21 个已跟踪文件被改 + 7 个新文件（逐条见会话交接 §3）
 候选程序    : src\PCMig.WinUI\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\PCMig.WinUI.exe
               （**不要**用 bin\Release\... 下的旧产物；构建前先 Stop-Process -Name PCMig.WinUI）
 启动方式    : powershell -NoProfile -ExecutionPolicy Bypass -File
-              E:\PCMigLab\Staging\recovery-gate\launch-app.ps1 -WaitSec 12
-证据根      : E:\PCMigLab\Evidence\Trust-Critical-Recovery\UI-CLOSURE-20261005\
-              E:\PCMigLab\Evidence\UI-Closure-20261005\（像素测量报告 + 24 个脚本）
-桌面交付    : D:\Users\User\Desktop\新建文件夹 (4)\
+              <实验室根>\Staging\recovery-gate\launch-app.ps1 -WaitSec 12
+证据根      : <实验室根>\Evidence\Trust-Critical-Recovery\UI-CLOSURE-20261005\
+              <实验室根>\Evidence\UI-Closure-20261005\（像素测量报告 + 24 个脚本）
+桌面交付    : <用户目录D>\Desktop\<桌面交付根>\
               ├ PCMig-UI-Closure-这一版源码-20261005.zip（8.39 MB / 505 条目 / 源码+清单+说明）
               ├ PCMig-UI-Closure-改动代码-20261005-0303\（28 改动文件镜像 + 21 diff + SHA256 清单）
               └ PCMig-FinalFixCandidate-ManualAcceptance-20261005-0155\（本会话第 1 轮候选身份）
@@ -90,7 +90,7 @@ U4 动效：    ⑪ 新增 Presentation\ProgressMotionDriver.cs：满宽填充 +
   docs\PMML-UI修改硬性规范.md，收工按 Compliance Gate 逐项声明。
 - 改完必须：dotnet build PCMig.sln -c Release（0 error）→ 相关测试 → 启动新 EXE 截图 → 再交付。
 - 用户口令「进度暂停」= 立即冻结落盘并只读待命；「进度恢复」= 才继续。
-- 每大轮结束把改动/相关/待核对文件复制到桌面「新建文件夹 (4)」带日期子目录（只复制不改源）+ 清单/校验。
+- 每大轮结束把改动/相关/待核对文件复制到桌面「<桌面交付根>」带日期子目录（只复制不改源）+ 清单/校验。
 
 ■ 本机环境陷阱（本会话踩过，务必遵守）
 - pwsh 工具实为 **Windows PowerShell 5.1**：含中文的 .ps1 必须 UTF-8 **with BOM**；
@@ -99,7 +99,7 @@ U4 动效：    ⑪ 新增 Presentation\ProgressMotionDriver.cs：满宽填充 +
 - 命令过长先落盘再 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File` 跑；单条命中时 (…).Count 为 null，用 @(...).Count。
 - 中文字面量直接写进 pwsh 命令不可靠；中文路径用 [char] 拼接或通配符匹配。
 - 大文件写入期间目标目录字节数不是真值（robocopy 预分配）⇒ 大文件用例必须逐文件 SHA256。
-- 共享勾选必须用短名（PCMIG-DS1 → C:\Users\User\PCMigLab-RG\ds-small，PCMIG-DS2 → ...\ds-large）。
+- 共享勾选必须用短名（PCMIG-DS1 → <宿主共享根>\ds-small，PCMIG-DS2 → ...\ds-large）。
 
 ■ 编号口径提醒
 docs\UI-CLOSURE-ISSUES-20261005.md 的 UI-01…UI-14 是**该问题表内部编号**（按施工顺序 U1–U4 重排），
@@ -109,7 +109,7 @@ docs\UI-CLOSURE-ISSUES-20261005.md 的 UI-01…UI-14 是**该问题表内部编�
 - 源码：未 commit ⇒ 按 01-清单\diff-stat.txt 清单 `git checkout -- <文件>`；
 - 新增文件手工删：src\PCMig.WinUI\Presentation\ProgressMotionDriver.cs + 3 份新文档（+ 本会话交接）；
 - 装饰可软关闭：把两处 `new ProgressMotionDriver(...)` 置空（不影响业务真值路径）；
-- 二进制：E:\PCMigLab\Staging\final-candidate-backup-20261005-0152\。
+- 二进制：<实验室根>\Staging\final-candidate-backup-20261005-0152\。
 ================================================================================
 END OF HANDOFF QUICK CARD
 ================================================================================

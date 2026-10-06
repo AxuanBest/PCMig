@@ -1,6 +1,6 @@
 # Final Polish 完成度审计 · 20260928
 
-> **审计对象**：`E:\Project\deepseek work\PCMig` 分支 `feature/winui-v0.5.0`（HEAD `c9aef30`）的**当前未提交工作树**，范围 = `src\PCMig.WinUI\`。
+> **审计对象**：`<仓库根>` 分支 `feature/winui-v0.5.0`（HEAD `c9aef30`）的**当前未提交工作树**，范围 = `src\PCMig.WinUI\`。
 > **审计依据**：`docs\archive\FinalPolish-用户指令原文-20260927.md`（2556 行，已全文读完）。
 > **审计方式**：只读。逐条以**亲眼看到的代码/文件**为判据；不采信注释、命名、交接文档自述。
 > **本次未修改、未创建、未删除任何文件**（唯一新增即本报告）。未执行破坏性 git 命令、未启动应用、未改代码。
@@ -21,11 +21,11 @@
 
 ## 2. 逐节完成度矩阵（覆盖全部 67 节）
 
-> 状态口径：`已完成` / `部分完成` / `未完成` / `不适用`。文件路径相对 `E:\Project\deepseek work\PCMig\`。
+> 状态口径：`已完成` / `部分完成` / `未完成` / `不适用`。文件路径相对 `<仓库根>\`。
 
 | 节 | 要求摘要 | 状态 | 证据（文件:行 + 关键代码/证据文件） |
 |---|---|---|---|
-| §0 | 先逐张放大看「新建文件夹 (5)」人工标注图并出问题清单 | 部分完成 | 目录真实存在且**未被改动**：`D:\Users\User\Desktop\新建文件夹 (5)` 内 4 张 png，mtime 全部 12:35–12:40（未删/未覆盖/未重命名）；`工作交接-...首批...md:23-28` 有 4 行问题表。**缺**：无独立《人工标注问题清单》交付文件；无逐张放大视觉审阅证据（第二批交接 §4 自认视觉后端 11+ 次仅 1 次成功）。 |
+| §0 | 先逐张放大看「新建文件夹 (5)」人工标注图并出问题清单 | 部分完成 | 目录真实存在且**未被改动**：`<用户目录D>\Desktop\新建文件夹 (5)` 内 4 张 png，mtime 全部 12:35–12:40（未删/未覆盖/未重命名）；`工作交接-...首批...md:23-28` 有 4 行问题表。**缺**：无独立《人工标注问题清单》交付文件；无逐张放大视觉审阅证据（第二批交接 §4 自认视觉后端 11+ 次仅 1 次成功）。 |
 | §1 | 冻结视觉基线；禁止重新引入 Shell/Workspace/Card/Input/Control AcrylicBrush | 已完成 | `Themes\Materials.xaml:19-27` Layer2–5 全部 `SolidColorBrush`；全项目唯一 `AcrylicBrush` = `Materials.xaml:45 SelectedSurfaceBrush`，只被 `Materials.xaml:61 SelectedNavigationSurface` 引用，而该 Style **无任何引用点**（死资源）→ 无活的嵌套 Acrylic。**注意**：默认 backdrop 是 `MainWindow.xaml:8 <MicaBackdrop Kind="BaseAlt"/>`，非 Desktop Acrylic（见 §3 不符清单 C）。 |
 | §2 | 恢复 Update Log 功能（禁伪造历史、禁删旧记录、开合不得 Hard Cut） | 部分完成 | 真实落地：`Views\ChangelogPanel.xaml(.cs)`、`Presentation\ChangelogEntry.cs:29` `GetManifestResourceStream("PCMig.WinUI.Assets.CHANGELOG.md")`、`PCMig.WinUI.csproj:28` `<EmbeddedResource Include="..\..\docs\更新日志.md" LogicalName="PCMig.WinUI.Assets.CHANGELOG.md"/>`、入口 = `MainWindow.xaml:42` 产品 Header 的 v0.5.0 Badge（`ChangelogButton`）。**数据源是真的**（`ChangelogEntry.cs:32-80` 解析 `## v` 分节 + 顶部版本表取日期），非硬编码。**缺**：关闭是 `MainWindow.xaml.cs:154` 直接 `Visibility=Collapsed` = Hard Cut（违反本节末句）；WPF 版的粗体 Run / "用记事本打开 TXT" 兜底未复刻。 |
 | §3 | 先响应式适配、到极限再禁止缩小 | 部分完成 | 禁止缩小已真做（§9）；适配侧只有密度 + 3 页重排，`Views\Step1ConnectPage.xaml.cs` 全文无 `ApplyLayoutMode`。 |
@@ -138,7 +138,7 @@
 - 第二批交接 §3.9"Tests 130/130"↔ 本次复跑 **130/130，失败 0，跳过 0** ✓。
 - 第二批交接 §3.3 Secondary 四态"几乎无位移"↔ 代码 `Controls.xaml:61-86` 模板确实无 Translation/Shadow ✓（实测数据与代码结构互相印证）。
 - 第二批交接 §4 第 4 项"Motion 其余四项未做"↔ 代码确认四项全未做 ✓（**没有把未做的说成做了**）。
-- 首批交接 §2 的 4 张标注图文件名/问题↔ `D:\Users\User\Desktop\新建文件夹 (5)` 实际文件名逐一吻合，且该目录 mtime 未变（未被写入）✓。
+- 首批交接 §2 的 4 张标注图文件名/问题↔ `<用户目录D>\Desktop\新建文件夹 (5)` 实际文件名逐一吻合，且该目录 mtime 未变（未被写入）✓。
 
 ### 另发现的、交接未提及的代码级缺陷（供下轮确认）
 1. **侧栏 Badge 与选中竖条同列重叠**：`StepNavigationControl.xaml:46-48`（竖条，`Width="4"`）与 `:54-60`（Badge，`Width="32"`）同在 `:42 <ColumnDefinition Width="32"/>` 的第 0 列，Badge 为后绘制兄弟 → 竖条中段被盖。需人眼确认。
@@ -208,7 +208,7 @@
 
 ## 6. 审计本身的可信度声明
 
-- **只读**：本次未修改/创建/删除任何仓库文件（唯一新增 = 本报告）。未执行 `git reset --hard` / `git checkout .` / `git restore .` / `git clean -fd`；未启动 PCMig 应用；未触碰交付区 `E:\Project\PCMig`、工作副本 `D:\PCMig`、镜像备份。
+- **只读**：本次未修改/创建/删除任何仓库文件（唯一新增 = 本报告）。未执行 `git reset --hard` / `git checkout .` / `git restore .` / `git clean -fd`；未启动 PCMig 应用；未触碰交付区 `<交付区>`、工作副本 `<发版工作副本>`、镜像备份。
 - **唯一执行的写操作**：`dotnet test tests\PCMig.Core.Tests\PCMig.Core.Tests.csproj -c Release`（会写 `obj\`/`bin\` 构建产物，属 §48 验收所需的实测手段）。
 - **审计时 `PCMig.WinUI` 正在运行（PID 234376）** → 未执行任何 `dotnet build`（会因文件锁失败）。**下一位接手者若要 build，务必先结束该进程。**
 - 所有结论均指向可复核的 文件:行 或 证据文件；凡属推算/推断的（U1–U4）已在第 5 节显式标出，**未把推断写成事实**。

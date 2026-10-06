@@ -2,7 +2,7 @@
 
 > 基线：**v0.4.6**（tag `v0.4.6` → `9a77381`）｜最后更新：**2026-09-19 17:20**
 > 口径：**最终有效 Run**（每场景取最后一次成功产出 `result.json` 的 run）；调试期 run 单独分类，不作产品结论
-> 证据根：`J:\pcmig-lab\runs\`｜索引：`J:\pcmig-lab\reports\run-index.json`
+> 证据根：`<外置实验室盘>\runs\`｜索引：`<外置实验室盘>\reports\run-index.json`
 > 配套：`Private-Test-Lab-Final-Report.md`｜`Private-Test-Lab-Blueprint.md`｜`Corporate-Simulation-Blueprint.md`｜`..\First-Day-Company-Test-Checklist.md`
 
 ---
@@ -148,7 +148,7 @@
 | 单元测试 | **85 / 85 通过** |
 | 全量 Run（含迭代） | **87** 个 |
 | 生产代码改动 | **0**（`src\**` 零改动，UI 未动，`MainViewModel` 未动） |
-| 测试侧改动 | `tests\` 2 改 1 增；`J:\pcmig-lab\` 8 脚本 + 2 模块 |
+| 测试侧改动 | `tests\` 2 改 1 增；`<外置实验室盘>\` 8 脚本 + 2 模块 |
 | 残留清理 | vhdx **0** ｜ X/Y/Z 挂载 **0** ｜ 虚拟盘 **0** ｜ robocopy **0** ｜ PCMig **0** |
 
 ---

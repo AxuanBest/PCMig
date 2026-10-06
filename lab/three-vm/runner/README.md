@@ -1,8 +1,8 @@
 # runner\ —— UI 自动化操作 Runner（能力脚本集）
 
-> 来源：`E:\Project\deepseek work\`（工作区根）2026-10-06 归位，27 个脚本。
+> 来源：`<工作区根>\`（工作区根）2026-10-06 归位，27 个脚本。
 > 定性（§9 判据 D「未来仍有复用价值」）：**测试能力脚本，保留**。
-> canonical 主库仍是 `E:\PCMigLab\Staging\recovery-gate\uia-lib.ps1`（本目录是能力副本，用于在仓库内直接复用与追溯）。
+> canonical 主库仍是 `<实验室根>\Staging\recovery-gate\uia-lib.ps1`（本目录是能力副本，用于在仓库内直接复用与追溯）。
 
 ## 一、能力分组
 

@@ -35,14 +35,14 @@
 | CPU / 内存 | AMD Ryzen 5 9600X（6C/12T）｜31.1 GB 总 / 约 13.5 GB 可用 |
 | PowerShell | **5.1.26100.9444** |
 | dotnet SDK | **8.0.425** |
-| **被测 CLI** | `I:\PCMig\Portable\pcmig-cli.exe` |
+| **被测 CLI** | `<旧镜像交付区>\Portable\pcmig-cli.exe` |
 | **CLI SHA256** | `4EC0E64222B49F60…`（每个 environment.json 内记录完整值） |
 | git HEAD | `d818f95def8b1588b84a40720a02e304457c39ee` |
 | **是否管理员** | **False**（Medium 完整性级别） |
 | 磁盘 | C 118.6 / D **FAT32 24.5** / E 130.1 / F 129.8 / **G 177.6** / H 27 / I **75.97** / **J 128** / K 80（GB 空闲） |
 | SMB 服务 | `LanmanServer` Running、`LanmanWorkstation` Running |
 | 已导出共享 | **13 个**：`ADMIN$ C$ D$ E$ F$ G$ H$ I$ J$ K$ IPC$ Users 项目` |
-| 测试根 | **`J:\pcmig-lab\`**（与 VM 盘 G、TEMP 盘 E 物理分离，避免 IO 互相污染） |
+| 测试根 | **`<外置实验室盘>\`**（与 VM 盘 G、TEMP 盘 E 物理分离，避免 IO 互相污染） |
 
 > ⚠ 交接文档记载 I 盘剩 17.9 GB —— 实测 **75.97 GB**（两个 API 一致复核），该数字已过时。
 
@@ -58,7 +58,7 @@
 | 版本 | v0.4.6 源码（HEAD `d818f95` + 本轮测试代码改动） |
 | 环境 | L0 单元层，dotnet 8.0.425 |
 | Setup | 无需 |
-| 实际执行 | `dotnet test "I:\deepseek work\PCMig\PCMig.sln" -c Release` |
+| 实际执行 | `dotnet test "<旧镜像根>\PCMig\PCMig.sln" -c Release` |
 | 预期 | 全绿，且用例数 ≥ 64 |
 | **实际** | **已通过! 失败 0 / 通过 85 / 跳过 0 / 1 秒** |
 | 通过条件 | 0 失败 |
@@ -75,10 +75,10 @@
 | 项 | 内容 |
 |---|---|
 | 何时 | 2026-09-19 14:19 |
-| Setup | 扫描 `C:\ProgramData\PCMig\Jobs\`（21 个历史 job / 118.7 MB 真实日志） |
+| Setup | 扫描 `<本机程序数据目录>\Jobs\`（21 个历史 job / 118.7 MB 真实日志） |
 | 实际执行 | 以 **GBK/CP936** 逐字节解码，正则提取错误行 |
 | **实际结果** | 4 类真实原文全部采到 |
-| 证据 | `J:\pcmig-lab\fixtures\robocopy\error-{112,82,59,2}.txt` + `README.encoding.txt` |
+| 证据 | `<外置实验室盘>\fixtures\robocopy\error-{112,82,59,2}.txt` + `README.encoding.txt` |
 | 通过条件 | 采到 ≥1 条真实原文且编码标注正确 |
 | Cleanup | 原件未动（只读） |
 | **结果** | **RUNTIME_VERIFIED / PASS** |
@@ -87,20 +87,20 @@
 
 ```
 # 错误 112（磁盘空间不足）— 来源 JOB-20260914-002001-5b64
-2026/09/14 00:22:00 错误 112 (0x00000070) 正在复制文件 \\192.168.134.131\E$\迁移全量测试\大文件\大文件-2.bin
+2026/09/14 00:22:00 错误 112 (0x00000070) 正在复制文件 \\192.0.2.131\E$\迁移全量测试\大文件\大文件-2.bin
 磁盘空间不足。
 正在等待 5 秒... 正在重试...
 
 # 错误 82（无法创建目录或文件）— 来源 JOB-20260913-130046-e486
-2026/09/13 13:03:21 错误 82 (0x00000052) 正在复制文件 \\192.168.134.131\E\迁移全量测试\海量小文件\pic_021845.jpg
+2026/09/13 13:03:21 错误 82 (0x00000052) 正在复制文件 \\192.0.2.131\E\迁移全量测试\海量小文件\pic_021845.jpg
 无法创建目录或文件。
 
 # 错误 59（意外的网络错误）— 来源 JOB-20260914-002001-5b64
-2026/09/14 00:20:46 错误 59 (0x0000003B) 正在复制文件 \\192.168.134.131\E$\迁移全量测试\海量小文件\pic_002133.jpg
+2026/09/14 00:20:46 错误 59 (0x0000003B) 正在复制文件 \\192.0.2.131\E$\迁移全量测试\海量小文件\pic_002133.jpg
 出现了意外的网络错误。
 
 # 错误 2（系统找不到指定的文件）— 来源 JOB-20260914-002001-5b64
-2026/09/14 00:20:46 错误 2 (0x00000002) 正在复制文件 \\192.168.134.131\E$\迁移全量测试\海量小文件\pic_002131.jpg
+2026/09/14 00:20:46 错误 2 (0x00000002) 正在复制文件 \\192.0.2.131\E$\迁移全量测试\海量小文件\pic_002131.jpg
 系统找不到指定的文件。
 ```
 
@@ -123,7 +123,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 产物 | `J:\pcmig-lab\lib\testdata.ps1`（9 种 Kind + MixedDataset） |
+| 产物 | `<外置实验室盘>\lib\testdata.ps1`（9 种 Kind + MixedDataset） |
 | 实际执行 | `-Kind MixedDataset -Root ... -Seed 20260919 -Force`，连跑两次 |
 | **实际结果** | **1267 文件 / 51 目录 / 71.093 MB / 2 秒** |
 | 确定性验证 | 两次结果：文件数、总字节、**4 个关键文件 SHA256 全部一致** → ✔ 可重复 |
@@ -137,11 +137,11 @@
 |---|---|
 | 何时 | 2026-09-19 14:25（首跑）/ 14:26（修复后重跑） |
 | Setup | 生成数据集 + 建空目标 + `Assert-LabSafePath` 护栏 |
-| 命令 | `pcmig quick --host AXUAN --source J:\pcmig-lab\test-data\base --target J:\pcmig-lab\test-data\out\LOCAL-BASE-01 --yes --threads 16 --jobs J:\pcmig-lab\jobs` |
+| 命令 | `pcmig quick --host AXUAN --source <外置实验室盘>\test-data\base --target <外置实验室盘>\test-data\out\LOCAL-BASE-01 --yes --threads 16 --jobs <外置实验室盘>\jobs` |
 | 预期 | `phase=completed` + 全量 SHA256 与目录结构完全一致 |
 | **实际** | `JOB-20260919-142612-*`：phase=**completed**、failedObjects=**0**、percent=100、bytes=74,548,744/74,548,744、**回执 17/17**、**1268 文件全量 SHA256 一致 + 51 目录结构一致**、耗时 2 秒 |
 | 通过条件 | 上述全部成立 |
-| 证据 | `J:\pcmig-lab\runs\20260919-142612-LOCAL-BASE-01\`（environment / command / pcmig.log / verify-jobstate / verify-integrity / verify-cli.log / result.json） |
+| 证据 | `<外置实验室盘>\runs\20260919-142612-LOCAL-BASE-01\`（environment / command / pcmig.log / verify-jobstate / verify-integrity / verify-cli.log / result.json） |
 | Cleanup | **PASS**（目标树已删，jobs 任务数已记录） |
 | **结果** | **RUNTIME_VERIFIED / PASS** |
 
@@ -150,7 +150,7 @@
 | 项 | 内容 |
 |---|---|
 | 源 | **`\\AXUAN\J$\pcmig-lab\test-data\base`**（真实 UNC + TCP 445 + SMB 会话 + NetShareEnum + robocopy 网络分支） |
-| 目标 | `J:\pcmig-lab\test-data\out\SMB-LOOPBACK-02` |
+| 目标 | `<外置实验室盘>\test-data\out\SMB-LOOPBACK-02` |
 | 预期 / **实际** | 与 LOCAL-BASE-01 完全一致：completed / 0 失败 / **1268 文件全量 SHA256 一致** / 51 目录一致 / 耗时 2 秒 |
 | 关键意义 | 这是 PCMig 的**产品定义链路**（SMB 直拉），此前自动化为 **0 覆盖** |
 | 前置断言 | 管理共享可读（免提权可行性已在审计期证明） |
@@ -195,7 +195,7 @@
 | S1 | **`Compare-Tree` >16MB 不哈希** | 300MB 大文件只比长度，内容损坏测不到 → **大文件场景的"完整性 PASS"在内容层面是空的** | 新模块改为**全量 SHA256**，并引入 `PASS_PARTIAL` 状态显式标注未哈希项 |
 | S2 | **`Compare-Tree` 不比对目录** | 空目录丢失完全检测不到 | 新增双向目录相对路径集合比对（**已实测：删掉空目录立刻判 FAIL**） |
 | S3 | **退出码陷阱** | `CompletedWithErrors`（含盘满）也返回 0 | 判定一律读 `job-state.json` 的 phase+failedObjects+回执 |
-| S4 | **无 job 隔离** | 任务落进生产 `%ProgramData%\PCMig\Jobs`（已有 25 个历史 Job） | 所有 CLI 调用强制 `--jobs J:\pcmig-lab\jobs` |
+| S4 | **无 job 隔离** | 任务落进生产 `%ProgramData%\PCMig\Jobs`（已有 25 个历史 Job） | 所有 CLI 调用强制 `--jobs <外置实验室盘>\jobs` |
 | S5 | **`write`/`edit` 工具丢 BOM** | 实测：写完 `.ps1` 前 3 字节变 `3C 23 0A`，PS 5.1 按 GBK 读中文脚本 → **字符串闭合被破坏、解析失败**（铁律 8 的经典事故） | 改后立即复查并补 `EF BB BF`；`.ps1` 改用 PowerShell `ReplaceExact` 修改 |
 | S6 | **PS 5.1 语法** | 误用 `$(if ...)` 与 `$args`（自动变量） | 全部改 if/else 赋值 + 重命名 `$cliArgs` |
 | S7 | **汇总输出污染返回值** | `Complete-LabRun` 用 `Write-Output` → 多行文本被当成场景结果，导致"2 个场景非 PASS"误报 | 改 `Write-Host`（不进管道） |
@@ -275,7 +275,7 @@
 
 ## 八、附件索引
 
-### 证据运行目录（`J:\pcmig-lab\runs\`）
+### 证据运行目录（`<外置实验室盘>\runs\`）
 
 | RunId | 场景 | 总体 |
 |---|---|---|
@@ -296,11 +296,11 @@
 
 | 路径 | 说明 |
 |---|---|
-| `J:\pcmig-lab\lib\LabCommon.ps1` | 公共模块（完整性核对 / 证据落盘 / 安全护栏 / SMB 基线） |
-| `J:\pcmig-lab\lib\testdata.ps1` | 测试数据生成器（确定性） |
-| `J:\pcmig-lab\scenarios\local-base.ps1` | 本地 + SMB 回环基线场景 |
-| `J:\pcmig-lab\scenarios\smb-boundary.ps1` | SMB 边界与凭据场景 |
-| `J:\pcmig-lab\fixtures\robocopy\error-*.txt` | 真实日志 GBK 原件（4 类） |
+| `<外置实验室盘>\lib\LabCommon.ps1` | 公共模块（完整性核对 / 证据落盘 / 安全护栏 / SMB 基线） |
+| `<外置实验室盘>\lib\testdata.ps1` | 测试数据生成器（确定性） |
+| `<外置实验室盘>\scenarios\local-base.ps1` | 本地 + SMB 回环基线场景 |
+| `<外置实验室盘>\scenarios\smb-boundary.ps1` | SMB 边界与凭据场景 |
+| `<外置实验室盘>\fixtures\robocopy\error-*.txt` | 真实日志 GBK 原件（4 类） |
 | `tests\PCMig.Core.Tests\SourceTreeHygieneTests.cs` | 新增（正则/控制字符防复发） |
 | `tests\PCMig.Core.Tests\RealWorldLogSampleTests.cs` | 扩写（8 → 24 用例） |
 | `tests\PCMig.Core.Tests\PCMig.Core.Tests.csproj` | 加 CodePages 包 |
@@ -466,7 +466,7 @@ catch 后**直接把异常文案当检查详情** → 用户看到的是
 
 | 用例组 | 覆盖 |
 |---|---|
-| `IsUncTarget_DetectsUncPaths`（4 例） | `\\server\share`、`\\192.168.1.10\D$`、含子目录、**含前后空格** |
+| `IsUncTarget_DetectsUncPaths`（4 例） | `\\server\share`、`\\192.0.2.10\D$`、含子目录、**含前后空格** |
 | `IsUncTarget_RejectsLocalAndEmptyPaths`（7 例） | `D:\`、中文路径、`C:\Users\...`、正斜杠、空串、纯空格、`null` |
 | `IsUncTarget_SingleBackslashIsNotUnc`（1 例） | 单反斜杠开头**不得**误判为 UNC |
 
@@ -476,7 +476,7 @@ catch 后**直接把异常文案当检查详情** → 用户看到的是
 
 | 项 | 修复前 | 修复后 |
 |---|---|---|
-| UNC 目标文案 | `Drive name must be a root directory (i.e. 'C:\') or a drive letter ('C'). (Parameter 'driveName')` | `不支持把网络路径当作目标位置：\\localhost\J$\…。本工具在新电脑上运行、把数据写到本机磁盘，因此目标必须是本机盘符路径（如 D:\迁移目标）。若目标是另一台机器的共享，请在那台机器上就地运行本工具，或先把共享映射为本地盘再试。` |
+| UNC 目标文案 | `Drive name must be a root directory (i.e. 'C:\') or a drive letter ('C'). (Parameter 'driveName')` | `不支持把网络路径当作目标位置：\\localhost\J$\…。本工具在新电脑上运行、把数据写到本机磁盘，因此目标必须是本机盘符路径（如 <迁移目标示例>）。若目标是另一台机器的共享，请在那台机器上就地运行本工具，或先把共享映射为本地盘再试。` |
 | UNC 目标判定 | exit=1 阻断（文案不可读） | **exit=1 阻断 + 文案可读**（行为不变，仅消息改善） |
 | 本地盘符目标 | `✔ 目标盘 J:\: 可用 127.05 GB` → 通过 | **同样通过**（无回归） |
 | 完整测试套件 | 87 / 87 | **99 / 99**（+12 新用例） |

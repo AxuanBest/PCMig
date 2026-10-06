@@ -2,9 +2,9 @@
 
 > **新增档案，不覆盖任何历史交接。**
 >
-> 权威工作区：`E:\Project\deepseek work\PCMig`  
+> 权威工作区：`<仓库根>`  
 > 分支：`feature/winui-v0.5.0` ｜ HEAD：`c9aef30454081fd81a13c8c9feef029f0629ad67`  
-> 当前状态：**未提交的既有脏工作树之上继续开发；未发版；未触碰交付区 `E:\Project\PCMig` 与工作副本 `D:\PCMig`。**
+> 当前状态：**未提交的既有脏工作树之上继续开发；未发版；未触碰交付区 `<交付区>` 与工作副本 `<发版工作副本>`。**
 
 ---
 
@@ -18,7 +18,7 @@
 
 ## 2. 人工标注图已逐张视觉审阅
 
-用户提供的原始证据目录为 `D:\Users\User\Desktop\新建文件夹 (5)`；**没有删除、覆盖、重命名或向其中写入任何文件。**
+用户提供的原始证据目录为 `<用户目录D>\Desktop\新建文件夹 (5)`；**没有删除、覆盖、重命名或向其中写入任何文件。**
 
 | 标注图 | 人工问题（已确认） |
 |---|---|
@@ -72,15 +72,15 @@
 | 项 | 位置 / 结果 |
 |---|---|
 | Tag | `v0.5.0-before-final-polish-20260927` → `c9aef30454081fd81a13c8c9feef029f0629ad67` |
-| 源码镜像 | `E:\Project\镜像备份源码\PCMig-v0.5.0-before-final-polish-20260927`，208 文件；robocopy `/L` 无差异。 |
-| Git bundle | `E:\Project\镜像备份源码\PCMig-v0.5.0-before-final-polish-20260927.bundle`；`git bundle verify` 退出码 0、48 refs、完整历史。 |
-| 清单 | `E:\Project\镜像备份源码\PCMig-v0.5.0-before-final-polish-20260927-清单.md`，含 18 项关键文件 SHA256 MATCH 与回退命令。 |
+| 源码镜像 | `<镜像备份根>\PCMig-v0.5.0-before-final-polish-20260927`，208 文件；robocopy `/L` 无差异。 |
+| Git bundle | `<镜像备份根>\PCMig-v0.5.0-before-final-polish-20260927.bundle`；`git bundle verify` 退出码 0、48 refs、完整历史。 |
+| 清单 | `<镜像备份根>\PCMig-v0.5.0-before-final-polish-20260927-清单.md`，含 18 项关键文件 SHA256 MATCH 与回退命令。 |
 
 主控还独立复核了 `MainWindow.xaml`、`MainWindow.xaml.cs`、`Themes\Controls.xaml`、`DeveloperTuningPanel.xaml` 的源/镜像 SHA256 MATCH。
 
 ### 备份已知瑕疵
 
-备份子任务一度错误扫描了未排除的 bin/obj，生成了误导性的 `E:\Project\镜像备份源码\PCMig-v0.5.0-before-final-polish-20260927-关键文件SHA256.txt`。它**不是权威结论**，权威清单是上表的 `-清单.md`；由于没有用户明确授权删除/改名，该文件被保留未动。此瑕疵不影响 robocopy `/L` 无差异、bundle verify 与关键 SHA256 MATCH 三类独立证据。
+备份子任务一度错误扫描了未排除的 bin/obj，生成了误导性的 `<镜像备份根>\PCMig-v0.5.0-before-final-polish-20260927-关键文件SHA256.txt`。它**不是权威结论**，权威清单是上表的 `-清单.md`；由于没有用户明确授权删除/改名，该文件被保留未动。此瑕疵不影响 robocopy `/L` 无差异、bundle verify 与关键 SHA256 MATCH 三类独立证据。
 
 回退禁止使用 `git reset --hard`、`git checkout .`、`git restore .`、`git clean -fd`。推荐先 `git stash -u` 保全当前未提交内容，再从 tag 查看；整目录恢复或 bundle clone 必须另获明确授权。
 
@@ -120,7 +120,7 @@
 
 ## 9. 纪律与安全
 
-- 权威源始终是 `E:\Project\deepseek work\PCMig`；`I:\K\deepseek work` 仅为旧镜像，未读取为事实依据。
+- 权威源始终是 `<仓库根>`；`<旧镜像根>` 仅为旧镜像，未读取为事实依据。
 - 本会话没有发版、没有删除、没有覆盖交付区/工作副本、没有使用破坏性 Git 命令。
 - 本文不含任何凭据明文。
 - 所有 `.ps1` 未被本会话编辑；BOM 规则仍有效。

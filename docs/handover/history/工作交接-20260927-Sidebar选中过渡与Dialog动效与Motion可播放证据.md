@@ -192,5 +192,5 @@
 - `archive\` **完全在 git 管辖之外**，`Themes\`/`Views\`/`Presentation\*.cs` 多为**未跟踪文件**。
 - 后果：`git clean -fd` 会瞬间销毁本轮全部成果（死律 9 已禁止该命令）。
 - 备份参照点：标签 `v0.5.0-before-final-polish-20260927` → `c9aef304…`，
-  镜像在 `E:\Project\镜像备份源码\PCMig-v0.5.0-before-final-polish-20260927`（+ `.bundle` + 清单，18 项 SHA256 MATCH）。
+  镜像在 `<镜像备份根>\PCMig-v0.5.0-before-final-polish-20260927`（+ `.bundle` + 清单，18 项 SHA256 MATCH）。
   **注意：该标签只覆盖"已跟踪"的改动，本轮及前序的 WinUI 成果未被它保护。**

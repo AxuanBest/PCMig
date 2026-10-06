@@ -121,7 +121,7 @@ public static class NetworkShare
     public static bool LastConnectReusedExistingConnection => t_lastConnectReusedInput;
 
     // ---- 失败提示去重（v0.3.8，缺陷 5）----
-    // 生产事故日志里 "连接 \Szlt500781IPC$ 失败: Win32Error=67" 在几分钟内反复出现
+    // 生产事故日志里 "连接 \SRC-PC-2IPC$ 失败: Win32Error=67" 在几分钟内反复出现
     // （预检一次 + 传输一次 + 直连回退各打一遍），用户以为"出了很多不同的错"。
     // 同一主机 + 同一错误码只完整打印一次，重复降到 Debug，并在第 2/10/100… 次明确写"已重复 N 次"。
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> s_connNoticeCounts = new();

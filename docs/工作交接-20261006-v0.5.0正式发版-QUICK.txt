@@ -21,10 +21,10 @@ git remote = 0 个 → 未 push。
 
 【本会话做了什么】
 A. 场景 G 真机取证 = VERIFIED（NtSuspendProcess 冻结 robocopy → engineDelta=0 / Head 冻结 / Band 继续动）
-   脚本与数据：E:\PCMigLab\Staging\recovery-gate\round3-*.ps1、E:\PCMigLab\Staging\phG-holding-v5\
+   脚本与数据：<实验室根>\Staging\recovery-gate\round3-*.ps1、<实验室根>\Staging\phG-holding-v5\
 B. 场景 H = 抓到真失败铁证（robocopy 错误 112 磁盘空间不足 / 复制 0 失败 6 / ExitCode=8），
    但暴露 OPEN 疑点：42 GB 未落盘却记 percent=99.9 → 未定性，需干净复现
-C. 性能采样：CPU 均值 0.738 核 / 峰值 1.199 核、WS 峰值 276 MB、gen2=1 → E:\PCMigLab\Staging\phPerf-aggregate\PERF-SUMMARY.txt
+C. 性能采样：CPU 均值 0.738 核 / 峰值 1.199 核、WS 峰值 276 MB、gen2=1 → <实验室根>\Staging\phPerf-aggregate\PERF-SUMMARY.txt
 D. 视觉修复三件事全进 commit：
    ① 矩形外壳（根因=CanvasAnimatedControl 的 SwapChainPanel external content 开孔）→ 宿主换 CanvasControl（用户人眼验收通过）
    ② 轨道炭黑 → 浅蓝灰 #FFD6E1F8（Colors.xaml + ResolvePalette 兜底 + ImmersiveProgressPalette.Fallback 三处同步）
@@ -44,9 +44,9 @@ H. 发版：release.ps1 -Version 0.5.0 跑 4 次（前 3 次失败各暴露一�
 9. v0.5.0 发版本轮的桌面复验包由本次交接补做（视觉那份 20261005-233901 已是历史证据，不能覆盖当前源码）
 
 【回退】
-改文件级：E:\Project\deepseek work\archive\pcmig-round3-immersive-backup-20261006-000027（58 文件 + 逐文件 SHA256）
+改文件级：<工作区根>\archive\pcmig-round3-immersive-backup-20261006-000027（58 文件 + 逐文件 SHA256）
 提交级：git revert 022377e；禁止 reset --hard / checkout . / restore . / clean -fd / rebase / amend
-交付物：E:\Project\PCMig\Portable\ 与 D:\PCMig\ 都是整棵树，可直接覆盖恢复；历史 dist\PCMigSetup-*.exe 全量保留、不得清理
+交付物：<交付区>\Portable\ 与 <发版工作副本>\ 都是整棵树，可直接覆盖恢复；历史 dist\PCMigSetup-*.exe 全量保留、不得清理
 
 【环境坑（先读省几小时）】
 1. PS 5.1 + 无 BOM 的 UTF-8 = GBK 解码灾难：全角括号（）吞引号报 Missing ')'；中文路径被毁（docs\更新日志.md→docs\鏇存柊鏃ュ織.md）
@@ -55,7 +55,7 @@ H. 发版：release.ps1 -Version 0.5.0 跑 4 次（前 3 次失败各暴露一�
 4. 单命中 (…).Count 返回 $null → 用 @(…).Count
 5. write 工具产出无 BOM；edit 会改掉 .ps1 的 BOM → 改完复查前三字节 EF BB BF
 6. 断言不许命中自己的注释（我在 csproj 注释写 PCMig.Gui → WinUiStep1ContractTests 红、发版闸门 0/5 红）
-7. E:\PCMigLab\Staging\recovery-gate\launch-app.ps1 的 STALE-WARNING 是误报（把 obj\ 中间产物当源文件）
+7. <实验室根>\Staging\recovery-gate\launch-app.ps1 的 STALE-WARNING 是误报（把 obj\ 中间产物当源文件）
 8. 本机窗口激活只认 Shell.Application 的 MinimizeAll() + UndoMinimizeAll()
 9. 切换目标卷（挂/卸 VHD）前必须先关应用，否则 WinUI 主进程 Responding=False 且空转烧 CPU
 10. ★ bili 代理 0.1.184 压缩静默失效（#2156/#2160）→ 重启 dsh 升 0.1.185 才能压缩

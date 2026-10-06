@@ -1,7 +1,7 @@
 # 工作交接 · 2026-09-28 · A43–A49 DAEL 全局化、Utility 材质定案、按钮文字消失事故修复
 
 > **交接时间**：2026-09-28 11:10 前后
-> **权威工作区**：`E:\Project\deepseek work\PCMig`（HEAD 仍 `c9aef30`；本会话**未执行任何 git 命令**，改动全部未提交）
+> **权威工作区**：`<仓库根>`（HEAD 仍 `c9aef30`；本会话**未执行任何 git 命令**，改动全部未提交）
 > **历史交接永久保留**：本文件是**新增**，未覆盖任何旧交接文档。
 
 ---
@@ -273,9 +273,9 @@ Disabled  → Setter Target="Label.Foreground" Value="{StaticResource AccentDisa
 | **关键结论** | 16:10 附近窗口比例下**高度永远先被耗尽** ⇒ 必须 `Min(ScaleX, ScaleY)`；只按宽度缩放必然在高度上裁切（Step4 日志被裁的成因） |
 
 ## 回退点（勿删）
-- `E:\Project\镜像备份源码\PCMig-v0.5.0-pre-responsive-motion-20260928-131622\`（2963 文件 / 700 条 SHA256 清单）
+- `<镜像备份根>\PCMig-v0.5.0-pre-responsive-motion-20260928-131622\`（2963 文件 / 700 条 SHA256 清单）
 - 关键基线哈希：`Materials.xaml B332EC826D2EA1F4`、`Controls.xaml 633AB72D9C6ED649`、`Step4ResultPage.xaml 599A840F266557F1`、`MainWindow.xaml F95DFD284AC63152`
 - ⚠️ **不要用 `git tag` 作回退点**：HEAD 仍 `c9aef30`（`Materials.xaml` 仅 16 行旧版、`StepNavigationControl.xaml` 不存在），tag 指向的提交不含本会话成果
 
 ## 影响面材料位置
-`D:\Users\User\Desktop\新建文件夹 (4)\Responsive-Motion-影响面代码\`（45 个文件全量代码 + `影响面说明.md` + `SHA256清单.json`）
+`<用户目录D>\Desktop\<桌面交付根>\Responsive-Motion-影响面代码\`（45 个文件全量代码 + `影响面说明.md` + `SHA256清单.json`）

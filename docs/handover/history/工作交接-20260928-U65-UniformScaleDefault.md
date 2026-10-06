@@ -1,7 +1,7 @@
 # 工作交接 — 20260928 — U65 P0：UniformScaleHost 改为生产默认（四页最小窗口裁切修复）
 
 > 交接对象：接手 PCMig v0.5.0 收尾工作的下一位（或下一个会话）
-> 权威工作区：`E:\Project\deepseek work\PCMig`
+> 权威工作区：`<仓库根>`
 > 触发：用户人工实测报 P0 —— 最小窗口下 Step1 / Step3 / Step4 下半部分被裁切（Step2 正常）
 > 结果：**已修复 · 构建 0 错误 · 单元测试 130 通过 / 0 失败 · 用户要求的全部验收项通过**
 > 前置交接：`docs\工作交接-20260928-U64-HoverLiftPressedSink.md`（U62/U63/U64 三批，已冻结）
@@ -107,7 +107,7 @@ public static bool IsRequested =>
 | 只回退本轮 | `PCMig\src\PCMig.WinUI\Presentation\UniformScaleHost.cs` 把 `IsRequested` 改回 `== "1"`；`MainWindow.xaml.cs` 删掉 `DiagResponsive` 方法与其调用（可选） |
 | 运行期回退（无需改代码） | 设 `PCMIG_UNIFORM_HOST=0` 重启 ⇒ 回到旧响应式路径（实测会重新出现 Compact 重排与裁切，**仅作对照**） |
 | 改动前其他快照 | `archive\tmp\*.before-u62-fluidzoom.*`、`*.before-u63-selectionstate.*` |
-| 主文件级快照（勿删） | `E:\Project\镜像备份源码\PCMig-v0.5.0-pre-responsive-motion-20260928-131622` |
+| 主文件级快照（勿删） | `<镜像备份根>\PCMig-v0.5.0-pre-responsive-motion-20260928-131622` |
 
 **Git：HEAD 仍 `c9aef30`（不含本会话成果）。不要 `reset --hard` / `checkout .` / `clean -fd`。**
 

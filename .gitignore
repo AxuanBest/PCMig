@@ -33,7 +33,7 @@ docs/screenshots/*.png
 lab/*.iso
 
 # 仓库内历史 / 本地遗留证据目录（非当前权威证据根，不纳入 Git）
-# 权威证据根在仓库之外：E:\Project\deepseek work\archive\
+# 权威证据根在仓库之外：<工作区根>\archive\
 # 本条只防误提交，不表示可以删除 / 移动 / 合并该目录
 /archive/
 

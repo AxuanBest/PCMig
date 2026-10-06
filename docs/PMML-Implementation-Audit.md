@@ -286,7 +286,7 @@ Primary Button ・ Secondary Button ・ Icon Button ・ TextBox ・ PasswordBox 
 
 **⚠ 上表「动画 = 无」「已知取舍 = 未做前沿高光」两条已由 2026-10-05 UI Closure 取代，见下节。**
 
-实测证据（像素级）：填充覆盖整 12 DIP 轨道高度（y 843..854 全 12 行），满宽行右边界 364（预测 `285 + 0.473×170 ≈ 365.4`，圆角内缩 1 px），颜色自 `(43,152,254)` 渐变到 `(20,107,234)`。详见 `E:\PCMigLab\Evidence\Trust-Critical-Recovery\FIX-BATCH-5-UI.md` §3。
+实测证据（像素级）：填充覆盖整 12 DIP 轨道高度（y 843..854 全 12 行），满宽行右边界 364（预测 `285 + 0.473×170 ≈ 365.4`，圆角内缩 1 px），颜色自 `(43,152,254)` 渐变到 `(20,107,234)`。详见 `<实验室根>\Evidence\Trust-Critical-Recovery\FIX-BATCH-5-UI.md` §3。
 
 ### Progress 族（2026-10-05 UI Closure 更新，用户指令 UI-05 / UI-06）
 

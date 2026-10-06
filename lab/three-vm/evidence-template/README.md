@@ -59,7 +59,7 @@
 
 | 类型 | 位置 |
 |---|---|
-| 正式证据（canonical） | `E:\PCMigLab\Evidence\<主题>\` |
+| 正式证据（canonical） | `<实验室根>\Evidence\<主题>\` |
 | 历史证据批次（仓库内） | `PCMig\archive\evidence\<批次>\` |
 | Bug 根因与修复资料 | `PCMig\archive\bug-evidence\<topic>\` |
-| 复验包 | `E:\Project\deepseek work\archive\review-packages\<topic>\` |
+| 复验包 | `<工作区根>\archive\review-packages\<topic>\` |

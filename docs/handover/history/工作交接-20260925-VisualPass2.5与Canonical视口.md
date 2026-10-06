@@ -183,7 +183,7 @@ git clone "E:/Project/镜像备份源码/PCMig-v0.5.0-pass25-before-handover-202
 ### 8.3 建议命令
 
 ```powershell
-cd "E:\Project\deepseek work\PCMig"
+cd "<仓库根>"
 
 # 1) 干净构建（0 warning / 0 error）
 dotnet build src\PCMig.WinUI\PCMig.WinUI.csproj -c Release --no-restore -p:NuGetAudit=false
@@ -193,9 +193,9 @@ dotnet test tests\PCMig.Core.Tests\PCMig.Core.Tests.csproj -c Release --no-resto
 
 # 3) 关闭残留进程 → 启动刚 Build 的新 EXE → 定位窗口 → 截图（同一条命令内完成）
 Get-Process PCMig.WinUI -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Process "E:\Project\deepseek work\PCMig\src\PCMig.WinUI\bin\Release\net8.0-windows10.0.19041.0\win-x64\PCMig.WinUI.exe"
+Start-Process "<仓库根>\src\PCMig.WinUI\bin\Release\net8.0-windows10.0.19041.0\win-x64\PCMig.WinUI.exe"
 Start-Sleep -Seconds 8
-powershell -NoProfile -ExecutionPolicy Bypass -File "E:\Project\deepseek work\archive\scripts\winui-capture-region.ps1" -Out "E:\Project\deepseek work\archive\screenshots\<下一张>.png" -X 0 -Y 0
+powershell -NoProfile -ExecutionPolicy Bypass -File "<工作区根>\archive\scripts\winui-capture-region.ps1" -Out "<工作区根>\archive\screenshots\<下一张>.png" -X 0 -Y 0
 # Compact 复测：追加 -Width 1440 -Height 900
 ```
 

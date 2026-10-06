@@ -186,7 +186,7 @@ Resume 后必须重跑）。
 ## E. 真机证据
 
 ### E1. 提示卡（PHASE A）
-- `E:\PCMigLab\Staging\recovery-gate\` 下的 `shot-*.png` 与控件转储（`dump-controls.ps1` 输出）。
+- `<实验室根>\Staging\recovery-gate\` 下的 `shot-*.png` 与控件转储（`dump-controls.ps1` 输出）。
 - 结构性契约已由 `ShellHintCardMotionContractTests` 锁定（源码级）。
 - **OPEN**：四通道同时显示 / 连续 20 次对象更新 / 长文本 / Resize / DPI 五档 /
   Reduced Motion 的完整截图与 bounds dump 尚未成体系补齐（见 F）。
@@ -206,11 +206,11 @@ Resume 后必须重跑）。
   修复后 Running 期 30/30 采样 `decoErr=- sweep=True glow=True particles=True marker=True` ✓
 - 装饰物像素证据（ROI 1010x12 固定列采样）：`103 → 99 → 103 → 101 → 103 → 82 → 99 → 101 → 103`
   ⇒ 存在独立于进度推进的时序变化 ✓
-- 产物：`E:\PCMigLab\Staging\phD-run\frames.csv`、`E:\PCMigLab\Staging\phD-run\frames\`（61 张 ROI PNG）、
-  `E:\PCMigLab\Staging\phC-5hz\frames.csv`、`E:\PCMigLab\Staging\phC-big\frames.csv`。
+- 产物：`<实验室根>\Staging\phD-run\frames.csv`、`<实验室根>\Staging\phD-run\frames\`（61 张 ROI PNG）、
+  `<实验室根>\Staging\phC-5hz\frames.csv`、`<实验室根>\Staging\phC-big\frames.csv`。
 
 ### E3. 暂停/恢复连续性（PHASE B，真机）
-- 命令：`pause-resume-continuity.ps1 -OutDir 'E:\PCMigLab\Staging\phDB' -TargetRoot 'E:\PCMigLab\Staging\phDtarget' -PauseAfterSec 8 -ResumeSampleCount 30 -ResumeSampleMs 200`
+- 命令：`pause-resume-continuity.ps1 -OutDir '<实验室根>\Staging\phDB' -TargetRoot '<实验室根>\Staging\phDtarget' -PauseAfterSec 8 -ResumeSampleCount 30 -ResumeSampleMs 200`
 - 时间线：`START 05:43:15.91` → `PAUSE-CLICKED 05:43:24.44`（`jobPercent=34.33 / uiPercent=39.7% / uiBytes=16.69 GB`）
   → 暂停后 `uiPercent=99.9% / jobPercent=99.9 / jobBytes=45097156608`（42 GB 已落盘）
   → `RESUME-CLICKED 05:43:34.99 uiPercentBeforeClick=99.9%`
@@ -223,9 +223,9 @@ Resume 后必须重跑）。
 ### E4. 统计卡大号数值（PHASE D，视觉复核）
 | 图 | 路径 | 结论（视觉模型原文） |
 |---|---|---|
-| 英雄数字区 | `E:\PCMigLab\Staging\phD-hero\hero-zoom2.png` | "The large percentage glyphs appear intact and rounded at the top, with clear padding above them inside the card" |
-| 四张统计卡 | `E:\PCMigLab\Staging\phD-hero\hero-zoom.png` | "BOTH have complete, fully rounded top edges — no horizontal truncation of their glyphs" |
-| 改动后完成态 | `E:\PCMigLab\Staging\phDdone\statcards-v3.png` | "the tops of 1, 4, G, B and / look intact rather than shaved" |
+| 英雄数字区 | `<实验室根>\Staging\phD-hero\hero-zoom2.png` | "The large percentage glyphs appear intact and rounded at the top, with clear padding above them inside the card" |
+| 四张统计卡 | `<实验室根>\Staging\phD-hero\hero-zoom.png` | "BOTH have complete, fully rounded top edges — no horizontal truncation of their glyphs" |
+| 改动后完成态 | `<实验室根>\Staging\phDdone\statcards-v3.png` | "the tops of 1, 4, G, B and / look intact rather than shaved" |
 - **诚实口径**：本机 **100% DPI 下未复现**用户所报裁切 ⇒ 本轮改动为防御性修正。
   DPI 125/150/175/200% 原始截图 + geometry JSON **未完成**（需改系统缩放）。
 
@@ -251,7 +251,7 @@ Resume 后必须重跑）。
 ---
 
 ## 参考仓库事实
-- 分支 `feature/winui-v0.5.0`，权威工作区 `E:\Project\deepseek work\PCMig`。
+- 分支 `feature/winui-v0.5.0`，权威工作区 `<仓库根>`。
 - 本轮候选产物：`src\PCMig.WinUI\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\PCMig.WinUI.exe`。
 - 复现口令：构建前 `Stop-Process -Name PCMig.WinUI` → `dotnet build PCMig.sln -c Release`
   → `dotnet test …` → `launch-app.ps1 -WaitSec 12` → `ensure-step3.ps1`

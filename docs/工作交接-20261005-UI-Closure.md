@@ -47,13 +47,13 @@
 | `docs\UI-CLOSURE-ISSUES-20261005.md` | §0 IMG5 结论更新（像素测量部分证伪 + 两条真依据）；状态表 14 条全部更新为 FIXED 并附证据 |
 | `docs\INDEX.md` | §七 新增本轮并行轨道交接条目 |
 
-### 3. 证据文件（`E:\PCMigLab\Evidence\Trust-Critical-Recovery\UI-CLOSURE-20261005\`）
+### 3. 证据文件（`<实验室根>\Evidence\Trust-Critical-Recovery\UI-CLOSURE-20261005\`）
 
 - `measure-text-widths.py` / `text-widths.json`、`measure-text-widths2.py` / `text-widths2.json`：关键数字与 ETA 的程序化宽度（Pillow）；
 - `measure-font-metrics.py` / `font-metrics.json`：字体自然行高（Microsoft YaHei UI）；
 - `shot-01-initial-step1.png`：候选启动后初始页截图；
 - `b10-full-transcript.txt`：编号核查用留档。
-- （另在 `E:\PCMigLab\Evidence\UI-Closure-20261005\` 有子代理的 `pixel-measure-report.md` + 24 个 `measure-*.py` + `crop-*.png`：4 项像素实测报告。）
+- （另在 `<实验室根>\Evidence\UI-Closure-20261005\` 有子代理的 `pixel-measure-report.md` + 24 个 `measure-*.py` + `crop-*.png`：4 项像素实测报告。）
 
 ---
 
@@ -85,7 +85,7 @@
 - 本轮**未 commit**：`git checkout -- <文件>` 即可整体回退（20 个源码/测试文件 + 5 个文档）。
 - 新增文件（无版本历史）需手工删除：`src\PCMig.WinUI\Presentation\ProgressMotionDriver.cs`。
 - `ProgressMotionDriver` 是**纯装饰驱动**：若需临时停用，把两个调用点的 `new ProgressMotionDriver(...)` 置空即可，业务真值路径不受影响（驱动不持有任何业务引用）。
-- 二进制回退备份沿用上轮：`E:\PCMigLab\Staging\final-candidate-backup-20261005-0152\`（旧候选四件）。
+- 二进制回退备份沿用上轮：`<实验室根>\Staging\final-candidate-backup-20261005-0152\`（旧候选四件）。
 
 ---
 

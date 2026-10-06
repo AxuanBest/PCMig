@@ -129,7 +129,7 @@ robocopy.exe（DST01）
 | 虚拟化已接管 | `HypervisorPresent=True`；`Win32_Processor.VirtualizationFirmwareEnabled=False` / `SLAT=False` **是 Hyper-V 已接管的显示假象，不是硬件缺陷** |
 | 身份 | `DESKTOP-5CSN7PT\User`，`IsInRole(Administrator)=False`（**未提权**），但属于本机 `Administrators` 组与 **`BUILTIN\Hyper-V Administrators` (`S-1-5-32-578`)** |
 | UAC | `EnableLUA=1`、`ConsentPromptBehaviorAdmin=5`、`PromptOnSecureDesktop=1`；**本会话审批被禁用 ⇒ 无法自提权** |
-| 宿主网络 | `以太网 192.168.1.212/24`、`WLAN 192.168.1.60/24`、`以太网 2 10.0.252.67/32`、`vEthernet (Default Switch) 172.31.160.1/20`、蓝牙 169.254.x |
+| 宿主网络 | `以太网 192.0.2.212/24`、`WLAN 192.0.2.60/24`、`以太网 2 192.0.2.67/32`、`vEthernet (Default Switch) 172.31.160.1/20`、蓝牙 169.254.x |
 | 宿主 SMB 服务端 | SMB1 关闭、SMB2 开启、`RequireSecuritySignature=True`、`Smb2DialectMax=65535`；共享 `ADMIN$ C$ D$ E$ F$ G$ IPC$ Users`（**F$/G$ 是历史残留**，当前无 F:/G: 卷） |
 | 未取到的数据 | **NTFS 簇大小**：`fsutil fsinfo ntfsinfo` 需提权（`Error 5: Access is denied`），本会话未提权 ⇒ **簇大小未知**，影响 §17 的空间精算（按 4 KiB 假设规划，Phase 1 用提权会话复核） |
 
@@ -169,9 +169,9 @@ robocopy.exe（DST01）
 统一规格：**Generation 2**、动态 VHDX、`Set-VMFirmware -EnableSecureBoot Off`（与既有 L3 脚本一致；Server 2025 / Win11 均可关闭 SecureBoot 引导）、无检查点套娃。
 
 **VM 与磁盘存放位置（必须人工确认后改）**：
-- 建议 `LabRoot = E:\PCMigLab`（E: 剩 717.70 GB，最充裕），目录布局沿用 hyperv-lab skill：`VMs` / `ISO` / `snapshots` / `logs` / `admin-queue` / `admin-results`。
-- ⚠ **Hyper-V 宿主默认路径现在指向 C:**（剩 215 GB），建 VM 时必须显式指定 `-Path E:\PCMigLab\VMs`，或先用提权会话改 `Set-VMHost -VirtualMachinePath / -VirtualHardDiskPath`。
-- ⚠ **环境变量冲突（必须先解决）**：当前 `PCMIG_LAB_ROOT = D:\PCMig-旧物归档\PCMigLab`（User 作用域；该目录存在且 `ISO`/`VMs`/`snapshots`/`logs`/`admin-queue`/`admin-results` **全为空**），而 `C:\Users\User\.dsh\skills\hyperv-lab\SKILL.md:64` 明确「环境变量会覆盖默认值」，SKILL.md:76 的默认是 `E:\PCMigLab`。**按现状直接跑，VM 会落进"旧物归档"目录。** Phase 1 第一件事 = 改这个变量或每次显式 `--labroot`。
+- 建议 `LabRoot = <实验室根>`（E: 剩 717.70 GB，最充裕），目录布局沿用 hyperv-lab skill：`VMs` / `ISO` / `snapshots` / `logs` / `admin-queue` / `admin-results`。
+- ⚠ **Hyper-V 宿主默认路径现在指向 C:**（剩 215 GB），建 VM 时必须显式指定 `-Path <实验室根>\VMs`，或先用提权会话改 `Set-VMHost -VirtualMachinePath / -VirtualHardDiskPath`。
+- ⚠ **环境变量冲突（必须先解决）**：当前 `PCMIG_LAB_ROOT = <发版工作副本>-旧物归档\PCMigLab`（User 作用域；该目录存在且 `ISO`/`VMs`/`snapshots`/`logs`/`admin-queue`/`admin-results` **全为空**），而 `<用户目录C>\.dsh\skills\hyperv-lab\SKILL.md:64` 明确「环境变量会覆盖默认值」，SKILL.md:76 的默认是 `<实验室根>`。**按现状直接跑，VM 会落进"旧物归档"目录。** Phase 1 第一件事 = 改这个变量或每次显式 `--labroot`。
 - host 侧 E: 空间验算（210 万路线）：3×OS 实际占用约 25–30 GB/台 ≈ 85 GB；SRC 数据 ≈ 55 GB；DST 目标 ≈ 55 GB；合计实际写入约 **200 GB**（动态盘按实际增长），远小于 E: 的 717.70 GB。**建议数据盘用固定大小 VHDX**（避免 210 万文件期间动态扩展抖动），固定预留 120+160 = 280 GB，仍在安全范围。
 
 ---
@@ -316,7 +316,7 @@ Share / NTFS 建议基线（`LAB-SRC01`）：
 
 ## ⑭ F01–F15 正式 Case Matrix（Phase 0 只设计，不执行）
 
-通用前提（每 Case 隐含，不重复写）：环境 = `TEST-BASELINE`；Persona 按列指定；故障注入前后记录 **T1/T2/T3**；证据落宿主侧 `E:\Project\deepseek work\archive\threevm-lab\<CaseID>\`；每 Case 出 **Data / Product / Evidence / Human-UI** 四个 Verdict + Case Verdict；**故障未真正生效而 PCMig 正常运行 ⇒ `INVALID / INCONCLUSIVE`**。
+通用前提（每 Case 隐含，不重复写）：环境 = `TEST-BASELINE`；Persona 按列指定；故障注入前后记录 **T1/T2/T3**；证据落宿主侧 `<工作区根>\archive\threevm-lab\<CaseID>\`；每 Case 出 **Data / Product / Evidence / Human-UI** 四个 Verdict + Case Verdict；**故障未真正生效而 PCMig 正常运行 ⇒ `INVALID / INCONCLUSIVE`**。
 
 | Case | 前置条件 | UI 操作 | 故障注入 | 预期业务行为（代码契约） | 预期 UI 行为 | 证据 | 恢复方式 |
 |---|---|---|---|---|---|---|---|
@@ -350,13 +350,13 @@ Share / NTFS 建议基线（`LAB-SRC01`）：
 | `DOMAIN-BASELINE` | AD DS/DNS 就绪 + SRC01/DST01 入域 + 账号/组/OU 完成 | 域验证通过后 | Secure Channel/机器账户/DNS 严重污染时 |
 | `TEST-BASELINE` | PCMig 已部署 + 标准数据 + 标准权限 + 测试前清场（清 SMB 会话、清 job 目录、清诊断会话） | 每次正式 Case 开始前 | **普通故障的首选恢复点** |
 
-- 工具：`C:\Users\User\.dsh\skills\hyperv-lab\scripts\hyperlab.mjs checkpoint create|restore|remove --name <vm>`（兜底）或 `mcp__hyperv-mcp__hyperv_checkpoint_*`（首选，带 `include_subtree` 语义）。
+- 工具：`<用户目录C>\.dsh\skills\hyperv-lab\scripts\hyperlab.mjs checkpoint create|restore|remove --name <vm>`（兜底）或 `mcp__hyperv-mcp__hyperv_checkpoint_*`（首选，带 `include_subtree` 语义）。
 - **恢复纪律**：
   1. 普通故障（文件/权限/共享/网络/服务）**只用局部恢复**，不要回滚 DC、不要三台一起回滚。
   2. **禁止无计划单独回滚 DC**；涉及机器账户/信任/DNS 严重污染时才用域级恢复或直接重建实验域。
   3. **不要**默认"三台用同名 Snapshot 一起恢复 = AD 健康"。
   4. 每次恢复后**必查**：DNS（`nslookup corp.test`）、AD DS（`Get-ADDomain`）、SYSVOL/NETLOGON（`\\LAB-DC01\SYSVOL`）、成员机信任（`nltest /sc_verify:corp.test`）、普通用户登录、`\\LAB-SRC01\D` 可访问。
-  5. **证据文件一律存宿主侧**（`E:\Project\deepseek work\archive\threevm-lab\`），**绝不**只留在 guest 内 —— 否则 Rollback 会连证据一起抹掉。
+  5. **证据文件一律存宿主侧**（`<工作区根>\archive\threevm-lab\`），**绝不**只留在 guest 内 —— 否则 Rollback 会连证据一起抹掉。
   6. `clone` 前先拍检查点（运行中复制 VHDX 只得崩溃一致性镜像）。
 
 ---
@@ -529,14 +529,14 @@ Phase 4  汇总报告（每 Case 四 Verdict）
 |---|---|---|---|
 | D1 | **Windows Server 介质从哪来** | (a) 人工提供 Server 2025 ISO；(b) 人工提供微软评估中心 Server 2025 **VHD**（历史结论推荐：免安装、免按键）；(c) 其他 | **阻塞 LAB-DC01**，直接决定能否开工 |
 | D2 | **虚拟化平台** | (a) Hyper-V（现成可用，**建议**）；(b) 安装 VMware 26H1/26H1u1（第三方重打包，需合规确认） | 决定 §附录 C 的建机路线与全部脚本 |
-| D3 | **LabRoot 最终值** | (a) `E:\PCMigLab`（SKILL.md 默认，空间最充裕）；(b) 保留 `D:\PCMig-旧物归档\PCMigLab` | 决定 VM/证据落盘位置；含改 `PCMIG_LAB_ROOT` 环境变量 |
+| D3 | **LabRoot 最终值** | (a) `<实验室根>`（SKILL.md 默认，空间最充裕）；(b) 保留 `<发版工作副本>-旧物归档\PCMigLab` | 决定 VM/证据落盘位置；含改 `PCMIG_LAB_ROOT` 环境变量 |
 | D4 | **三 VM 的 Windows 版本基线** | 建议：DC01 = Server 2025 Standard(桌面体验)；SRC01/DST01 = **同一张** Win11 24H2 商业版（26100）；可选兼容基线 = Win10 22H2 商业版（19045）**留待第二轮** | 决定"环境变量可控"是否可以成立 |
 | D5 | **Route B 的客户端** | (a) 用旧 WPF `PCMig.Gui`（有 `ExpertMode` 开关）；(b) 先在 v0.5.0 接线再测（属**产品改动**，须另开授权）；(c) Route B 推后 | 「超大数据模式」第①步现在无法在 WinUI 上执行 |
 | D6 | **PCMig 部署形态** | (a) 用现有 `bin\Release` 构建产物（存在两棵重复构建树，需指定其中一棵）；(b) 正式走 `tools\release.ps1` 出包（会写日志+打包，属发版动作，需授权） | 决定 DST01 上跑的二进制与 SHA256 记录 |
 | D7 | **是否允许一次性管理员令牌** | 建交换机 / 改 Hyper-V 默认路径 / 确认 ISO 索引 / 可能的新建 VM 都需要提权 | 本会话审批为 never，**无法自提权**；没有它 Phase 1 无法开工 |
-| D8 | **`lab-admin-*` SYSTEM 执行器是否引入** | 建议**不引入**（历史已被 ReadKey 挂死；且实测免提权即可读 VM）。若引入，必须先把 `lab-admin-setup.ps1:26` 的 `I:\deepseek work\...` 改成权威路径 | 宿主持久提权面，属安全变更 |
+| D8 | **`lab-admin-*` SYSTEM 执行器是否引入** | 建议**不引入**（历史已被 ReadKey 挂死；且实测免提权即可读 VM）。若引入，必须先把 `lab-admin-setup.ps1:26` 的 `<旧镜像根>\...` 改成权威路径 | 宿主持久提权面，属安全变更 |
 | D9 | **210 万数据是否接受"新写生成器"** | 现成脚本只到 5 万小文件 | 决定 Phase 3 的工作量 |
-| D10 | **证据根目录确认** | 建议 `E:\Project\deepseek work\archive\threevm-lab\`（在工作区权威证据根下、在仓库外、不随 VM 回滚消失） | 决定 §16 全部证据落点 |
+| D10 | **证据根目录确认** | 建议 `<工作区根>\archive\threevm-lab\`（在工作区权威证据根下、在仓库外、不随 VM 回滚消失） | 决定 §16 全部证据落点 |
 
 ---
 
@@ -548,9 +548,9 @@ Phase 4  汇总报告（每 Case 四 Verdict）
 
 | # | 阻塞项 | 事实 | 解除方式 |
 |---|---|---|---|
-| **B1** | **没有任何 Windows Server 安装介质** | 全盘（C:/D:/E:，含递归）搜索 `*.iso/*.vhd/*.vhdhx/*.vmdk/*.wim/*.esd`：只有 4 个**客户端** ISO + `C:\Aomei\AomeiBoot.wim` + `ampe.iso`；`D:\PCMig-旧物归档\PCMigLab\ISO` **为空**；`E:\PCMigLab` 不存在 | 人工提供 Server 2025 ISO 或评估中心 VHD（Phase 0 禁止下载） |
+| **B1** | **没有任何 Windows Server 安装介质** | 全盘（C:/D:/E:，含递归）搜索 `*.iso/*.vhd/*.vhdhx/*.vmdk/*.wim/*.esd`：只有 4 个**客户端** ISO + `C:\Aomei\AomeiBoot.wim` + `ampe.iso`；`<发版工作副本>-旧物归档\PCMigLab\ISO` **为空**；`<实验室根>` 不存在 | 人工提供 Server 2025 ISO 或评估中心 VHD（Phase 0 禁止下载） |
 | **B2** | **虚拟化平台未拍板** | Hyper-V 可用；VMware 未安装但安装介质已备（第三方重打包，两版并存） | 用户决定 D2 |
-| **B3** | **`PCMIG_LAB_ROOT` 冲突** | 现值为 `D:\PCMig-旧物归档\PCMigLab`，与 hyperv-lab skill 默认 `E:\PCMigLab` 冲突；照现状跑会把 VM 建进"旧物归档" | 用户决定 D3，然后改环境变量或每次 `--labroot` |
+| **B3** | **`PCMIG_LAB_ROOT` 冲突** | 现值为 `<发版工作副本>-旧物归档\PCMigLab`，与 hyperv-lab skill 默认 `<实验室根>` 冲突；照现状跑会把 VM 建进"旧物归档" | 用户决定 D3，然后改环境变量或每次 `--labroot` |
 | **B4** | **无可用的 210 万文件生成器** | 现成脚本上限 50,000 小文件 ≈25.6 MB；且 `vm-gen-massdata.ps1` 锁文件段单跑必抛异常 | 接受 D9，Phase 1 新写 |
 | **B5** | **ISO 的 install 索引无法在无提权下确认** | `Get-WindowsImage`/`dism` 与 `fsutil`（簇大小）都需管理员；本会话审批为 never | 需一次性管理员令牌（D7），或改在 Phase 1 装机步骤里用提权会话确认 |
 | **B6** | **Hyper-V 写操作免提权未验证** | 读操作（`Get-VM`/`Get-VMHost`）免提权成功；`New-VM`/`New-VMSwitch`/`Add-VMDvdDrive` 未实测（Phase 0 禁止创建） | Phase 1 首次尝试即知；失败则需提权会话（D7） |
@@ -559,7 +559,7 @@ Phase 4  汇总报告（每 Case 四 Verdict）
 **非阻塞但必须记录**：
 - 宿主 NTFS 簇大小未知（`fsutil` 需提权）—— 影响 §17 空间精算的精度，不改变 120/160 GB 的盘容量结论。
 - `Windows.iso` 经鉴定是 **Windows 10 客户端（19041 分支）ESD 介质**，**不是** Windows Server（详见 §B）。
-- 历史 L3 资产已全部不可复用：`G:\`/`I:\`/`J:\` 盘不存在；既有 VM 资产（`G:\HyperV\PCMig-OldPC`、`E:\Documents\Virtual Machines\`）与已校验的 Server 2025 Eval ISO 均已不在盘上。
+- 历史 L3 资产已全部不可复用：`G:\`/`I:\`/`J:\` 盘不存在；既有 VM 资产（`<Hyper-V 镜像盘>\PCMig-OldPC`、`<本机文档>\Virtual Machines\`）与已校验的 Server 2025 Eval ISO 均已不在盘上。
 - 历史遗留：`CLIENT01` 曾出现 **PowerShell Direct 始终不可达（原因未查明）** ⇒ 新实验室的 `LAB-DST01` 必须**提前做一次 PD 可达性验证**，不能假定 PD 一定通。
 
 **已就绪、可直接进入 Phase 1 的部分**：产品契约已查清（§13）；运行拓扑与数据路径已确认（§①②）；宿主机资源与虚拟化平台已确认（§④⑤）；网络/域/账号/权限基线方案已定（§⑦⑧⑨⑩）；F01–F15 Case Matrix 已设计（§⑭）；快照/证据/时间线方案已定（§⑮⑯⑲）；客户机 ISO 已选定且哈希可核（§C）；`hyperv-lab` skill 与 6 个可直接复用的 L3 脚本已定位（§附录 C）。
@@ -574,7 +574,7 @@ Phase 4  汇总报告（每 Case 四 Verdict）
 |---|---|
 | Current Installed Version | **NOT INSTALLED**（注册表无 VMware 卸载项；无 `vmware*`/`vmnat`/`vmnetdhcp` 进程；无 `vmrun`；`C:\ProgramData\VMware` 不存在） |
 | Prepared Installer Version | **两个版本并存**：`26H1 (25388281)` 与 `26H1u1 (25688693)`；Windows exe 与 Linux bundle 两种形态 |
-| Installer Path | `E:\系统ISO和Vm安装包\VM\VMware Workstation 26H1\` |
+| Installer Path | `<ISO 镜像目录>\VM\VMware Workstation 26H1\` |
 | SHA256 | 26H1 exe = `a0ef9087607d9cad20b08139e73e41242e044ad5bd8cee141d3bad314586737f`（287,670,872 B）<br>26H1 bundle = `3f6d2501e654dbc7701a8290ff6ffcfba6c5444cd5f35f4933cd08c9499f6d84`（340,821,664 B）<br>26H1u1 Windows exe = `3d775c3c2153600eef4642f95d519a514ba7e861400bda2598352bff792db473`（280,609,368 B）<br>26H1u1 Linux bundle = `da823c853cc7e57be7b9b070c8aed20fe9d75fd519ae6f175ab1dafc7283002e`（366,828,204 B）<br>**4 个随附 `.sha256` 全部自校验 MATCH**（说明文件未损坏，但**不证明来源官方**） |
 | 附带 | `-CHS-Lang-M.zip` 2,072,942 B、`-CHS-Lang-Z.zip` 2,071,553 B、`-25688693-CHS-Lang-Z.7z` 1,590,061 B、`_Powered_by_sysin.org.url` 108 B |
 | Usable for Three-VM Lab | **NEEDS REVIEW** —— ① 来源为第三方重打包站 sysin.org（含中文语言包、Linux bundle），非 Broadcom 官方渠道；② 两版并存未定；③ 本机 Hyper-V 已可直接使用。**Phase 0 不安装、不升级、不卸载** |
@@ -584,7 +584,7 @@ Phase 4  汇总报告（每 Case 四 Verdict）
 | 字段 | 值 |
 |---|---|
 | Selected ISO | **NONE FOUND — 阻塞项 B1** |
-| Path | —（`E:\系统ISO和Vm安装包\ISO\` 内 4 个 ISO 已逐一鉴定，**无一个是 Server**；`D:\PCMig-旧物归档\PCMigLab\ISO` 为空；全盘无 `*SERVER*` 命名的镜像） |
+| Path | —（`<ISO 镜像目录>\ISO\` 内 4 个 ISO 已逐一鉴定，**无一个是 Server**；`<发版工作副本>-旧物归档\PCMigLab\ISO` 为空；全盘无 `*SERVER*` 命名的镜像） |
 | Windows Version / Edition / Build / Language / Architecture | 不可提供 |
 | Suitable for LAB-DC01 | **NO** |
 
@@ -592,7 +592,7 @@ Phase 4  汇总报告（每 Case 四 Verdict）
 
 | 字段 | 值 |
 |---|---|
-| 文件 | `E:\系统ISO和Vm安装包\ISO\Windows.iso` |
+| 文件 | `<ISO 镜像目录>\ISO\Windows.iso` |
 | 大小 / mtime | **4,983,554,048 B（4.64 GB）** / 2026-10-02 14:50:55 |
 | SHA256 | `2189232877cd06b4e090b016817b00da48062babb119fc8a79f0924d56e55946` |
 | 卷标 | **`ESD-ISO`** |
@@ -609,7 +609,7 @@ Phase 4  汇总报告（每 Case 四 Verdict）
 | 字段 | 主选（建议） |
 |---|---|
 | Selected ISO | `zh-cn_windows_11_business_editions_version_24h2_updated_oct_2025_x64_dvd_a30b900a.iso` |
-| Path | `E:\系统ISO和Vm安装包\ISO\` |
+| Path | `<ISO 镜像目录>\ISO\` |
 | Windows Version | **Windows 11 24H2**（商业版，2025-10 更新；联网佐证对应内部版本 **26100.6899**） |
 | Edition | 商业版多版本，`install.wim` **映像数 = 5**；**专业版索引待提权确认**（`confirm-iso-images.ps1` 一句即可，Phase 1 必做） |
 | Build | 26100（`setup.exe` 10.0.26100.1；`mediasetupuimgr.dll`/`setupplatform.dll` = **10.0.26100.6713**） |
@@ -624,7 +624,7 @@ Phase 4  汇总报告（每 Case 四 Verdict）
 |---|---|---|
 | `Windows11_ChinaOnly_professional_x64_zh-cn_26300_9457.iso`（8,825,178,112 B，SHA `95fe575e6e8069bd6a151f0aac784589c0d752794d20f51c4138f5796428934e`，卷标 `PCHA_X64FREO_ZH-CN_DV9`，install.wim 7,497.9 MB、**映像数=1**、**无 EI.CFG**、setup 栈 26100.9443，文件名/联网佐证 = **Win11 26H2（26300）**，与宿主自身 26300 同代） | **NEEDS REVIEW / 备选** | 单映象省事、版本最新，但属"**仅限中国**"渠道 SKU、build 极新（26H2），与"公司真实企业环境"的相似度低于商业版；不作主选 |
 | `zh-cn_windows_10_business_editions_version_22h2_updated_oct_2025_x64_dvd_d4e92df7.iso`（6,985,566,208 B，SHA `2c026f88b826be82ec0fb5a084b822298fba026eef9d8cff8441e822fc72205e`，install.wim 5,780.8 MB、**映像数=5**、有 EI.CFG，**SHA256 与微软 MSDN 公布值逐字一致 ⇒ 原版可信**，内部版本 19045.6456） | **可选兼容基线（第二轮）** | 第一轮**不混入** OS 差异（任务书明确要求）；第二轮作为 `Optional Compatibility Baseline` |
-| `D:\Users\User\Downloads\Windows11_ChinaOnly_professional_x64_zh-cn_26300_9457.iso` | 冗余 | 与 E: 同名同大小重复（8.22 GB） |
+| `<用户目录D>\Downloads\Windows11_ChinaOnly_professional_x64_zh-cn_26300_9457.iso` | 冗余 | 与 E: 同名同大小重复（8.22 GB） |
 
 **`Primary Three-VM OS Baseline`（建议）**：
 - `LAB-DC01` = **Windows Server 2025 Standard（Desktop Experience）** —— 介质待补（B1）
@@ -637,7 +637,7 @@ Phase 4  汇总报告（每 Case 四 Verdict）
 
 | 文件 | 用途判定 | 是否需要 | 处置建议 |
 |---|---|---|---|
-| `E:\系统ISO和Vm安装包\ISO\Windows.iso` | **Win10 客户端 19041 分支 ESD 介质**（非 Server，edition 待确认） | 不必需 | **保留备用**；不作为 DC，也不作为第一轮客户端 |
+| `<ISO 镜像目录>\ISO\Windows.iso` | **Win10 客户端 19041 分支 ESD 介质**（非 Server，edition 待确认） | 不必需 | **保留备用**；不作为 DC，也不作为第一轮客户端 |
 | `C:\Program Files (x86)\AOMEI Partition Assistant\ampe.iso`（1,098.6 MB） | AOMEI 分区助手 **PE 维护盘** | 与实验无关 | 保留（不属于本实验资产） |
 | `C:\Aomei\AomeiBoot.wim`（1,040.5 MB） | 同上，PE 引导映像 | 与实验无关 | 保留 |
 | `PCMig\lab\answer.iso`（1,179,648 B）及若干历史副本 | 历史 L3 应答盘（`answer\autounattend.xml` 面向 **Win10 专业版**，且**含明文密码**） | 第一轮不需要 | **保留但不要直接复用**；若复用必须先处理凭据并另写 Server/Win11 应答 |
@@ -649,23 +649,23 @@ Phase 4  汇总报告（每 Case 四 Verdict）
 
 | 资产 | 结论 |
 |---|---|
-| `tools\pcmiglab-vm.ps1`（175 行） | **复用性最高**。只建空 VM + 空 VHDX + 交换机；默认干跑 + `-LabRoot` 可覆盖（hyperv-lab skill 已用 `-LabRoot E:\PCMigLab` 适配）；硬编码 `G:\PCMigLab`、`PCMigLab-Sw`、`192.168.28`、DC01/FS01/CLIENT01 规格。**创建/删除 VM 可能仍需管理员令牌** |
+| `tools\pcmiglab-vm.ps1`（175 行） | **复用性最高**。只建空 VM + 空 VHDX + 交换机；默认干跑 + `-LabRoot` 可覆盖（hyperv-lab skill 已用 `-LabRoot <实验室根>` 适配）；硬编码 `<实验室镜像盘>`、`PCMigLab-Sw`、`192.168.28`、DC01/FS01/CLIENT01 规格。**创建/删除 VM 可能仍需管理员令牌** |
 | `tools\l3-inject.ps1`（400 行） | **★★★★★ 最值得复用**。离线灌盘：`Mount-VHD` → GPT(EFI 300MB/MSR/NTFS) → `Expand-WindowsImage` → `bcdboot /f UEFI` → 注入 `Windows\Panther\unattend.xml` + `SetupComplete.cmd` → 卸盘 → 建 VM → **硬盘首启**。头注释直接写明结论：「从 ISO 引导安装必然出现 `Press any key to boot from CD`（Hyper-V Gen2 UEFI 无法绕过）…离线部署完全不需要引导安装程序」。⚠ 风险点：`:291-293` `Remove-Partition -Confirm:$false`（按磁盘号，裸删分区）、`:210` 挂 ISO **无配对卸载**、`:296/:304` `-AssignDriveLetter` 会扰动宿主盘符、`:243` `Stop-VM -Force` |
 | `tools\confirm-iso-images.ps1` | **唯一零副作用的宿主级脚本**（挂 ISO → 列 wim 清单 → 卸 ISO → 写 `IMAGES-LIST.txt`）；**新实验室必须先跑一次**（改 `$IsoPath`，且**删掉 `:111-114` 的写死结论**）。需管理员 |
 | `tools\l3-diag.ps1` | **只读诊断，复用性最高**；打印服务/固件/启动顺序/DVD/HDD/网卡并给结论。若新方案改成硬盘首启，其"从光驱引导"的结论假设会把正确配置误判为问题 |
 | `tools\l3-fixboot.ps1` | 修 `The boot loader did not load an operating system`；**灌盘起不来时的唯一现成解药**，建议一并适配保留 |
 | `tools\l3-orchestrate.ps1` | **编排思路最值钱**：PowerShell Direct（不走网络）+ 超时轮询 + 等待域就绪 + 重试加域 + 写 json 证据 + "BLOCKED 而非假 FAIL"。需改 VM 名常量、域就绪判据、重试动作。⚠ 历史坑：域控上不能用裸 `Administrator` 连接（需 `.\Administrator` 或 `DOMAIN\Administrator`） |
-| `tools\lab-admin-{setup,executor,run}.ps1` | **建议不引入**。注册 SYSTEM+Highest+开机自启+无时限计划任务，队列目录"可写即可提权"（脚本自述）；默认 `$ExecutorPath='I:\deepseek work\PCMig\tools\lab-admin-executor.ps1'`（**旧镜像路径**）；历史 v1 因脚本末尾 `ReadKey` 在无人值守下**永久阻塞并把执行器一起挂死** |
+| `tools\lab-admin-{setup,executor,run}.ps1` | **建议不引入**。注册 SYSTEM+Highest+开机自启+无时限计划任务，队列目录"可写即可提权"（脚本自述）；默认 `$ExecutorPath='<旧镜像根>\PCMig\tools\lab-admin-executor.ps1'`（**旧镜像路径**）；历史 v1 因脚本末尾 `ReadKey` 在无人值守下**永久阻塞并把执行器一起挂死** |
 | `tools\l3\dc01-setup.ps1` | **DC01 可直接复用**（改域名字符串即可）：`Install-ADDSForest`、OU/组/用户、安全闸门"已是域成员即中止" |
 | `tools\l3\fs01-setup.ps1` | 部分复用（目标改 Win11 + `D:` 共享后 ShareRoot/ShareName/IP 全改）；⚠ `Install-WindowsFeature -Name FS-FileServer` **在 Win11 上不存在，必须改** |
 | `tools\l3\client01-setup.ps1` | 最接近 `LAB-DST01`（加域 + 造用户数据），但**完全不含 PCMig 部署逻辑**（只做 `Get-Command pcmig` 探测）⇒ **DST01 部署 PCMig = 净新增工作量** |
-| `tools\l3\l3-scenarios.ps1` | **当前无法运行**：依赖 `J:\pcmig-lab\lib\LabCommon.ps1`（全工作区 glob **零命中**），调用的 10 个函数全部未定义 ⇒ 直接 `exit 2`。**场景设计可抄，代码不可抄** |
+| `tools\l3\l3-scenarios.ps1` | **当前无法运行**：依赖 `<外置实验室盘>\lib\LabCommon.ps1`（全工作区 glob **零命中**），调用的 10 个函数全部未定义 ⇒ 直接 `exit 2`。**场景设计可抄，代码不可抄** |
 | `lab\vm-gen-massdata.ps1` | 上限 50,000 个 512 B 小文件；写死 `E:`；**锁文件段依赖 `fill-e.ps1` 先建文件，单跑必抛异常**；无幂等/续跑 |
 | `lab\fill-e.ps1` | 4×2100 MB + 50×10 MB + 3,000×40 KB + 200 docx + 填满盘只留 150 MB；**只能在 guest 内跑** |
 | `lab\unlock.ps1` | `Stop-Process` 杀掉**所有** powershell 进程 ⇒ **危险，禁止在宿主运行** |
 | `lab\diskpart.txt` | `select disk 3` 裸按序号选盘 ⇒ 磁盘编号一变即**灾难性误清盘**；已被 `l3-inject.ps1` 的分区逻辑取代 |
 | `lab\repair-src.ps1` | **与实验室无关**（按行号改源码里的 U+FFFD 损坏中文；路径在 `H:`，行号映射一次性强耦合，**误用会静默破坏源码**） |
-| `C:\Users\User\.dsh\skills\hyperv-lab\SKILL.md`（6,476 B）+ `scripts\hyperlab.mjs`（6,845 B） | **⭐ 现成的建机入口**：`status/list/iso/plan/create/remove --purge-vhd/clone/export/import/checkpoint/create-lab`，**不加 `--execute` 一律干跑**；`create-lab` 转调 `tools/pcmiglab-vm.ps1 -LabRoot E:\PCMigLab`；安全口径完备（默认干跑、只认 `PCMigLab-` 前缀、隔离、不可逆操作先确认、凭据不写环境变量） |
+| `<用户目录C>\.dsh\skills\hyperv-lab\SKILL.md`（6,476 B）+ `scripts\hyperlab.mjs`（6,845 B） | **⭐ 现成的建机入口**：`status/list/iso/plan/create/remove --purge-vhd/clone/export/import/checkpoint/create-lab`，**不加 `--execute` 一律干跑**；`create-lab` 转调 `tools/pcmiglab-vm.ps1 -LabRoot <实验室根>`；安全口径完备（默认干跑、只认 `PCMigLab-` 前缀、隔离、不可逆操作先确认、凭据不写环境变量） |
 
 # 附录 B. 历史教训（仍然成立的，直接进 Phase 1 纪律）
 
@@ -679,23 +679,23 @@ Phase 4  汇总报告（每 Case 四 Verdict）
 # 附录 C. 最小可行建机路径（供 Phase 1 参考，本轮不执行）
 
 1. `confirm-iso-images.ps1`（改 `$IsoPath`，**提权**）→ 确认 Win11 24H2 商业版与 Server ISO 的 install 索引。
-2. 以 `l3-inject.ps1` 为蓝本（改 `$specs` 为 DC01/SRC01/DST01、`$LabRoot` 改 `E:\PCMigLab`、`$ImageIndex` 按确认值）→ **离线灌盘，无需按空格、无需应答 ISO**；DomainName 改 `corp.test`、IP 段改 `10.77.0.x`。
+2. 以 `l3-inject.ps1` 为蓝本（改 `$specs` 为 DC01/SRC01/DST01、`$LabRoot` 改 `<实验室根>`、`$ImageIndex` 按确认值）→ **离线灌盘，无需按空格、无需应答 ISO**；DomainName 改 `corp.test`、IP 段改 `10.77.0.x`。
 3. DC01：复用 `l3\dc01-setup.ps1` 改 `-DomainName corp.test` / `-NetbiosName CORP` / `-StaticIP 10.77.0.10`。
 4. SRC01：以 `fs01-setup.ps1` 为蓝本，`ShareRoot='D:\'`、ShareName `D`、**删掉 `Install-WindowsFeature FS-FileServer`**（Win11 无此角色，改 `New-SmbShare`）。
 5. DST01：**PCMig 部署为净新增**；造数可参考 `client01-setup.ps1:100-109`。
 6. 编排抄 `l3-orchestrate.ps1` 骨架（改 `$targets`、域就绪判据），**并额外加一条 `LAB-DST01` 的 PowerShell Direct 可达性预检**。
 7. 数据生成：现成脚本改盘符只能到 5 万小文件级；**210 万级必须新写**（见 §17 约束）。
-8. 提权优先"显式一次性管理员令牌"；若确需 `lab-admin-*`，**先把 `ExecutorPath` 从 `I:\deepseek work\...` 改成权威路径并单独报批**。
+8. 提权优先"显式一次性管理员令牌"；若确需 `lab-admin-*`，**先把 `ExecutorPath` 从 `<旧镜像根>\...` 改成权威路径并单独报批**。
 
 # 附录 D. 本次审计的证据来源与不确定项
 
 - **实测命令**（只读）：`Get-CimInstance Win32_Processor/Win32_ComputerSystem`、`Get-Volume`、`Get-VMHost`、`Get-VMSwitch`、`Get-VM`、`Get-Service SharedAccess`、`Get-NetIPAddress`、`Get-NetRoute`、`Get-NetNat`、`Get-SmbServerConfiguration`、`Get-FileHash`、`Mount-DiskImage`/`Dismount-DiskImage`、`Get-ChildItem -Recurse -Include *.iso,*.vhd,*.vhdx,*.vmdk,*.wim,*.esd`、注册表/进程/命令探测（VMware）、`Test-Path`、`git rev-parse/log/status`。
-- **代码核验**：`E:\Project\deepseek work\PCMig\src\` 全量 grep（Robocopy/拓扑/契约/超大数据模式）+ 四路只读子代理交叉核验（运行拓扑、产品契约、历史资产与大规模模式、L3 工具链）。
+- **代码核验**：`<仓库根>\src\` 全量 grep（Robocopy/拓扑/契约/超大数据模式）+ 四路只读子代理交叉核验（运行拓扑、产品契约、历史资产与大规模模式、L3 工具链）。
 - **未取到 / 不确定**：
   1. NTFS 簇大小（`fsutil` 需提权）—— 只影响 §17 空间精算精度。
   2. 各 ISO 内 edition 名（`Get-WindowsImage`/`dism` 需提权）—— 建 VM 前必须提权确认。
   3. Hyper-V **写**操作是否免提权 —— 未实测（Phase 0 禁止创建）。
   4. 宿主当前内存占用基线（只知总量 31.76 GB）—— Phase 1 建机前应实测。
-  5. `C:\Users\User\.dsh\skills\hyperv-lab\scripts\hyperlab.mjs` 的实现未逐行读（只读了 SKILL.md）；`create-lab` 除 `-LabRoot` 外是否还做其他适配未确认。
+  5. `<用户目录C>\.dsh\skills\hyperv-lab\scripts\hyperlab.mjs` 的实现未逐行读（只读了 SKILL.md）；`create-lab` 除 `-LabRoot` 外是否还做其他适配未确认。
   6. `docs\测试报告-公司环境.md`（1,348 行）与 `docs\qa\history\Private-Test-Lab-Blueprint.md`（344 行）只做了定向检索，未逐行通读。
   7. `LAB-DST01` 是否会被 GPO/Defender 策略影响（如 Controlled Folder Access 拦 robocopy 写入）—— 未测，属 Phase 1 场景（历史 L3-10）。

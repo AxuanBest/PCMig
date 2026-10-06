@@ -2,9 +2,9 @@ PCMig 会话短卡 · 委托链修复与 P3 裁决（2026-10-06 11:20）
 （可直接整段粘贴给新会话）
 
 【坐标】
-  权威工作区  E:\Project\deepseek work\PCMig   分支 feature/winui-v0.5.0
-  交付区      E:\Project\PCMig      工作副本 D:\PCMig      实验室 E:\PCMigLab
-  桌面交付根  D:\Users\User\Desktop\新建文件夹 (4)
+  权威工作区  <仓库根>   分支 feature/winui-v0.5.0
+  交付区      <交付区>      工作副本 <发版工作副本>      实验室 <实验室根>
+  桌面交付根  <用户目录D>\Desktop\<桌面交付根>
   发版脚本    tools\release.ps1
 
 【Git 现状（实读）】
@@ -16,7 +16,7 @@ PCMig 会话短卡 · 委托链修复与 P3 裁决（2026-10-06 11:20）
   身份 Axuanbest / axuanbest@users.noreply.github.com
 
 【开工必读链（按序，不许跳读）】
-  1 E:\Project\deepseek work\AGENTS.md
+  1 <工作区根>\AGENTS.md
   2 PCMig\AGENTS.md（十一条死律 + 权限条款 + 状态表）
   3 PCMig\docs\INDEX.md（唯一导航入口）
   4 PCMig\docs\工作交接-20261006-委托链修复与P3裁决.md（当前交接 = 本卡对应主文档）
@@ -67,7 +67,7 @@ PCMig 会话短卡 · 委托链修复与 P3 裁决（2026-10-06 11:20）
   · 未提交 tests\PCMig.Diagnostics.Tests\TestResults\*.trx（文件仍在盘，已 gitignore）
 
 【证据在哪】
-  报告根  E:\PCMigLab\Evidence\Trust-Critical-Recovery\
+  报告根  <实验室根>\Evidence\Trust-Critical-Recovery\
     ★ FIX-DELEGATION-CHAIN-20261006.md   修复报告（根因四环链 / 三层修复 / 门禁 / D6+D7）
     ★ SCENARIO-H-ROOT-CAUSE-20261006-REV2.md  根因定论版
       SCENARIO-H-ROOT-CAUSE-20261006.md   首版（结论已被推翻，勿引用其结论）
@@ -75,13 +75,13 @@ PCMig 会话短卡 · 委托链修复与 P3 裁决（2026-10-06 11:20）
       P3-DECISIONS-20261006.md           P3 三项裁决
       C1-PERF-CANVAS / C2-LIFECYCLE-MATRIX / C3-UniformScale-DPI-20261006.md
       TRACK-C-SUMMARY-20261006.md        未测三项汇总
-  夹具  E:\PCMigLab\Staging\fix-verify\diskfull-verify.ps1 + cli-verify.ps1 + out-r*\ + cli-out-c*\
-  桌面复验包  D:\Users\User\Desktop\新建文件夹 (4)\PCMig-委托链修复-复验包-20261006-110849\
+  夹具  <实验室根>\Staging\fix-verify\diskfull-verify.ps1 + cli-verify.ps1 + out-r*\ + cli-out-c*\
+  桌面复验包  <用户目录D>\Desktop\<桌面交付根>\PCMig-委托链修复-复验包-20261006-110849\
   ⚠ 实验室残留按用户明确决定「全部保留」（fix-verify 与 ProgramData 测试 job 不删）
 
 【回退（只许可回退手段）】
   git revert 1594fe0 / git revert 66d8ced（后者会恢复 818 行的 ProgressMotionDriver.cs）
-  文件级 E:\Project\deepseek work\archive\pcmig-round3-immersive-backup-20261006-000027\
+  文件级 <工作区根>\archive\pcmig-round3-immersive-backup-20261006-000027\
   禁止 reset --hard / checkout . / restore . / clean -fd / rebase / amend / 删未知用户文件
 
 【环境踩坑（省几小时）】

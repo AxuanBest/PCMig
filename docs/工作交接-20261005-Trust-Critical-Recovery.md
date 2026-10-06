@@ -3,11 +3,11 @@
 > 本文档按「交接只增不覆」新增，**不覆盖**产品 Current Handover（`docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md`），
 > 也不改动上一份并行轨道交接 `docs\工作交接-20261004-Trust-Critical-Recovery.md`。
 > 完整细节、逐 case 证据、陷阱清单见实验室侧交接：
-> `E:\PCMigLab\Evidence\Trust-Critical-Recovery\SESSION-HANDOFF-TRUST-CRITICAL-RECOVERY-20261005-0200.md`（+ `…-QUICK.txt`）。
+> `<实验室根>\Evidence\Trust-Critical-Recovery\SESSION-HANDOFF-TRUST-CRITICAL-RECOVERY-20261005-0200.md`（+ `…-QUICK.txt`）。
 
 ## 一、本轮（本会话）在仓库里做了什么
 
-- 依据权威施工指令（22 节，`E:\PCMigLab\Evidence\Trust-Critical-Recovery\INSTRUCTION-Trust-Critical-Recovery-Campaign.md`）**完成 FIX BATCH 1→7**：
+- 依据权威施工指令（22 节，`<实验室根>\Evidence\Trust-Critical-Recovery\INSTRUCTION-Trust-Critical-Recovery-Campaign.md`）**完成 FIX BATCH 1→7**：
   - **BATCH 1** Pause 核心语义（机制 A：杀当前 robocopy 进程树、当前对象不记完成回执、Resume 重跑该对象）；SLA 常量集中在 `src\PCMig.Diagnostics.Abstractions\ActionSla.cs`（5 s / 10 s / 2 s / 12 s / 30 s / 60 s）；`ActionSla` 无 ProjectReference 依赖，是引擎/诊断/UI 的唯一真值源。
   - **BATCH 2** Pause UI 状态机（`PauseUiState`、`IsPaused/IsPausing/IsPauseFailed/PauseButtonText/PauseStateText`、`CanResume` 重写、过期失败态丢弃）。
   - **BATCH 3** 诊断动作兑现（`pause.v2` 契约、`ExpectationFailure`/`OnFailure`、第 8 条规则 `ACTION_FULFILLMENT_FAILED`(TRN-023)、`DiagnosticHealth.MarkActionUnfulfilled`）。
@@ -43,7 +43,7 @@
 
 ## 五、导航指针
 
-- 实验室侧交接（权威、含全部证据坐标与陷阱）：`E:\PCMigLab\Evidence\Trust-Critical-Recovery\SESSION-HANDOFF-TRUST-CRITICAL-RECOVERY-20261005-0200.md` / `…-QUICK.txt`
+- 实验室侧交接（权威、含全部证据坐标与陷阱）：`<实验室根>\Evidence\Trust-Critical-Recovery\SESSION-HANDOFF-TRUST-CRITICAL-RECOVERY-20261005-0200.md` / `…-QUICK.txt`
 - 现场账本：`…\CURRENT-TRUST-CRITICAL-CHECKPOINT.txt`（尾部 `PAUSE / FREEZE RECORD` 2026-10-05 01:44）
 - 风险台账：`…\OPEN-RISKS.md`；逐批证据：`…\FIX-BATCH-1..6-*.md`；恢复门：`…\recovery-gate\`
-- 桌面复核包：`D:\Users\User\Desktop\新建文件夹 (4)\PCMig-Trust-Critical-Recovery-BATCH7-RecoveryGate-20261005-0200\`（+ 同名 .zip）
+- 桌面复核包：`<用户目录D>\Desktop\<桌面交付根>\PCMig-Trust-Critical-Recovery-BATCH7-RecoveryGate-20261005-0200\`（+ 同名 .zip）

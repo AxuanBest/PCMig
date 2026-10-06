@@ -3,15 +3,15 @@
 > **本文件的定位**：这是 **lab 修复战役（Trust-Critical Recovery）** 的会话交接，属**并行轨道**，
 > **不是**产品 Current Handover。产品 Current 仍为 `docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md`，
 > 本文件按"只增不覆"规则新增，不替换任何既有交接文档。
-> 权威全文与证据在实验室侧：`E:\PCMigLab\Evidence\Trust-Critical-Recovery\`。
+> 权威全文与证据在实验室侧：`<实验室根>\Evidence\Trust-Critical-Recovery\`。
 
 - 交接时间戳：`20261004-2205`（用户主动收口：上下文过长）
 - 轨道状态：**只读调查已完成并交付；修复战役仅完成 baseline；产品源码零改动**
-- 权威施工指令：`E:\PCMigLab\Evidence\Trust-Critical-Recovery\INSTRUCTION-Trust-Critical-Recovery-Campaign.md`（22 节，约束完整摘录）
-- 完整交接：`E:\PCMigLab\Evidence\Trust-Critical-Recovery\SESSION-HANDOFF-TRUST-CRITICAL-RECOVERY-20261004-2205.md`
-- 粘贴用短卡：`E:\PCMigLab\Evidence\Trust-Critical-Recovery\SESSION-HANDOFF-TRUST-CRITICAL-RECOVERY-20261004-2205-QUICK.txt`
-- 当前检查点：`E:\PCMigLab\Evidence\Trust-Critical-Recovery\CURRENT-TRUST-CRITICAL-CHECKPOINT.txt`
-- 桌面复核包：`D:\Users\User\Desktop\新建文件夹 (4)\PCMig-Trust-Critical-Recovery-Handoff-20261004-2205\`（+ 同名 `.zip`）
+- 权威施工指令：`<实验室根>\Evidence\Trust-Critical-Recovery\INSTRUCTION-Trust-Critical-Recovery-Campaign.md`（22 节，约束完整摘录）
+- 完整交接：`<实验室根>\Evidence\Trust-Critical-Recovery\SESSION-HANDOFF-TRUST-CRITICAL-RECOVERY-20261004-2205.md`
+- 粘贴用短卡：`<实验室根>\Evidence\Trust-Critical-Recovery\SESSION-HANDOFF-TRUST-CRITICAL-RECOVERY-20261004-2205-QUICK.txt`
+- 当前检查点：`<实验室根>\Evidence\Trust-Critical-Recovery\CURRENT-TRUST-CRITICAL-CHECKPOINT.txt`
+- 桌面复核包：`<用户目录D>\Desktop\<桌面交付根>\PCMig-Trust-Critical-Recovery-Handoff-20261004-2205\`（+ 同名 `.zip`）
 
 ## 1. 为什么开这条轨道
 
@@ -29,9 +29,9 @@
 
 ## 2. baseline（本轮落盘，可直接复用）
 
-- 仓库 `E:\Project\deepseek work\PCMig`，分支 `feature/winui-v0.5.0`，HEAD `d1aefb2fb8b36b135cf136afc71532c3450226a8`
+- 仓库 `<仓库根>`，分支 `feature/winui-v0.5.0`，HEAD `d1aefb2fb8b36b135cf136afc71532c3450226a8`
 - 工作树：`git status --porcelain=v1` = 29（19 modified + 10 untracked）；`git diff --stat` = **19 files changed, 918 insertions(+), 64 deletions(-)**
-- 证据目录 `E:\PCMigLab\Evidence\Trust-Critical-Recovery\baseline\`（10 文件）：`baseline-meta.txt`、`git-head.txt`、`git-branch.txt`、`git-status-porcelain.txt`、`git-diff-stat.txt`、`git-diff-name-only.txt`、`git-diff-full.patch.txt`、`git-log-1.txt`、`git-stash-list.txt`、`build-identity-before.csv`
+- 证据目录 `<实验室根>\Evidence\Trust-Critical-Recovery\baseline\`（10 文件）：`baseline-meta.txt`、`git-head.txt`、`git-branch.txt`、`git-status-porcelain.txt`、`git-diff-stat.txt`、`git-diff-name-only.txt`、`git-diff-full.patch.txt`、`git-log-1.txt`、`git-stash-list.txt`、`build-identity-before.csv`
 - 当前候选构建身份（四哈希）：exe `20CA24445D40D1445131C6F398FBFC7ACB129B62BF5C7845A211B13C6004DD0F`、Core.dll `C233F270394A666EEACF5A367BF67E2D6755B553BCF7F577D05D7F3184D25A2C`、WinUI.dll `E25927058EF4056CE7B997B24358C363E84FCD5F3CA70B178E6F527179441CD5`、WinUI.pri `481CDD88A8B0D515CE72559D450387BC92728D5FF8BED1C44CC64CFD37322A66`
 - 本轮**未**构建、未部署、未启动 VM、未启动应用、未改任何产品源码。
 
@@ -58,6 +58,6 @@
 
 ## 6. 本文件对应的证据与索引
 
-- 调查包（只读）：`D:\Users\User\Desktop\PCMig-Serious-Issue-Investigation-20261004-180846\`（20 份报告，核心 03/04/06/07/08/09/15/16）
-- 真实失败轮现场：`C:\ProgramData\PCMig\Jobs\JOB-20261004-171522-b785\`、诊断会话 `40d85e6396ff4545bdc8e3167cde5b1d`（709 事件、incidents 空）与 `48a7ef9a58c6421299db758813b50ab7`
+- 调查包（只读）：`<用户目录D>\Desktop\PCMig-Serious-Issue-Investigation-20261004-180846\`（20 份报告，核心 03/04/06/07/08/09/15/16）
+- 真实失败轮现场：`<本机程序数据目录>\Jobs\JOB-20261004-171522-b785\`、诊断会话 `40d85e6396ff4545bdc8e3167cde5b1d`（709 事件、incidents 空）与 `48a7ef9a58c6421299db758813b50ab7`
 - 本文件在桌面复核包内的副本：`investigation-reports\` 同级 `REPO-HANDOFF-20261004-Trust-Critical-Recovery.md`

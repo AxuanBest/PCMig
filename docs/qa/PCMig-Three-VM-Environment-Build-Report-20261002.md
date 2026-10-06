@@ -3,7 +3,7 @@
 - 报告时间：2026-10-02 23:40（Asia/Shanghai）
 - 阶段：**Three-VM Phase 1 — Environment Build**
 - 授权来源：人工指令 `START THREE-VM ENVIRONMENT BUILD`（含 27 节主指令 + 14 节「无人值守管理员执行模式」）
-- 权威证据根：`E:\PCMigLab\Evidence\Phase1-EnvironmentBuild-20261002-221412\`（D10）
+- 权威证据根：`<实验室根>\Evidence\Phase1-EnvironmentBuild-20261002-221412\`（D10）
 - **最终状态：`THREE-VM ENVIRONMENT BUILD COMPLETE` / `Status: READY FOR UI TEST EXECUTION`**
 - 本阶段**未启动过任何 PCMig 正式测试**：未 Connect、未 Add Share、未 Start/Stop/Resume/Verify/Repair、未跑 F01–F15、未生成 210 万文件、未改产品代码、未接线 ExpertMode、未动 PMML、未 push、未 Release。
 
@@ -26,7 +26,7 @@ Mount-VHD → Initialize-Disk GPT → EFI 300MB FAT32 + MSR 16MB + NTFS 主分�
 灌盘后各机一次开机即进入 unattend 的 specialize→oobeSystem，`SkipMachineOOBE/SkipUserOOBE/AutoLogon` 生效，
 三台均达到 **`IMAGE_STATE_COMPLETE`**（历史最坑的 `IMAGE_STATE_UNDEPLOYABLE` 未发生），随后由 PowerShell Direct 接管配置。
 
-三种机制的全部脚本与应答文件：`E:\PCMigLab\Staging\scripts\`、`E:\PCMigLab\Staging\unattend\`、`E:\PCMigLab\Staging\payload\`（**未提交进 PCMig Git**）。
+三种机制的全部脚本与应答文件：`<实验室根>\Staging\scripts\`、`<实验室根>\Staging\unattend\`、`<实验室根>\Staging\payload\`（**未提交进 PCMig Git**）。
 
 ---
 
@@ -38,8 +38,8 @@ Mount-VHD → Initialize-Disk GPT → EFI 300MB FAT32 + MSR 16MB + NTFS 主分�
 | LAB-SRC01 | `zh-cn_windows_11_business_editions_version_24h2_updated_oct_2025_x64_dvd_a30b900a.iso` | **3** | Windows 11 专业版 24H2 |
 | LAB-DST01 | 同上（**同一张 ISO、同一索引**） | **3** | 同上 |
 
-两个 ISO 均在 `E:\系统ISO和Vm安装包\ISO\`（**未复制到 Lab Root**，按人工裁定避免几十 GB 重复占用）。
-`E:\系统ISO和Vm安装包\ISO\Windows.iso` 经鉴定位 **Windows 10 客户端 19041 分支 ESD 消费级介质（Index 1 家庭版/2 家庭单语言/3 教育版/4 专业版）——不是 Windows Server**，本阶段未使用。
+两个 ISO 均在 `<ISO 镜像目录>\ISO\`（**未复制到 Lab Root**，按人工裁定避免几十 GB 重复占用）。
+`<ISO 镜像目录>\ISO\Windows.iso` 经鉴定位 **Windows 10 客户端 19041 分支 ESD 消费级介质（Index 1 家庭版/2 家庭单语言/3 教育版/4 专业版）——不是 Windows Server**，本阶段未使用。
 Windows 10 22H2 商业版 ISO（`...d4e92df7.iso`，Index 3 = 专业版）按 D4 保留，供后续「旧系统→新系统」兼容性基线，第一轮未混入。
 
 Server 2022 Eval 的 install.wim 完整索引：1 = Standard Evaluation / **2 = Standard Evaluation (Desktop Experience)** / 3 = Datacenter Evaluation / 4 = Datacenter Evaluation (Desktop Experience)。
@@ -51,7 +51,7 @@ Server 2022 Eval 的 install.wim 完整索引：1 = Standard Evaluation / **2 = 
 | fwlink | `https://go.microsoft.com/fwlink/p/?LinkID=2195280&clcid=0x804&culture=zh-cn&country=CN` |
 | 解析后 URL | `https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66756/20348.1787.230607-0640.fe_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso` |
 | 来源主机 | `software-static.download.prss.microsoft.com`（**Microsoft PRSS，官方**） |
-| 本地路径 | `E:\系统ISO和Vm安装包\ISO\20348.1787.230607-0640.fe_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso` |
+| 本地路径 | `<ISO 镜像目录>\ISO\20348.1787.230607-0640.fe_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso` |
 | 字节数 | **5,478,957,056**（与官方 `Content-Length` 逐字节相符） |
 | SHA256 | **`ced78fe5817f8ac3fcb2b741499ad26c66dba203a66499aec3953ebf93947cf6`** |
 | Edition / Build / Arch / Language | Standard Evaluation (Desktop Experience) / 20348.1787 / x64 / zh-CN |
@@ -71,8 +71,8 @@ Server 2022 Eval 的 install.wim 完整索引：1 = Standard Evaluation / **2 = 
 | 宿主 | DESKTOP-5CSN7PT（WORKGROUP） |
 | Hyper-V PowerShell 模块 | **2.0.0.0** |
 | 逻辑处理器 / 内存容量 | 32 / 34,104,659,968 B（≈31.76 GB） |
-| `VirtualMachinePath` / `VirtualHardDiskPath` | **`E:\PCMigLab\VMs`**（已从 `C:\ProgramData\...` 改到 Lab Root） |
-| 平台裁定 | **Hyper-V（D2）**；VMware Workstation **未安装、不安装、不删除、不升级**（`E:\系统ISO和Vm安装包\VM\...26H1\` 保持原样） |
+| `VirtualMachinePath` / `VirtualHardDiskPath` | **`<实验室根>\VMs`**（已从 `C:\ProgramData\...` 改到 Lab Root） |
+| 平台裁定 | **Hyper-V（D2）**；VMware Workstation **未安装、不安装、不删除、不升级**（`<ISO 镜像目录>\VM\...26H1\` 保持原样） |
 | 关键限制 | **无 `Send-VMKey`** ⇒ 见 §0；`Set-VMMemory` 固定内存只可传 `-DynamicMemoryEnabled $false -StartupBytes <n>`（同时传 Minimum/Maximum 会报「需要启用动态内存」） |
 
 ## 4. Virtual Switch / NAT
@@ -84,7 +84,7 @@ Server 2022 Eval 的 install.wim 完整索引：1 = Standard Evaluation / **2 = 
 | NAT | **`PCMig-Lab-NAT`**，`InternalIPInterfaceAddressPrefix = 10.77.0.0/24`，`Active = True` |
 | 未改动 | `Default Switch`（172.31.160.1/20，ICS 出口）原样保留 |
 
-**隔离保证**：Internal 交换机**无物理网卡绑定**，绝不桥接真实公司 LAN；实验网段 `10.77.0.0/24` 与宿主真实网段（192.168.1.0/24 等）无交集；未加入、未连通任何真实公司域。
+**隔离保证**：Internal 交换机**无物理网卡绑定**，绝不桥接真实公司 LAN；实验网段 `10.77.0.0/24` 与宿主真实网段（192.0.2.0/24 等）无交集；未加入、未连通任何真实公司域。
 
 ## 5. 三 VM 最终配置
 
@@ -94,7 +94,7 @@ Server 2022 Eval 的 install.wim 完整索引：1 = Standard Evaluation / **2 = 
 | **LAB-SRC01** | 旧电脑 / Source SMB 服务端 | 2 | 4 | 6 GB **固定** | 100 GB 动态 VHDX | Data1 **120 GB** → **D:** | 是 | On | **False** | PCMig-Lab-Switch（MAC 00155DFC4302） |
 | **LAB-DST01** | 新电脑 / PCMig 执行端 | 2 | 4 | 6 GB **固定** | 100 GB 动态 VHDX | Data1 **160 GB** → **D:**；Data2 **20 GB** → **F:** | 是 | On | **False** | PCMig-Lab-Switch（MAC 00155DFC4303） |
 
-全部 VHDX 位于 `E:\PCMigLab\VMs\<VM>\`；`FirstBootDevice = File`（硬盘）；
+全部 VHDX 位于 `<实验室根>\VMs\<VM>\`；`FirstBootDevice = File`（硬盘）；
 数据盘 NTFS **AllocationUnitSize = 4096**（卷标 `Data-SRC01` / `Data-DST01` / `Fault-DST01`）。
 证据：`12-vm-create.txt`、`31-vm-configuration.txt`。
 
@@ -137,7 +137,7 @@ Server 2022 Eval 的 install.wim 完整索引：1 = Standard Evaluation / **2 = 
 
 密码处理（按补充 §7 与 §11）：
 - 全部为**实验室专用随机密码**（22 位），**未复用**宿主密码 / Microsoft 账户密码 / 公司域密码 / 任何个人密码。
-- 唯一落盘位置：`E:\PCMigLab\Staging\.secrets\lab-credentials.json`，**ACL 去继承，仅 `BUILTIN\Administrators`（F）+ `NT AUTHORITY\SYSTEM`（F）**。
+- 唯一落盘位置：`<实验室根>\Staging\.secrets\lab-credentials.json`，**ACL 去继承，仅 `BUILTIN\Administrators`（F）+ `NT AUTHORITY\SYSTEM`（F）**。
 - **未打印**在任何终端输出中（一律经 `$env:PCMIG_LAB_PWD` 在内存/子进程环境变量传递）；**未进入** Evidence 包、未进入桌面交付包、未进入 Git、未进入本报告。
 - 传送给 guest 时只作为 powershell 子进程的环境变量存在，会话结束即移除。
 
@@ -206,7 +206,7 @@ Source（SRC01 `D:\`）：
 
 | 项 | 值 |
 |---|---|
-| 目录 | **`D:\PCMigTarget\`**（本地目标根，符合已确认的「PCMig 在 DST 本机写 TargetRoot」拓扑） |
+| 目录 | **`<发版工作副本>Target\`**（本地目标根，符合已确认的「PCMig 在 DST 本机写 TargetRoot」拓扑） |
 | ACL | `CORP\user01:(OI)(CI)(M)` + `CORP\user02:(OI)(CI)(M)` + `CORP\admin:(OI)(CI)(F)` + `NT AUTHORITY\SYSTEM:(OI)(CI)(F)`（另有继承的 `BUILTIN\Users:ReadAndExecute`） |
 | 目标盘 | D: 卷标 `Data-DST01`，NTFS，AllocationUnitSize 4096，160 GB（free ≈159.9 GB） |
 | 当前内容 | **空**（0 项），已准备好接受迁移 |
@@ -218,14 +218,14 @@ Source（SRC01 `D:\`）：
 - `Start-Process -Credential` 在 PowerShell Direct 会话中**不可用**（`exit=-1073741502` = `0xC0000142 STATUS_DLL_INIT_FAILED`，会话无法为第二个用户构建令牌）。
 - `Register-ScheduledTask -User/-Password` + `Start-ScheduledTask`：任务注册成功但**从未运行**（`lastResult=267011` = `SCHED_S_TASK_HAS_NOT_RUN`）；`schtasks /Create /RU CORP\user0x` 给出**真实原因**：「任务已注册，但无法启动。该任务主体需要启用批登录特权。」实测 `SeBatchLogonRight = *S-1-5-32-544,*S-1-5-32-551,*S-1-5-32-559`（**仅** Administrators / Backup Operators / Performance Log Users），即**域用户默认没有「作为批处理作业登录」特权**。
 - **决策：不为了取证而放宽该特权** —— 那正是「接近正常企业安全状态的 Windows」要保留的东西。改用**该用户自己的令牌经 SMB 访问同一目录**（NTFS ACL 在同一目录上被同样地求值）完成取证：临时共享 `PCMigTargetWriteTest` → 以 `net use` 建立会话 → 写文件 → 读回 → 删除 → 删除临时共享。
-- 事后校验：临时共享 **已移除**（存在性 = False）、残留 `_write-test-*` = **0**、`D:\PCMigTarget` 条目 = **0**。
+- 事后校验：临时共享 **已移除**（存在性 = False）、残留 `_write-test-*` = **0**、`<发版工作副本>Target` 条目 = **0**。
 
 ## 15. Fault Disk
 
 | 项 | 值 |
 |---|---|
 | 盘 | LAB-DST01 **`F:`**，20 GB 动态 VHDX（`Fault-DST01`），NTFS AllocationUnitSize 4096 |
-| 目录 | **`F:\PCMigFaultTarget\`** |
+| 目录 | **`<故障注入目标盘>\`** |
 | ACL | 与正常目标**完全相同**（user01/user02 = Modify，admin/SYSTEM = FullControl） |
 | 本阶段状态 | **已格式化、已建目录、已设 ACL、未填充**（free ≈19.9 GB） |
 | 用途（后续） | 空间不足 / 迁移途中磁盘被吃满 / 小容量存储故障 |
@@ -234,12 +234,12 @@ Source（SRC01 `D:\`）：
 
 | 项 | 值 |
 |---|---|
-| 仓库 | `E:\Project\deepseek work\PCMig` |
+| 仓库 | `<仓库根>` |
 | 分支 / HEAD | `feature/winui-v0.5.0` / **`d1aefb2fb8b36b135cf136afc71532c3450226a8`（d1aefb2，= D7 指定稳定基线）** |
 | 构建 | `dotnet publish src\PCMig.WinUI\PCMig.WinUI.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false`（SDK 10.0.401）→ **rc=0** |
-| 产物 | `E:\PCMigLab\Staging\pcmig-publish\winui`：**528 文件 / 224.3 MB**；主程序 `PCMig.WinUI.exe` **288,768 B**，SHA256 `20ca24445d40d1445131c6f398fbfc7acb129b62bf5c7845a211b13c6004dd0f` |
+| 产物 | `<实验室根>\Staging\pcmig-publish\winui`：**528 文件 / 224.3 MB**；主程序 `PCMig.WinUI.exe` **288,768 B**，SHA256 `20ca24445d40d1445131c6f398fbfc7acb129b62bf5c7845a211b13c6004dd0f` |
 | 清单 | `pcmig-build-manifest-winui.tsv`（528 行，逐文件 SHA256+字节）、`pcmig-build-manifest-cli.tsv`、`pcmig-build-info.json` |
-| 部署位置 | **`LAB-DST01:C:\PCMig\`**（经 PowerShell Direct 拷贝，39.0 s） |
+| 部署位置 | **`LAB-DST01:<本机交付副本>\`**（经 PowerShell Direct 拷贝，39.0 s） |
 | 部署校验 | guest 侧重算 SHA256 → `35-pcmig-deployed-manifest.tsv`（530 行）；主程序存在且 288,768 B |
 | 未使用 | **未用 Debug 构建、未用 CLI 替代、未用旧 GUI 替代**；CLI 仅作为构建产物保留（`...\pcmig-publish\cli`，200 文件 / 72.1 MB），**不作为正式用户入口** |
 | 运行状态 | **已部署，未启动**；本阶段**未执行** Connect / Add Share / Start / Stop / Resume / Verify / Repair / Export |
@@ -308,7 +308,7 @@ Source（SRC01 `D:\`）：
 |---|---|---|
 | B1 | **已解除** | 官方 Server 2022 Eval ISO 已获取并通过三重来源/签名证据 |
 | B2 | **已裁定** | 平台 = Hyper-V（VMware 不引入） |
-| B3 | **已裁定** | Lab Root = `E:\PCMigLab\`；`PCMIG_LAB_ROOT`（User 作用域）已改为该值 |
+| B3 | **已裁定** | Lab Root = `<实验室根>\`；`PCMIG_LAB_ROOT`（User 作用域）已改为该值 |
 | B5 | **已解除** | 已提权枚举 install.wim 索引；数据盘 NTFS 簇大小已确定为 **4096** |
 | B6 | **已解除** | 在一次性提权会话下，Hyper-V 写操作（建交换机/NAT/VM/VHDX/检查点）全部实测成功 |
 | **B4** | **DEFERRED（Route B Gate）** | 见 §21 |
@@ -340,11 +340,11 @@ Source（SRC01 `D:\`）：
 | 实验域 `corp.test` 与 DNS 健康 | ✅ dcdiag 仅剩预期噪声 |
 | 域名账号与权限 persona | ✅ `user01`/`user02`（同权）+ `admin`（域管） |
 | 源端普通共享 `D` 与 NTFS 基线 | ✅ 已真实读通 |
-| 目标端本地 NTFS 与故障盘 | ✅ 已真实写通 + `F:\PCMigFaultTarget` 就绪 |
-| PCMig 稳定基线产物部署到 DST | ✅ `d1aefb2` self-contained WinUI Release → `C:\PCMig`（未启动） |
+| 目标端本地 NTFS 与故障盘 | ✅ 已真实写通 + `<故障注入目标盘>` 就绪 |
+| PCMig 稳定基线产物部署到 DST | ✅ `d1aefb2` self-contained WinUI Release → `<本机交付副本>`（未启动） |
 | 冷连接状态 | ✅ 无残留用户热连接 |
 | 可恢复基线 | ✅ `TEST-BASELINE`（三台一致）+ 恢复办法见 §17 |
-| 证据已归档 | ✅ `E:\PCMigLab\Evidence\Phase1-EnvironmentBuild-20261002-221412\`（35 个文件） |
+| 证据已归档 | ✅ `<实验室根>\Evidence\Phase1-EnvironmentBuild-20261002-221412\`（35 个文件） |
 
 **注意**：`READY` 指「环境可以在人工批准后立即开始 UI 黑盒测试」，**不等于**已获准开始测试。本阶段到此强制停止。
 
@@ -367,7 +367,7 @@ Source（SRC01 `D:\`）：
 
 ## 附录 B — 本阶段脚本与配置清单（均**未**提交进 PCMig Git）
 
-宿主侧 `E:\PCMigLab\Staging\scripts\`：
+宿主侧 `<实验室根>\Staging\scripts\`：
 `deploy-os.ps1`（离线灌盘，含分区/apply/bcdboot/unattend 注入/离线 OOBE 注册表/数据盘）、
 `run-guest-script.ps1`（PD 投送并执行 guest 脚本，密码只经环境变量）、
 `phase1-dc01-stage.ps1`（等 ISO + 验 SHA256 + 记出处 + 枚举 install.wim + 灌盘 DC01 + 启动）、
@@ -384,12 +384,12 @@ Source（SRC01 `D:\`）：
 
 guest 角色脚本：`role-DC01-phase1.ps1`、`role-DC01-phase2.ps1`、`role-SRC01-phase1.ps1`、`role-SRC01-phase2.ps1`、`role-DST01-phase1.ps1`、`role-DST01-phase2.ps1`。
 
-应答文件与载荷 `E:\PCMigLab\Staging\unattend\`、`E:\PCMigLab\Staging\payload\`：
-`unattend-Server.xml`、`unattend-Client.xml`、`SetupComplete.cmd`、`firstlogon.cmd`（模板均为 ASCII + 占位符；含密码的**渲染版**只存在于 `E:\PCMigLab\Staging\.secrets\`）。
+应答文件与载荷 `<实验室根>\Staging\unattend\`、`<实验室根>\Staging\payload\`：
+`unattend-Server.xml`、`unattend-Client.xml`、`SetupComplete.cmd`、`firstlogon.cmd`（模板均为 ASCII + 占位符；含密码的**渲染版**只存在于 `<实验室根>\Staging\.secrets\`）。
 
-状态文件：`E:\PCMigLab\Staging\phase1-state.json`（按补充 §11 建立，**只作提示，不压过真实系统状态**）。
+状态文件：`<实验室根>\Staging\phase1-state.json`（按补充 §11 建立，**只作提示，不压过真实系统状态**）。
 
-## 附录 C — 证据清单（`E:\PCMigLab\Evidence\Phase1-EnvironmentBuild-20261002-221412\`）
+## 附录 C — 证据清单（`<实验室根>\Evidence\Phase1-EnvironmentBuild-20261002-221412\`）
 
 `10-hyperv-network-and-host.txt`、`11-iso-image-index-enumeration.txt`、`11-iso-image-index-enumeration-server2022.txt`、`12-vm-create.txt`、
 `30-hyperv-network-and-host.txt`、`31-vm-configuration.txt`、`32-iso-inventory-sha256.tsv`、`33-server-iso-provenance.txt`、
@@ -400,7 +400,7 @@ guest 角色脚本：`role-DC01-phase1.ps1`、`role-DC01-phase2.ps1`、`role-SRC
 `pcmig-build-info.json`、`pcmig-build.log`、`pcmig-build-manifest-winui.tsv`、`pcmig-build-manifest-cli.tsv`、
 `phase1-domain-stage.log`、`phase1-final-stage.log`、`phase1-LAB-DC01.log`、`phase1-LAB-SRC01.log`、`phase1-LAB-DST01.log`。
 
-**全部证据文件不含任何密码。** 凭据唯一存在于 `E:\PCMigLab\Staging\.secrets\`（ACL 仅 Administrators+SYSTEM）。
+**全部证据文件不含任何密码。** 凭据唯一存在于 `<实验室根>\Staging\.secrets\`（ACL 仅 Administrators+SYSTEM）。
 
 ## 附录 D — 宿主资源与空间
 

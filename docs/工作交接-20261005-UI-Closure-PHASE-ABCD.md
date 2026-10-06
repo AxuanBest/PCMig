@@ -6,7 +6,7 @@
 
 ## 一、仓库状态
 
-- 权威工作区：`E:\Project\deepseek work\PCMig`；分支 `feature/winui-v0.5.0`。
+- 权威工作区：`<仓库根>`；分支 `feature/winui-v0.5.0`。
 - **未 commit / 未 push / 未 tag**（保持用户既有未提交改动，未做任何破坏性 git 操作）。
 - 候选产物（本轮刚构建）：`src\PCMig.WinUI\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\PCMig.WinUI.exe`。
 - 新增未跟踪文件：`docs\UI-CLOSURE-PHASE-ABCD-20261005.md`、`docs\工作交接-20261005-UI-Closure-PHASE-ABCD.md`、
@@ -36,7 +36,7 @@ dotnet test tests\PCMig.Diagnostics.Tests -c Release  # 通过 382 / 失败 0
 
 应用已启动并停在 **Step3 就绪态**：
 - PID 231152，标题 `PCMig 迁移工具 · v0.5.0`，进程路径匹配 x64 Release 产物。
-- Job `JOB-20261005-054722-3dc7`：41 个对象 / 42 GB，目标 `E:\PCMigLab\Staging\phDtarget`。
+- Job `JOB-20261005-054722-3dc7`：41 个对象 / 42 GB，目标 `<实验室根>\Staging\phDtarget`。
 - 用户可直接点「开始迁移」观察：进度条连续推进 + 装饰物可见、暂停/恢复百分比不回退、
   提示卡文字不堆叠、四张统计卡数值不被裁。
 
@@ -53,7 +53,7 @@ dotnet test tests\PCMig.Diagnostics.Tests -c Release  # 通过 382 / 失败 0
 
 ## 六、交付包
 
-`C:\Users\User\Desktop\新建文件夹 (4)\PCMig-UI-Closure-PHASE-ABCD-20261005\`
+`<用户目录C>\Desktop\<桌面交付根>\PCMig-UI-Closure-PHASE-ABCD-20261005\`
 （报告 + evidence 截图/CSV/日志 + frames-sample + scripts 复现脚本 + git-status.txt + 清单.txt + SHA256.txt，共 33 个文件，只复制未改源）
 
 ## 七、纪律红线（继承，仍然有效）

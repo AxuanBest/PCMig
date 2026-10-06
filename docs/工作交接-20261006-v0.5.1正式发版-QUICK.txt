@@ -9,10 +9,10 @@ PCMig v0.5.1 正式发版 · 交接短卡（2026-10-06）
   状态：WAITING FOR HUMAN INSTRUCTION。下一版版本号未定，不得推断。
 
 ■ 坐标
-  权威工作区 E:\Project\deepseek work\PCMig  分支 feature/winui-v0.5.0
-  交付区 E:\Project\PCMig   工作副本 D:\PCMig   脚本 tools\release.ps1
-  实验室 E:\PCMigLab   备份根 E:\Project\镜像备份源码
-  桌面交付根 D:\Users\User\Desktop\新建文件夹 (4)
+  权威工作区 <仓库根>  分支 feature/winui-v0.5.0
+  交付区 <交付区>   工作副本 <发版工作副本>   脚本 tools\release.ps1
+  实验室 <实验室根>   备份根 <镜像备份根>
+  桌面交付根 <用户目录D>\Desktop\<桌面交付根>
 
 ■ v0.5.1 是什么
   v0.5.0 的可信度紧急修正版，不是新功能版（功能与界面不变）。六项：
@@ -26,7 +26,7 @@ PCMig v0.5.1 正式发版 · 交接短卡（2026-10-06）
   4 发版链修复：v0.5.0 曾漏改 WinUI 两处运行时版本徽章（TitleBarVersionText
     与更新日志徽章）；本版新增第 10 条 Patch + 反向自查，已验证生效
   5 旧 WPF 前端退出正式交付链（见下）
-  6 根因定论报告：E:\PCMigLab\Evidence\Trust-Critical-Recovery\
+  6 根因定论报告：<实验室根>\Evidence\Trust-Critical-Recovery\
     SCENARIO-H-ROOT-CAUSE-20261006-REV2.md
     （无 -REV2 的那份是已被推翻的首版，不可作定论引用）
 
@@ -64,7 +64,7 @@ PCMig v0.5.1 正式发版 · 交接短卡（2026-10-06）
   未 push / 未做人工视觉终验（截图已取，模型无图像输入，视觉终验永远是人
   工）/ 未真机复验 / 回冲路径补测未做（HIT-RETRACT=0，窗口未触发）/
   未录屏 / docs\ 根多份历史交接未成组归档 / 未配远端未打其它 tag /
-  铁律 18·21 与附录 A 的旧坐标 I:\PCMig 未统一（已在铁律内标注）
+  铁律 18·21 与附录 A 的旧坐标 <旧镜像交付区> 未统一（已在铁律内标注）
 
 ■ 回退
   提交级 git revert 8d38f3b
@@ -79,7 +79,7 @@ PCMig v0.5.1 正式发版 · 交接短卡（2026-10-06）
   3 docs\更新日志.txt 里 ## 已变成 ■ ⇒ 别用 ^## v0.5.1 去匹配 txt
 
 ■ 开工必读链
-  1 E:\Project\deepseek work\AGENTS.md
+  1 <工作区根>\AGENTS.md
   2 PCMig\AGENTS.md（十一条死律 + 权限条款 + 状态表）
   3 PCMig\docs\INDEX.md（唯一导航入口）
   4 完整交接 docs\工作交接-20261006-v0.5.1正式发版.md
