@@ -129,7 +129,7 @@ PCMig 是一个面向**企业内网换机场景**的 Windows 迁移工具。它�
 | `pcmig-cli.exe` | 命令行入口，脚本化与自动化场景使用 |
 | ~~`PCMig-classic.exe`~~ | **已退出交付物**（v0.5.0 及以前作为"经典界面·回退"随包发布） |
 
-- 交付树 `dist/app`、`Portable/` 与安装后的工作副本都带**硬门禁**：出现 `PCMig-classic.exe` / `PCMig.exe` 会当场中止发版。
+- 交付树（本地构建输出，见第 14 节）与安装后的工作副本都带**硬门禁**：出现 `PCMig-classic.exe` / `PCMig.exe` 会当场中止发版。
 - **旧 WPF 源码（`src/PCMig.Gui/`）保留在仓库中**，作为历史实现与回退参考，仅"不再 publish、不再进安装包"，并未删除。
 - 界面视觉与动效遵循仓库内的 PMML 规范文档（`docs/PCMig-Visual-Motion-Language.md` 等）。**装饰层（光波 / 粒子 / 涟漪 / 光晕）永远不得影响进度真值、字节数、回执与任务状态。**
 
@@ -273,7 +273,7 @@ dotnet test tests/PCMig.Diagnostics.Tests/PCMig.Diagnostics.Tests.csproj -c Rele
 
 ### 方式二：Portable 绿色目录
 
-`Portable/` 是自包含目录版，复制到目标机器直接运行 `PCMig.WinUI.exe` 即可（WinUI 需要与其原生组件同目录）。
+交付区的 `Portable` 目录（本地构建输出，**不入 Git 仓库**）是自包含目录版，复制到目标机器直接运行 `PCMig.WinUI.exe` 即可（WinUI 需要与其原生组件同目录）。
 
 ### 方式三：命令行
 
@@ -351,11 +351,10 @@ PCMig.sln
 ├─ lab/
 │  ├─ three-vm/                     三 VM 测试框架（见第 10 节）
 │  └─ smoke-data/                   小型回归测试数据
-├─ docs/                            使用说明、更新日志、发版铁律、测试报告、诊断与视觉规范
-└─ dist/                            发版产物（.gitignore 忽略，不入仓库）
+└─ docs/                            使用说明、更新日志、发版铁律、测试报告、诊断与视觉规范
 ```
 
-> 仓库内另有 `.merkle-snapshot.json`（快照校验用）、`AGENTS.md`（开发协作约定）与 `archive/`（本地历史证据归档，**已在 `.gitignore` 中排除**，不入仓库）。
+> 上面的目录树**只列出进入 Git 仓库的内容**。构建与发版产物目录、本地历史归档（`dist`、`archive` 等）均已在 `.gitignore` 中排除，**不随仓库发布、在 GitHub 上不存在**；仓库内另有 `.merkle-snapshot.json`（快照校验用）与 `AGENTS.md`（开发协作约定）。
 
 ---
 
@@ -403,7 +402,7 @@ PCMig.sln
 | 产物 | 位置 | 命名 |
 |------|------|------|
 | 安装包 | 交付区根目录 | `PCMigSetup-<版本>.exe` |
-| Portable | 交付区 `Portable/` | 自包含目录（整棵 app 树） |
+| Portable | 交付区的 `Portable` 目录（本地构建输出，**不入 Git 仓库**） | 自包含目录（整棵 app 树） |
 | 交付清单 / 哈希 | 随包 | 逐文件 SHA256 |
 
 ### 发布流程（摘要）
