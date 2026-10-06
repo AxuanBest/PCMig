@@ -5,7 +5,7 @@
 
 **直拉模式（Direct Pull）** —— 旧机不装代理、不落中转盘、不上云，数据只在新旧两台机器之间流动。
 
-**当前稳定版本：v0.5.1**（2026-10-06） ｜ 开发：郑子轩（[Axuanbest](https://github.com/Axuanbest)）
+**当前稳定版本：v0.5.1**（2026-10-06） ｜ 开发：（[Axuanbest](https://github.com/Axuanbest)）
 
 ---
 
