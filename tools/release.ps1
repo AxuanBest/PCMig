@@ -102,6 +102,12 @@ if ($old -eq '') { Abort '读不出 installer\pcmig.iss 里的当前版本号' }
 Patch 'src\PCMig.Gui\PCMig.Gui.csproj' '<Version>[0-9.]+</Version>' ('<Version>' + $Version + '</Version>')
 Patch 'src\PCMig.WinUI\PCMig.WinUI.csproj' '<Version>[0-9.]+</Version>' ('<Version>' + $Version + '</Version>')
 Patch 'src\PCMig.WinUI\MainWindow.xaml' 'Title="PCMig 迁移工具 · v[0-9.]+"' ('Title="PCMig 迁移工具 · v' + $Version + '"')
+# ★ v0.5.1 新增 ★ WinUI 主界面里还有两处**运行时肉眼可见**的版本文字，v0.5.0 时脚本漏改过它们：
+#   ① 标题栏右侧 TitleBarVersionText（虽有 x:Name，但没有任何 .cs 给它赋值 ⇒ XAML 字面量就是运行时真值）
+#   ② 标题行「更新日志」徽章（PCMigVersionBadgeButton 里的 TextBlock）
+#   两处形态都是 Text="vX.Y.Z"，用同一条正则一并替换；实测在 MainWindow.xaml 里恰好命中 2 处，
+#   不会误伤 ChangelogButton 的 ToolTipService.ToolTip（那串是 ToolTip="查看从 v0.1.0 起…"）。
+Patch 'src\PCMig.WinUI\MainWindow.xaml' 'Text="v[0-9.]+"' ('Text="v' + $Version + '"')
 Patch 'src\PCMig.Cli\PCMig.Cli.csproj' '<Version>[0-9.]+</Version>' ('<Version>' + $Version + '</Version>')
 Patch 'src\PCMig.Core\PCMig.Core.csproj' '<Version>[0-9.]+</Version>' ('<Version>' + $Version + '</Version>')
 Patch 'src\PCMig.Gui\MainWindow.xaml' 'Title="PCMig 迁移工具 v[0-9.]+"' ('Title="PCMig 迁移工具 v' + $Version + '"')
@@ -114,6 +120,7 @@ $expect = @(
   [pscustomobject]@{ F = 'src\PCMig.Gui\PCMig.Gui.csproj'; P = ('<Version>' + $Version + '</Version>') },
 [pscustomobject]@{ F = 'src\PCMig.WinUI\PCMig.WinUI.csproj'; P = ('<Version>' + $Version + '</Version>') },
   [pscustomobject]@{ F = 'src\PCMig.WinUI\MainWindow.xaml'; P = ('Title="PCMig 迁移工具 · v' + $Version + '"') },
+  [pscustomobject]@{ F = 'src\PCMig.WinUI\MainWindow.xaml'; P = ('Text="v' + $Version + '"') },
   [pscustomobject]@{ F = 'src\PCMig.Cli\PCMig.Cli.csproj'; P = ('<Version>' + $Version + '</Version>') },
   [pscustomobject]@{ F = 'src\PCMig.Core\PCMig.Core.csproj'; P = ('<Version>' + $Version + '</Version>') },
   [pscustomobject]@{ F = 'src\PCMig.Gui\MainWindow.xaml'; P = ('Title="PCMig 迁移工具 v' + $Version + '"') },
@@ -125,6 +132,15 @@ foreach ($e in $expect) {
   $txt = [IO.File]::ReadAllText((Join-Path $repo $e.F), (EncOf (Join-Path $repo $e.F)))
   if (-not $txt.Contains($e.P)) { Abort ('自查失败：' + $e.F + ' 里没有「' + $e.P + '」') }
 }
+# ★ v0.5.1 新增 ★ 上面那条只证明"新版本串在"，还要证明"没有残留的旧徽章版本"。
+#   MainWindow.xaml 里所有 Text="v<数字>" 形态（窗口 Title 不属于此形态）必须**全部**等于目标版本。
+$mwPath = Join-Path $repo 'src\PCMig.WinUI\MainWindow.xaml'
+$mwTxt = [IO.File]::ReadAllText($mwPath, (EncOf $mwPath))
+$mwBadges = @([regex]::Matches($mwTxt, 'Text="v([0-9.]+)"') | ForEach-Object { $_.Groups[1].Value })
+if ($mwBadges.Count -eq 0) { Abort '自查失败：src\PCMig.WinUI\MainWindow.xaml 里找不到任何 Text="vX.Y.Z" 版本徽章（标题栏版本文字 / 更新日志徽章）' }
+$staleBadges = @($mwBadges | Where-Object { $_ -ne $Version })
+if ($staleBadges.Count -gt 0) { Abort ('自查失败：src\PCMig.WinUI\MainWindow.xaml 仍有旧版本徽章 v' + ($staleBadges -join ' / v') + '（共 ' + $mwBadges.Count + ' 处，应全部为 v' + $Version + '）') }
+Write-Output ('   WinUI 版本徽章 ' + $mwBadges.Count + ' 处全部为 v' + $Version)
 Write-Output ('   版本号 ' + $old + ' → ' + $Version + '，' + $expect.Count + ' 处声明全部自查通过')
 
 # ============ 日志 TXT + 打包 ============
@@ -171,8 +187,7 @@ $bytes = [IO.File]::ReadAllBytes($txtPath)
 if (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) { Abort '更新日志.txt 不是 UTF-8 BOM，记事本可能识别不了中文' }
 if (([IO.File]::ReadAllText($txtPath, [Text.Encoding]::UTF8)) -notmatch [regex]::Escape($Version)) { Abort ('更新日志.txt 里没有 v' + $Version) }
 
-Log 'publish（CLI + GUI，单文件自包含）'
-Log 'publish（WinUI 主界面 + CLI + 经典回退，自包含）'
+Log 'publish（WinUI 主界面 + CLI，自包含）'
 Remove-Item (Join-Path $repo 'dist\cli'), (Join-Path $repo 'dist\gui'), (Join-Path $repo 'dist\winui'), (Join-Path $repo 'dist\app') -Recurse -Force -ErrorAction SilentlyContinue
 dotnet publish (Join-Path $repo 'src\PCMig.Cli\PCMig.Cli.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -o (Join-Path $repo 'dist\cli') 2>&1 | Select-String -Pattern 'error|-> ' | Select-Object -First 6
 # ★ v0.5.0（2026-10-06）★ 主界面换成 WinUI 3。
@@ -182,17 +197,23 @@ dotnet publish (Join-Path $repo 'src\PCMig.Cli\PCMig.Cli.csproj') -c Release -r 
 #   ⇒ 整目录 publish 后**整棵树**进包；安装包与 Portable 都以目录形态交付。
 dotnet publish (Join-Path $repo 'src\PCMig.WinUI\PCMig.WinUI.csproj') -c Release -r win-x64 --self-contained true -p:Platform=x64 -o (Join-Path $repo 'dist\winui') 2>&1 | Select-String -Pattern 'error|-> ' | Select-Object -First 6
 if (-not (Test-Path (Join-Path $repo 'dist\winui\PCMig.WinUI.exe'))) { Abort 'WinUI 未产出' }
-# 经典 WPF 界面保留为**回退**（单文件自包含），包内命名 PCMig-classic.exe：
-#   WinUI 在极旧系统/受限显卡上万一起不来，用户仍有可用的经典界面。
-dotnet publish (Join-Path $repo 'src\PCMig.Gui\PCMig.Gui.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IncludeAllContentForSelfExtract=true -o (Join-Path $repo 'dist\gui') 2>&1 | Select-String -Pattern 'error|-> ' | Select-Object -First 6
-if (-not (Test-Path (Join-Path $repo 'dist\gui\PCMig.exe'))) { Abort '经典界面未产出' }
+# ★ v0.5.1（2026-10-06）★ 旧 WPF 前端（src\PCMig.Gui）**退出正式交付链**：
+#   源码继续保留在仓库里作为历史实现 / 回退参考，但**不再 publish、不再进安装包与 Portable**。
+#   正式用户交付物只允许两个可执行文件：PCMig.WinUI.exe 与 pcmig-cli.exe。
+#   下面组装 dist\app 之后有硬门禁，任何 PCMig-classic.exe / PCMig.exe 都会被当场拦下。
+#   （v0.5.0 及以前曾把 WPF 打成 PCMig-classic.exe 随包发布作为"经典界面·回退"入口，本轮起取消。）
 
 Log '组装 dist\app'
 $app = Join-Path $repo 'dist\app'
 New-Item $app -ItemType Directory | Out-Null
 Copy-Item -Path (Join-Path $repo 'dist\winui\*') -Destination $app -Recurse -Force
 Copy-Item (Join-Path $repo 'dist\cli\pcmig.exe') (Join-Path $app 'pcmig-cli.exe')
-Copy-Item (Join-Path $repo 'dist\gui\PCMig.exe') (Join-Path $app 'PCMig-classic.exe')
+# [硬门禁] v0.5.1 起：旧 WPF 前端不得进入正式用户交付物。
+# 这道断言就是"不得再以备用 / 经典界面 / 回退名义随包发布"的可执行约束——
+# 将来谁把 publish PCMig.Gui 或 Copy-Item PCMig-classic.exe 加回来，发版会在这里中止。
+foreach ($legacy in @('PCMig-classic.exe', 'PCMig.exe')) {
+  if (Test-Path (Join-Path $app $legacy)) { Abort ('交付树 dist\app 里出现了旧 WPF 前端 ' + $legacy + ' —— v0.5.1 起旧 WPF 不得进入正式用户交付物（只允许 PCMig.WinUI.exe 与 pcmig-cli.exe）。') }
+}
 Copy-Item (Join-Path $repo 'matrix') (Join-Path $app 'matrix') -Recurse
 Copy-Item $umPath (Join-Path $app '使用说明.txt')
 Copy-Item $txtPath (Join-Path $app '更新日志.txt')
@@ -212,9 +233,22 @@ $portable = Join-Path $delivery 'Portable'
 if (Test-Path $portable) { Remove-Item $portable -Recurse -Force }
 New-Item $portable -ItemType Directory -Force | Out-Null
 # Portable 与工作副本都收**整棵 app 树**（WinUI 必须与其原生组件同目录才能启动）
+# ★ v0.5.1（2026-10-06）★ 工作副本是**跨版本复用**的目录：上一版（v0.5.0）铺进去的
+#   PCMig-classic.exe 会一直躺在 D:\PCMig 里。下面那道"不得含旧 WPF 前端"的门禁如果只看
+#   拷贝结果，会被这个**陈旧残留**触发中止（而它并不是本次 publish 带进来的）。
+#   ⇒ 先清掉工作副本里的旧 WPF 残留，再整树铺新的；拷贝之后的门禁才真正校验"本次产出是否干净"。
+foreach ($legacy in @('PCMig-classic.exe', 'PCMig.exe')) {
+  $stale = Join-Path $workCopy $legacy
+  if (Test-Path $stale) { Remove-Item $stale -Force; Write-Output ('   已从工作副本移除上一版残留的旧 WPF 前端 ' + $legacy) }
+}
 Get-ChildItem $app -Force | ForEach-Object {
   Copy-Item $_.FullName $portable -Recurse -Force
   Copy-Item $_.FullName $workCopy -Recurse -Force
+}
+# [硬门禁] v0.5.1 起：Portable 与工作副本同样不得含旧 WPF 前端（dist\app 已查过一遍，这里是第二/第三道）。
+foreach ($legacy in @('PCMig-classic.exe', 'PCMig.exe')) {
+  if (Test-Path (Join-Path $portable $legacy)) { Abort ('交付 Portable 里出现了旧 WPF 前端 ' + $legacy + ' —— v0.5.1 起旧 WPF 不得进入正式用户交付物。') }
+  if (Test-Path (Join-Path $workCopy $legacy)) { Abort ('工作副本里出现了旧 WPF 前端 ' + $legacy + ' —— v0.5.1 起旧 WPF 不得进入正式用户交付物。') }
 }
 Copy-Item $setup (Join-Path $delivery ('PCMigSetup-' + $Version + '.exe')) -Force
 Copy-Item (Join-Path $portable '使用说明.txt') (Join-Path $delivery '使用说明.txt') -Force
@@ -224,8 +258,6 @@ $pairs = @(
   [pscustomobject]@{ Src = (Join-Path $app 'PCMig.WinUI.exe'); Dst = (Join-Path $workCopy 'PCMig.WinUI.exe') },
   [pscustomobject]@{ Src = (Join-Path $app 'pcmig-cli.exe'); Dst = (Join-Path $portable 'pcmig-cli.exe') },
   [pscustomobject]@{ Src = (Join-Path $app 'pcmig-cli.exe'); Dst = (Join-Path $workCopy 'pcmig-cli.exe') },
-  [pscustomobject]@{ Src = (Join-Path $app 'PCMig-classic.exe'); Dst = (Join-Path $portable 'PCMig-classic.exe') },
-  [pscustomobject]@{ Src = (Join-Path $app 'PCMig-classic.exe'); Dst = (Join-Path $workCopy 'PCMig-classic.exe') },
   [pscustomobject]@{ Src = $setup; Dst = (Join-Path $delivery ('PCMigSetup-' + $Version + '.exe')) },
   [pscustomobject]@{ Src = (Join-Path $app '更新日志.txt'); Dst = (Join-Path $delivery '更新日志.txt') },
   [pscustomobject]@{ Src = (Join-Path $app '使用说明.txt'); Dst = (Join-Path $delivery '使用说明.txt') }
@@ -249,16 +281,9 @@ Start-Sleep -Seconds 22
 if ($pr.HasExited) { Abort ('WinUI 闪退，退出码 ' + $pr.ExitCode) }
 Write-Output ('   WinUI PID=' + $pr.Id + '，标题应为 PCMig 迁移工具 · v' + $Version)
 
-Log '启动经典回退界面自检'
-$classic = Join-Path $workCopy 'PCMig-classic.exe'
-$pc = Start-Process $classic -PassThru
-Start-Sleep -Seconds 14
-if ($pc.HasExited) {
-  Write-Output ('   注意：经典回退界面自检闪退（退出码 ' + $pc.ExitCode + '）——主界面是 WinUI，此项仅作回退可用性记录')
-} else {
-  Write-Output ('   经典回退界面 PID=' + $pc.Id)
-  Get-Process -Id $pc.Id -ErrorAction SilentlyContinue | Stop-Process -Force
-}
+# ★ v0.5.1（2026-10-06）★ 经典回退界面的启动自检已删除：旧 WPF 前端退出正式交付链，
+#   交付区与工作副本里不会再出现 PCMig-classic.exe，自检只启动 PCMig.WinUI.exe 这一个主界面。
+#   旧 WPF 源码仍在仓库（src\PCMig.Gui），需要时自行 build 作为回退参考，但不随包发布。
 
 Write-Output ''
 Write-Output ('=== v' + $Version + ' 打包完成，发版后请做这三项验证 ===')
