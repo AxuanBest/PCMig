@@ -3574,6 +3574,25 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// </summary>
     private void AddFail(string title, string detail, bool objectLevel = false, bool verifyDerived = false)
     {
+        // ★ 线程纪律（场景 H 根因修复 / 2026-10-06）★
+        //   本方法会改 FailItems（ObservableCollection）、_failIndex、_failDropped —— 三者都只能在 UI 线程动。
+        //   而它确有**引擎线程**调用路径：OnOutputLine（引擎逐行输出的错误行）与
+        //   UiThrottleUnavailable 时 ApplyOutputLine 的直通分支。
+        //   缺陷实录：WinUI 上「跨线程改 ObservableCollection」在 FailItems.Add 处抛 COMException，
+        //   异常沿 OutputLine 多播委托链冒泡，被 RobocopyRunner 的
+        //   `try { OutputLine?.Invoke(trimmed); } catch { }` 静默吞掉 ⇒ 排在「转发 UI」之后的
+        //   OnRunnerErrorLine **永不执行** ⇒ 盘满熔断（T07）与两条回冲路径全部失效 ⇒
+        //   真机出现 completedBytes=42 GiB / percent=99.9% / 对象 0/N 的永久虚报（场景 H）。
+        //   修复：统一投递到 UI 队列。Post 在已是 UI 线程时**直通**（零开销），不改变任何既有语义。
+        //   注：错误行是低频流（非错误行不入失败清单），且重复行会在下面的 _failIndex 处立即返回，
+        //   故此投递不构成 P1-5 关注的「每行一个工作项」问题（A8 断言只约束 OnOutputLine 本体，
+        //   本方法的引擎线程投递不会在 OnOutputLine 里产生任何 Post 文本）。
+        if (_queue is not null && !_queue.HasThreadAccess)
+        {
+            Post(() => AddFail(title, detail, objectLevel, verifyDerived));
+            return;
+        }
+
         var key = $"{title}|{detail}";
 
         if (_failIndex.Contains(key)) return;          // 已出现过（含"已显示"与"因超限被丢弃"）

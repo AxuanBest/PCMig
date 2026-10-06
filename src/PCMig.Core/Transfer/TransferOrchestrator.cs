@@ -409,8 +409,20 @@ public sealed class TransferOrchestrator
         // 行级输出/文件级回调只有真实 robocopy 通道才有（受控 worker 不产生行文本）
         if (_runner is RobocopyRunner robo)
         {
-            robo.OutputLine += line => OutputLine?.Invoke(line); // 转发给 UI（报错区实时展示）
-            robo.OutputLine += OnRunnerErrorLine;                 // 错误风暴检测 + 进度回冲
+            // ★ 注册顺序 + 隔离（场景 H 根因修复 / 2026-10-06）★
+            //   两个订阅者挂在**同一个** OutputLine 多播委托上，而 RobocopyRunner 用一个 try/catch
+            //   包住整条链（RobocopyRunner.cs:631）：链上**任何一个**订阅者抛异常，排在它**之后**的
+            //   订阅者全部被跳过，异常本身也被吞掉。
+            //   2026-10-06 真机实录：WinUI 的「转发 UI」在错误行上抛（跨线程改 ObservableCollection
+            //   组成的 FailItems），而它注册在 OnRunnerErrorLine 之前 ⇒ 熔断（T07）与两条回冲路径
+            //   从未执行 ⇒ 目标盘满后 completedBytes 永久钉在 42 GiB、percent 钉在 99.9%。
+            //   ① 核心逻辑先注册（顺序保证）；② 转发各自加 try/catch（隔离保证）。两者缺一不可。
+            robo.OutputLine += OnRunnerErrorLine;                 // 错误风暴检测 + 进度回冲 + 盘满熔断（核心逻辑，必须先于 UI 转发）
+            robo.OutputLine += line =>
+            {
+                try { OutputLine?.Invoke(line); }                 // 转发给 UI（报错区实时展示）
+                catch { /* UI 订阅方异常绝不影响核心逻辑：委托链是共享的（同下方 FileCopied 的既有纪律） */ }
+            };
             robo.FileCopied += (p, b) =>
             {
                 OnRunnerFileCopied(p, b);

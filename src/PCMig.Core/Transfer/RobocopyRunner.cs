@@ -628,7 +628,15 @@ public sealed class RobocopyRunner : ITransferWorker
                         }
                     }
                 }
-                try { OutputLine?.Invoke(trimmed); } catch { /* UI 订阅方异常绝不能杀死传输泵 */ }
+                try { OutputLine?.Invoke(trimmed); }
+                catch (Exception ex)
+                {
+                    // ★ 可观测性（场景 H 根因修复 / 2026-10-06）★
+                    //   原实现是空 catch：订阅方异常被完全吞掉，日志里什么都不留 ——
+                    //   场景 H 排查时「熔断日志三条全缺、jsonl 里却满是错误行」正是被这里掩盖的。
+                    //   隔离职责不变（传输泵必须继续），但异常必须留痕（含栈），否则故障永远不可观测。
+                    _log.Warning(ex, "OutputLine 订阅方抛异常（已隔离，传输泵继续）：{Line}", trimmed);
+                }
                 _log.Debug("robocopy| {Line}", trimmed);
             });
             var stderrTask = PumpAsync(proc.StandardError, line =>
@@ -636,7 +644,8 @@ public sealed class RobocopyRunner : ITransferWorker
                 var trimmed = line.TrimEnd();
                 if (trimmed.Length == 0) return;
                 lastErrorLine = trimmed;
-                try { OutputLine?.Invoke(trimmed); } catch { /* 同上 */ }
+                try { OutputLine?.Invoke(trimmed); }
+                catch (Exception ex) { _log.Warning(ex, "OutputLine 订阅方抛异常（stderr，已隔离）：{Line}", trimmed); }
                 _log.Warning("robocopy stderr| {Line}", trimmed);
             });
 
