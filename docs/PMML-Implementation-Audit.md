@@ -295,15 +295,17 @@ Primary Button ・ Secondary Button ・ Icon Button ・ TextBox ・ PasswordBox 
 | 项 | 本轮实现值 | 位置 |
 |---|---|---|
 | 填充几何 | `Width="Auto"` + `HorizontalAlignment="Stretch"`（本地值覆盖 `PCMigProgressFill` 样式的 `Width=0`），常驻满宽；可见长度由 `InsetClip.RightInset = 轨道宽 − 已完成像素` 表达 | `Views/Step3ProgressPage.xaml`（`TotalProgressFill`）/ `MainWindow.xaml`（`FooterProgressFill`） |
-| 视觉补间 | 新类 `ProgressMotionDriver`（`internal sealed`，零业务引用）：追赶上限 `MaxCatchUpPerSecond = 0.55`（轨道宽 55%/s）、单段 `MinSpanSeconds = 0.06` / `MaxSpanSeconds = 0.40`、段内线性（**不加 easing** —— `InsetClip` 无可回读动画值，新段起点必须用 Stopwatch + 上段起止值精确复现，否则回跳） | `Presentation/ProgressMotionDriver.cs` |
+| 视觉补间 | ~~新类 `ProgressMotionDriver`（`internal sealed`，零业务引用）：追赶上限 `MaxCatchUpPerSecond = 0.55`（轨道宽 55%/s）、单段 `MinSpanSeconds = 0.06` / `MaxSpanSeconds = 0.40`、段内线性（**不加 easing** —— `InsetClip` 无可回读动画值，新段起点必须用 Stopwatch + 上段起止值精确复现，否则回跳）~~ → **该类已于 2026-10-06 随 L-19 收敛删除**（818 行 / 40.1 KB；删除前 SHA256 `530EA58E605137CA4548649D1501D21751BF417D081578FD6DA2693234D9EA15`）。删除依据：Step3 与底栏生产路径引用数均 0、契约测试强制零引用、未被任何测试项目链接、csproj 无显式 `<Compile Include>` | ~~`Presentation/ProgressMotionDriver.cs`~~ **已删除** |
 | 调用点 | Step3：`UpdateTotalProgressFill()` 内 `SetTrackWidth / SetActive / SetTarget / SnapTo`（`normalProgress = Phase == Running && width >= _lastRenderedWidth`）；底栏：`UpdateFooterProgressFill()` 同构 | `Views/Step3ProgressPage.xaml.cs` / `MainWindow.xaml.cs` |
 | 前沿柔光 | 带宽 `GlowWidth = 26f`、亮峰 `GlowPeakAt = 9f`、峰值 `#5ABCA4FF`、右侧渐隐至全透明；挂**轨道宿主**子树（挂填充会被前沿 clip 切平）；位置与前沿用同一组起止值/时长并行插值 | 同上 |
-| 扫描高光 | 带宽 `SweepBandWidth = 44f`、峰值 `SweepPeakAlpha = 0x1E`（≈12%）、`SweepSeconds = 1.60`（与既有 Token `PCMigMotionProgressSweepDuration` 同源）、`IterationBehavior.Forever`；挂**填充元素**子树 ⇒ 自动被裁剪在已完成区内 | 同上 |
+| 扫描高光 | 带宽 `SweepBandWidth = 44f`、峰值 `SweepPeakAlpha = 0x1E`（≈12%）、`SweepSeconds = 1.60`（与既有 Token `PCMigMotionProgressSweepDuration` 同源）、`IterationBehavior.Forever`；挂**填充元素**子树 ⇒ 自动被裁剪在已完成区内。**⚠ 2026-10-06：本项随 `ProgressMotionDriver` 删除而整体消失**，`PCMigMotionProgressSweepDuration` 重新退回**零消费者**死 Token（见 L-07 / G-04） | ~~同上~~ **已删除** |
 | 粒子流 | `ParticleCount = 8`、半径 2.0/1.65/1.3 DIP、`ParticleSpan = 34f`（活动带）、`ParticleCycleSeconds = 0.90`、负 `DelayTime` 错相、Opacity 峰值 0.26、颜色 `#8CB4FF` / `#BCA4FF` 交替 | 同上 |
 | 状态映射 | `SetActive(Phase == JobPhase.Running)`：**只有 Running 开装饰**；Pausing / Paused / Stopped / Failed / Interrupted / Resumable / Completed / CompletedWithErrors 一律 `SnapTo` 真值 + `IsVisible=false` + `StopAnimation` | 两个调用点 |
 | Reduced Motion | 复用 `MotionDirector.SystemAnimationsEnabled`：关闭时 `SnapTo` 真值，装饰对象仍会被创建但保持 `IsVisible=false`；业务状态零变化 | 同上 |
 
 **实现纪律（踩坑记录）**：`VisualCollection` **没有索引器**（`Children[i]` 编译失败 CS0021）⇒ 按序号访问必须先 `ToArray()`；`Microsoft.UI.Composition` 与 `Windows.UI.Composition` **是两套类型不可混用**；一个 XAML 元素**只能挂 1 个 child visual**（装饰合并到各挂载点唯一的 `ContainerVisual` 下）；动画属性名是字符串，拼错会**静默不生效**。
+
+**⚠ 2026-10-06 更新（L-19 已 CLOSED）**：上表描述的整套 Progress 动效路线（视觉补间 / 前沿柔光 / 扫描高光 / 粒子流）**已随 `Presentation/ProgressMotionDriver.cs` 整体删除**。删除前的实际状态是：Step3 与底栏**早已不再引用它** —— Step3 用自包含的 `controls:ImmersiveTransferProgress`，底栏用同一控件的 `Variant="Compact"`（`MainWindow.xaml:123`，宿主 `FooterProgressHost`），`_footerMotion` 字段与 `FooterProgressFill` 元素均已不存在。因此上表应读作**历史实现记录**，不代表当前代码。当前生效的进度动效实现见 `PMML-UI修改硬性规范.md` 与 `ImmersiveTransferProgress` 控件本体。
 
 ### Token / 样式增量（2026-10-05）
 
@@ -433,7 +435,7 @@ Legacy Deviation Introduced: NO
 |---|---|---|
 | `Presentation\ProgressPresentationCoordinator.cs`（新） | 连续指数状态滤波：`visual += (target − visual) × (1 − exp(−k·dt))`，`k = 10`，`dt ≤ 1/30 s`，`IsAnimating = 模式非 Frozen 且滞后 > 1e-4`；`CompletedSnapEpsilon = 0.05` | **PMML-R24 / R20** |
 | `Presentation\MigrationSessionViewModel.cs` | `ContinuationDisplayState` 高水位 + 前跳守卫 `TrackRawForwardLeap`（阈值 `+10 pp` 或 `+max(1 GiB, 计划 × 10%)`，含速率豁免 `8 GiB/s`）⇒ `UnexpectedProgressLeapForward`（Error） | **PMML-R16 / R24** |
-| `Views\Step3ProgressPage.xaml.cs` | 呈现节拍 `PresentIntervalMs = 16`；`UpdateTotalProgressFill()` 成为**唯一写入者**；`ProgressMotionDriver` 引用数 **0** | **PMML-R11 / R20 / R23** |
+| `Views\Step3ProgressPage.xaml.cs` | 呈现节拍 `PresentIntervalMs = 16`；`UpdateTotalProgressFill()` 成为**唯一写入者**；`ProgressMotionDriver` 引用数 **0** ⇒ 该驱动已于 2026-10-06 删除（文件不存在） | **PMML-R11 / R20 / R23** |
 
 ### 三、新控件与 Token（所有值取自代码，可核）
 
@@ -498,4 +500,4 @@ SameSource(VisualProgress): PASS（headX = visual% × 1010 全样本成立；文
 
 - 本轮新增规则已写入 `docs\PMML-UI修改硬性规范.md`：**R21 进度头只代表已确认事实 / R22 几何稳定光照动态 / R23 同源 / R24 视觉只许落后 / R25 同时最多一条 Push Band / R26 粒子属于进度空间且固定池 / R27 局域光学耦合与稀疏 Ripple / R28 Renderer 与业务层隔离 / R29 Reduced Effects 不改业务 / R30 真机验收七项**。
 - 正式章节已写入 `docs\PCMig-Visual-Motion-Language.md` **附录 B：PCMig Immersive Transfer Progress（A~O）**。
-- 旧路线（`ProgressMotionDriver` + Sweep + 8 粒子）按执行书 §7 **冻结**：只许下线/删除，不得再扩展；生产路径对它的引用数已为 0。
+- 旧路线（`ProgressMotionDriver` + Sweep + 8 粒子）按执行书 §7 **冻结**：只许下线/删除，不得再扩展；生产路径对它的引用数已为 0。→ **2026-10-06：该文件已按用户当轮授权删除，L-19 标 CLOSED**（删除前 SHA256 `530EA58E605137CA4548649D1501D21751BF417D081578FD6DA2693234D9EA15`；连带 L-07 / G-04 已同步）。

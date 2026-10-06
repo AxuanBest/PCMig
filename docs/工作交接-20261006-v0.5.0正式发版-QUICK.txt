@@ -1,0 +1,68 @@
+PCMig 新会话无缝衔接 · QUICK（v0.5.0 正式发版后）2026-10-06 09:20
+==============================================================
+
+【现状一句话】
+PCMig v0.5.0 已正式发布：commit 022377e / annotated tag v0.5.0 / 安装包 151.13 MB / Portable 539 文件。
+门禁：Build 0 error + 3 warning(WMC1506×3=基线)、Core 569/569、Diagnostics 382/382。
+工作树（发版提交时）只剩 1 项未提交：tests/PCMig.Diagnostics.Tests/TestResults/diag-b3-r2.trx。
+【⚠ 交接动作之后又多出 4 项、未 commit、属预期】M AGENTS.md / M docs/INDEX.md /
+?? docs\工作交接-20261006-v0.5.0正式发版.md / ?? docs\工作交接-20261006-v0.5.0正式发版-QUICK.txt
+⇒ 共 5 项。要不要 commit 必须先问用户，不得自行提交。
+git remote = 0 个 → 未 push。
+
+【必读（按序）】
+1. docs\工作交接-20261006-v0.5.0正式发版.md   ← 完整交接（本轮主文档）
+2. docs\INDEX.md                              ← 导航，Current Handover 已指向上面那份
+3. AGENTS.md                                  ← 状态表已是 v0.5.0 已发版
+4. docs\测试报告-公司环境.md                   ← 读【末尾】「## v0.5.0 发版记录」：本轮全部根因/修法/证据/未测项
+5. docs\发版铁律.md                            ← 铁律 13 / 13-A / 18 / 19 / 20-A 已 WinUI 化
+6. 改 UI 前必读 PMML 链：docs\PCMig-Visual-Motion-Language.md、docs\PMML-UI修改硬性规范.md（R21–R36）、
+   docs\PMML-Implementation-Audit.md、docs\PMML-Legacy-Deviations.md
+
+【本会话做了什么】
+A. 场景 G 真机取证 = VERIFIED（NtSuspendProcess 冻结 robocopy → engineDelta=0 / Head 冻结 / Band 继续动）
+   脚本与数据：E:\PCMigLab\Staging\recovery-gate\round3-*.ps1、E:\PCMigLab\Staging\phG-holding-v5\
+B. 场景 H = 抓到真失败铁证（robocopy 错误 112 磁盘空间不足 / 复制 0 失败 6 / ExitCode=8），
+   但暴露 OPEN 疑点：42 GB 未落盘却记 percent=99.9 → 未定性，需干净复现
+C. 性能采样：CPU 均值 0.738 核 / 峰值 1.199 核、WS 峰值 276 MB、gen2=1 → E:\PCMigLab\Staging\phPerf-aggregate\PERF-SUMMARY.txt
+D. 视觉修复三件事全进 commit：
+   ① 矩形外壳（根因=CanvasAnimatedControl 的 SwapChainPanel external content 开孔）→ 宿主换 CanvasControl（用户人眼验收通过）
+   ② 轨道炭黑 → 浅蓝灰 #FFD6E1F8（Colors.xaml + ResolvePalette 兜底 + ImmersiveProgressPalette.Fallback 三处同步）
+   ③ 底栏右端直角（星号列只剩 ~138 DIP vs Host MinWidth 160）→ MainWindow.xaml MinWidth=0 + FooterProgressWidth => 0d
+E. 应用图标缺陷：WinUI csproj 无 <ApplicationIcon> → 复制 Assets + ApplicationIcon + AppWindow.SetIcon
+   实测 exe 提取图标 SHA256 = 5A8CFC9CBE401964 == 源 pcmig.ico ✓
+F. Step2 目录树「…」与未勾选共享：DirNode.AddDummy / "文件过多"提示的 FullPath="" 占位被 materialize 放行 → 已修
+G. 发版链 WinUI 化（用户明确授权）：tools\release.ps1（268 行，9 组哈希）、installer\pcmig.iss、docs\发版铁律.md
+   顺带修掉发版链三个缺陷：Patch() 假"已是目标版本"、python 命中 Store 存根、.ps1 丢 BOM
+H. 发版：release.ps1 -Version 0.5.0 跑 4 次（前 3 次失败各暴露一个缺陷，第 4 次带图标全绿）→ commit + annotated tag
+
+【明确没做什么】
+1. 未 push（无远端）2. P3 三项裁决全未做（L-19 底栏 Compact 化与删 ProgressMotionDriver 需单独授权 /
+   Models.cs:277 注释 / tests/**/TestResults/ 进 .gitignore）3. 未清理那 1 个 .trx
+4. 未做 CanvasControl 拖窗-交互-动画卡顿量化 5. 未做生命周期矩阵实测（离开再进 Step3 ≥3 次 / 缩放 / 最小化还原）
+6. 未实测非默认 DPI 下星号列=Host=Canvas 三个运行时宽度 7. 未定性场景 H 的 99.9% 疑点 8. 未录屏
+9. v0.5.0 发版本轮的桌面复验包由本次交接补做（视觉那份 20261005-233901 已是历史证据，不能覆盖当前源码）
+
+【回退】
+改文件级：E:\Project\deepseek work\archive\pcmig-round3-immersive-backup-20261006-000027（58 文件 + 逐文件 SHA256）
+提交级：git revert 022377e；禁止 reset --hard / checkout . / restore . / clean -fd / rebase / amend
+交付物：E:\Project\PCMig\Portable\ 与 D:\PCMig\ 都是整棵树，可直接覆盖恢复；历史 dist\PCMigSetup-*.exe 全量保留、不得清理
+
+【环境坑（先读省几小时）】
+1. PS 5.1 + 无 BOM 的 UTF-8 = GBK 解码灾难：全角括号（）吞引号报 Missing ')'；中文路径被毁（docs\更新日志.md→docs\鏇存柊鏃ュ織.md）
+2. $Pid / $host 是只读自动变量 → 参数名改用 ProcessId
+3. [IO.File]::ReadAllText 相对路径按进程 CWD 解析，不随 Set-Location 变化 → 一律绝对路径
+4. 单命中 (…).Count 返回 $null → 用 @(…).Count
+5. write 工具产出无 BOM；edit 会改掉 .ps1 的 BOM → 改完复查前三字节 EF BB BF
+6. 断言不许命中自己的注释（我在 csproj 注释写 PCMig.Gui → WinUiStep1ContractTests 红、发版闸门 0/5 红）
+7. E:\PCMigLab\Staging\recovery-gate\launch-app.ps1 的 STALE-WARNING 是误报（把 obj\ 中间产物当源文件）
+8. 本机窗口激活只认 Shell.Application 的 MinimizeAll() + UndoMinimizeAll()
+9. 切换目标卷（挂/卸 VHD）前必须先关应用，否则 WinUI 主进程 Responding=False 且空转烧 CPU
+10. ★ bili 代理 0.1.184 压缩静默失效（#2156/#2160）→ 重启 dsh 升 0.1.185 才能压缩
+
+【下一步】
+等用户指令，不要自行开工。建议先跑：
+  git log --oneline -3        # 应为 022377e / 862b091 / d1aefb2
+  git tag -l v0.5.0
+  git status --porcelain=v1 --untracked-files=all   # 应为 5 项（1 个 .trx + 本次交接的 2 改 2 新）
+用户候选待办：P3 三项裁决 / 场景 H 干净复现 / 未测三项 / 是否配远端并 push

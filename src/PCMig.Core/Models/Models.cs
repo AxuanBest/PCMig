@@ -274,7 +274,11 @@ public sealed class ObjectReceipt
     public DateTime StartedUtc { get; set; }
     public DateTime CompletedUtc { get; set; }
     public ObjectStatus Status { get; set; }
-    public long TargetBytes { get; set; }            // 目标侧实际落盘字节（枚举实测）
+    // 目标侧字节。两种语义：Completed=盘上实测（枚举长度）；Interrupted=本趟运行时可信
+    // checkpoint（TransferOrchestrator.CaptureInterruptedConfirmedProgress）——后者在 /Z 可续传
+    // 通道下**不等于**目标文件逻辑长度，因为 robocopy 会先预分配最终大小。
+    public long TargetBytes { get; set; }
+    // 目标侧文件数。Interrupted 结算时为 0：文件计数没有可靠的运行时来源，不猜。
     public long TargetFiles { get; set; }
     public int RobocopyExitCodeBulk { get; set; } = -1;
     public int RobocopyExitCodeLarge { get; set; } = -1;  // -1 = 未执行该 pass

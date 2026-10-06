@@ -18,12 +18,12 @@
 
 ---
 
-## 〇 Current State（截至 2026-10-02）
+## 〇 Current State（截至 2026-10-06 —— v0.5.0 正式发版后）
 
 | 项目 | 状态 |
 | --- | --- |
-| 当前发布版本 | **v0.4.9**（`installer\pcmig.iss`、Cli/Core/Gui 三处 csproj 均为 `0.4.9`） |
-| 当前开发线 | **v0.5.0 WinUI**（分支 `feature/winui-v0.5.0`，**尚未发版**） |
+| 当前发布版本 | **v0.5.0** —— **2026-10-06 正式发布**：release commit `022377e` + annotated tag `v0.5.0`；安装包 `E:\Project\PCMig\PCMigSetup-0.5.0.exe`（151.13 MB）；Portable 539 文件 / 330.48 MB；9 组 SHA256 全 MATCH；发版后三验通过。版本号 9 处 = **四个 csproj（含 `src\PCMig.WinUI`，其 `<Version>` 节点本轮新建）** + 两个窗口标题（Gui 与 WinUI，WinUI 多一个 `·`）+ `README.md` + `installer\pcmig.iss` 两处 |
+| 当前开发线 | **无在研版本 —— 等人工指令**。v0.5.0 已随本轮一并交付（分支 `feature/winui-v0.5.0`）。**未 push**（`git remote` = 0 个，本仓库无远端）。发版提交时工作树仅剩 1 项未提交（`tests\PCMig.Diagnostics.Tests\TestResults\diag-b3-r2.trx`）；**交接动作后又产生 4 项未提交（`AGENTS.md`、`docs\INDEX.md` 与 2 份 2026-10-06 交接文档）⇒ 当前合计 5 项，未获授权不提交** |
 | PMML | **v1.0 — FROZEN**（UI 冻结） |
 | Diagnostics | **D6.1 — COMPLETE · D6.2 — EXECUTED · D6.3 — FINAL CLOSED**（2026-10-02；**Independent Verification = COMPLETED / PASSED**；收口报告 + **最终 Closure Report（已登记，见 §四）**：R-1…R-7 全部 CLOSED，Known Trust-Critical Risk = 0；**真机运行 = 2 轮**；改动已按 **2 个本地 Commit** 落库，**未 push / 未 release**） |
 | D6.2 Real World Validation | **EXECUTED**（结论：Deep Trace E2E FAIL 限定 / Secret PASS / 2-9 Action 全链路 / 跨包隐私 FAIL 限定 / Stage B NOT READY） |
@@ -35,7 +35,7 @@
 | 构建基线 | `dotnet build PCMig.sln -c Release` → **0 error / 4 warning**（既有：xUnit2031 ×1 + WMC1506 ×3，无新增） |
 | Git 分支 / Commits | `feature/winui-v0.5.0` · checkpoint **`2c0183b`**（治理前真实产品状态）→ solution **`7ba2bc1`** → governance **`c5e668c`** → 最终交接·报告 **`73fcb05`** → D6.2 收口 **`8513c25`** → D6.3 可信度收口 **`f5a4f69`**（7 笔逻辑提交） · **D6.3 剩余风险关闭（R-1…R-7）+ 最终仓库收尾 = 2 个本地 Commit**（`fix(diagnostics): close D6.3 trust-critical risks` + `docs(diagnostics): finalize D6.3 closure handover`；**未 push / 未 tag / 未 release**；**最新 HEAD 一律用 `git log --oneline -1` 实读，不写死**） |
 | Workspace 治理 | **COMPLETE**（2026-10-01 第二轮：docs 顶层 `.md` 83 → 29；清出 ≈1.09 GiB 可重建产物） |
-| 当前工作交接 | `docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md` |
+| 当前工作交接 | **`docs\工作交接-20261006-v0.5.0正式发版.md`**（+ 短卡 `…-QUICK.txt`，2026-10-06；见 §七）。上一份产品 Current `docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md` 仍在 `docs\` 根（本次未归档，原因见 §七） |
 | 文档入口 | 本文件（`docs\INDEX.md`） |
 
 **一句话**：产品功能仍处于冻结状态（PMML v1.0 FROZEN / D6.1 COMPLETE）；D6.2 真实验证、**D6.3 可信度收口**、**D6.3 剩余风险关闭（R-1…R-7）**与 **D6.3 最终仓库收尾**均已完成（2026-10-02），**D6.3 = FINAL CLOSED，Independent Verification = PASSED，Known Trust-Critical Risk = 0**；改动已按 **2 个本地 Commit** 落库（**未 push / 未 tag / 未 release**）；**Stage B 未获授权前不得开始**；**下一步 = 等人工下一条指令（Next Task = WAITING FOR HUMAN INSTRUCTION）**。
@@ -110,7 +110,8 @@
 **D6.3 剩余风险关闭 ⇒ 最终收尾（2026-10-02，Remaining Risk Closure · D6.3 = FINAL CLOSED）**：
 
 - `docs\诊断系统实施-D6.3-Final-Closure-Report.md` —— **D6.3 最终 Closure Report（正式登记进本 INDEX，2026-10-02）**。定义：**D6.3 最终可信度收口报告**（§〇 一页速览 / §一 范围与约束 / §二 逐条 R-1…R-5 / §二（续）R-6/R-7 / §三 修改文件清单 / §四 测试结果 / §五 真机复验 / §六 风险状态与证据索引 / §七 结论与下一步）。**旧有 D6.3 Trust Closure、Independent Verification、Remaining Risk 相关报告全部保留，不删除。**
-- `docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md` —— 本轮 Current Handover（见 §七）
+- `docs\工作交接-20261006-v0.5.0正式发版.md` —— **本轮 Current Handover**（v0.5.0 正式发版，见 §七）；短卡 `docs\工作交接-20261006-v0.5.0正式发版-QUICK.txt`
+- `docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md` —— 上一份产品 Current Handover（仍在 `docs\` 根，未归档，原因见 §七）
 - **变更范围权威口径**：D6.3 最终变更文件范围与行数，**以 Final Closure Commit 的 `git show --name-status` / `git show --stat` 为权威**；文档中出现的 `17 files changed, 520 insertions(+), 15 deletions(-)`、`18 项改动`、`工作树 17 M + 3 ??` 等数字一律为**当时阶段快照**（取自更新指针之前的工作树），**不得当作当前最终工作树描述**。
 - 机器证据（**工作区根目录，不在 Git 仓库内**）—— **禁止删除**：`E:\Project\deepseek work\archive\evidence\d63-remaining-risk-closure\`（`red-proof.md`、`red-proof-r2-silent.md`、`tests\`、`build\`、`real-export-030312\`、`real-export-r2-113637\`、`git\`）
 
@@ -178,8 +179,12 @@
 
 ## 七、【Current Handover】当前工作交接
 
-**当前**：`docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md`
+**当前**：`docs\工作交接-20261006-v0.5.0正式发版.md`（2026-10-06 —— v0.5.0 正式发版本轮；短卡 `docs\工作交接-20261006-v0.5.0正式发版-QUICK.txt`）
 （上一份 Current `工作交接-20261002-D6.3可信度收口完成.md` 已于 2026-10-02 按本节规则移入 `docs\handover\history\`，只作历史追溯；更早的 `工作交接-20261001-D6.2真实验证完成.md`、`工作交接-20261001-Workspace治理完成与D6.2起点.md` 亦已在历史目录。）
+
+**⚠ 本次未执行「旧 Current → `docs\handover\history\`」归档步骤，原因如实记录**：上上份产品 Current `docs\工作交接-20261002-D6.3剩余风险关闭R1-R7.md` 仍留在 `docs\` 根目录。它被 `docs\工作交接-20261004-Trust-Critical-Recovery.md`、`docs\工作交接-20261005-Trust-Critical-Recovery.md`、`docs\工作交接-20261005-UI-Closure.md` 等多份**同目录并行轨道交接**以**相对文件名**引用（另有 `docs\INDEX.md` 与 `AGENTS.md` 引用）；**单独移动它会断链**，故按「移动前先查硬引用」的治理规则暂不移动。后续若要把 `docs\` 根的历史交接统一归档，必须**成组移动**并同步改写上述引用，属独立治理任务，**需人工授权**。
+
+**`docs\` 根目录现存的多份交接（2026-10-06 实读，共 10 项）**：`工作交接-20261002-D6.3剩余风险关闭R1-R7.md`、`工作交接-20261004-Trust-Critical-Recovery.md`、`工作交接-20261005-Trust-Critical-Recovery.md`、`工作交接-20261005-UI-Closure.md`、`工作交接-20261005-UI-Closure-会话交接.md`、`工作交接-20261005-UI-Closure-PHASE-ABCD.md`、`工作交接-20261005-UI-Closure-QUICK.txt`、`工作交接-20261005-2115-Round3-新会话无缝衔接.md`、**`工作交接-20261006-v0.5.0正式发版.md`（Current）**、`工作交接-20261006-v0.5.0正式发版-QUICK.txt`。历史目录 `docs\handover\history\` = **45 篇**（未变）。
 
 **并行 lab 轨道交接（不替换产品 Current）**：
 - **最新**：`docs\工作交接-20261005-UI-Closure.md`（2026-10-05 03:00）
@@ -294,4 +299,4 @@
 
 ---
 
-*本文件由 Workspace Cleanup & Governance 轮建立（2026-10-01）；最近一次更新：**D6.3 Final Closure / Remaining Risk Closure 轮（2026-10-02）**更新 Current State / Diagnostics 产物 / Roadmap / 最终状态块。文档治理规则：机器生成文档禁手改；历史文档只追溯；移动前先查硬引用。*
+*本文件由 Workspace Cleanup & Governance 轮建立（2026-10-01）；最近一次更新：**PCMig v0.5.0 正式发版本轮（2026-10-06）**更新 Current State（发布版本 v0.4.9 → **v0.5.0**、开发线、Git/tag/工作树）与 §七 Current Handover。文档治理规则：机器生成文档禁手改；历史文档只追溯；移动前先查硬引用。*
