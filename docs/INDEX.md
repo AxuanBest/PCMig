@@ -136,6 +136,7 @@
 - `docs\更新日志.txt` —— 由 `更新日志.md` 生成（release.ps1 校验 UTF-8 BOM）
 - `docs\使用说明.txt` —— 随包交付（release.ps1 + `installer\pcmig.iss` 引用 → **不可移动**）
 - `docs\测试报告-公司环境.md` —— 发版后追加验证结果（死律 5）
+- `docs\历史版本索引.md` —— 历史版本的**证据索引**（51 版本 × 安装包/更新日志/测试章节/精确源码快照；含 Windows 兼容性证据等级与 tag 塌缩说明）
 - `docs\首日实测检查表.md` —— 随包交付（release.ps1:145 + iss:49）
 
 > 已知债务：`首日实测检查表.md` 内容仍是旧口径；`tools\release.ps1` 交付复制清单存在缺口。**均登记不改**，留待 Release Governance 轮。
@@ -302,4 +303,4 @@
 
 ---
 
-*本文件由 Workspace Cleanup & Governance 轮建立（2026-10-01）；最近一次更新：**PCMig「桌面整理（第二轮）」轮（2026-10-06）**更新 §〇 Current State（新增第二轮口径：桌面 53→6 项、MOVE 42 / DELETE 9、PCMig 归档 30 项、个人文件归位 `Desktop-Archive\2026\`、§9 脚本二次精简 KEEP 11 / DELETE 88、工作树 69 项）与 §七 Current Handover 指针（`docs\` 根交接 16 → 18 项）。上一轮（**「工作区整理 / 清理」轮，2026-10-06**）更新 §〇 Current State（释放 427.8 GB、桌面 38→2、三 VM 框架归位）与 §七指针（14 → 16 项）。再上一轮（**「v0.5.1 正式发版」轮，2026-10-06**）更新 §〇 Current State（发布版本 v0.5.0 → **v0.5.1**、开发线、Git/tag/工作树）与 §七 Current Handover 指针（12 → 14 项）。再上一轮更新（**「委托链修复与 P3 裁决」轮，2026-10-06 11:20**）更新了 §七 Current Handover 指针与 `docs\` 根交接清单（10 → 12 项）。文档治理规则：机器生成文档禁手改；历史文档只追溯；移动前先查硬引用。*
+*本文件由 Workspace Cleanup & Governance 轮建立（2026-10-01）；最近一次更新：**「GitHub 首次上传前（README + 历史版本考古）」轮（2026-10-06）**新增 §五 条目 `docs\历史版本索引.md`（51 版本证据索引；三组判定：Current / 有精确源码快照 / 无精确源码快照），并记录 README 主页化重写与 tag 塌缩事实。上一轮（**PCMig「桌面整理（第二轮）」轮（2026-10-06）**）更新 §〇 Current State（桌面 53→6 项、MOVE 42 / DELETE 9、PCMig 归档 30 项、个人文件归位 `Desktop-Archive\2026\`、§9 脚本二次精简 KEEP 11 / DELETE 88、工作树 69 项）与 §七 Current Handover 指针（`docs\` 根交接 16 → 18 项）。上一轮（**「工作区整理 / 清理」轮，2026-10-06**）更新 §〇 Current State（释放 427.8 GB、桌面 38→2、三 VM 框架归位）与 §七指针（14 → 16 项）。再上一轮（**「v0.5.1 正式发版」轮，2026-10-06**）更新 §〇 Current State（发布版本 v0.5.0 → **v0.5.1**、开发线、Git/tag/工作树）与 §七 Current Handover 指针（12 → 14 项）。再上一轮更新（**「委托链修复与 P3 裁决」轮，2026-10-06 11:20**）更新了 §七 Current Handover 指针与 `docs\` 根交接清单（10 → 12 项）。文档治理规则：机器生成文档禁手改；历史文档只追溯；移动前先查硬引用。*
