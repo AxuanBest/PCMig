@@ -24,8 +24,10 @@ lab/make-*.ps1
 lab/unlock.ps1
 lab/repair-src.ps1
 
-# 运行时生成的 Job 数据
-jobs/
+# 运行时生成的 Job 数据（限定仓库根目录）
+# 注意：写成裸 jobs/ 会匹配任意层级，把源码目录 src/PCMig.Core/Jobs/ 一起吞掉，
+# 导致该目录从未入库、干净检出无法编译。
+/jobs/
 
 # 截图（按需手动加入）
 docs/screenshots/*.png
