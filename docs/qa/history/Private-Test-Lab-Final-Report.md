@@ -157,7 +157,7 @@
 | **S2** | 旧 `Compare-Tree` **不比对目录** | **空目录丢失完全检测不到** | 加目录集合双向比对（实测删空目录立刻 FAIL） |
 | S3 | 退出码陷阱 | `CompletedWithErrors`（含盘满）也返回 0 | 判定一律读 `job-state.json` |
 | S4 | 无 job 隔离 | 任务落进生产 `%ProgramData%\PCMig\Jobs` | 强制 `--jobs <外置实验室盘>\jobs` |
-| **S5** | `write`/`edit` 工具**丢 BOM** | PS 5.1 按 GBK 读 UTF-8 中文脚本 → **字符串闭合被破坏、解析失败**（铁律 8 经典事故） | 改后复查补 `EF BB BF`；`.ps1` 用精确编辑 |
+| **S5** | `write`/`edit` 工具**丢 BOM** | PS 5.1 按 GBK 读 UTF-8 中文脚本 → **字符串闭合被破坏、解析失败**（发布规则 8 经典事故） | 改后复查补 `EF BB BF`；`.ps1` 用精确编辑 |
 | S6 | PS 5.1 用 `$(if ...)` / `$args` / `$Pid` | 语法错或只读变量冲突 | 改 if/else 赋值 + 重命名 |
 | S7 | `Complete-LabRun` 用 `Write-Output` | 汇总文本污染返回值 → **场景结果误报** | 改 `Write-Host` |
 | S8 | 单元素数组解包 | 6 条断言被当成 1 条 | 统一 `@()` |

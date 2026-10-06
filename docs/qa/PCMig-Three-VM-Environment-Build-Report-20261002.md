@@ -357,7 +357,7 @@ Source（SRC01 `D:\`）：
 | 1 | `Set-VMMemory` 报「设置最大值、最小值和缓冲区设置需要启用动态内存」 | 固定内存时不能同时给 Minimum/Maximum | 只传 `-DynamicMemoryEnabled $false -StartupBytes <n>` |
 | 2 | `deploy-os.ps1` 定位挂载盘失败：`mounted VHD disk object not found within timeout` | 挂载后 VHDX 文件路径在 `Get-Disk.Location`，**不在** `Get-Disk.Path` | 按 `BusType -eq 'File Backed Virtual'` + `GetFullPath($_.Location)` 匹配；超时 90 s。另 `Get-VHD` 必须带 `-Path` |
 | 3 | DC01 灌盘 `bcdboot` **rc=193** `Failure when attempting to copy boot files.` | 宿主 bcdboot（Win11 26300）在 Secure Boot 开且 DB 含 2023 PCA 时强制用 Ex 二进制：`BFSVC: Using Ex bins because SB is on, BFSVC_USE_EX_BINS is set, and 2023 PCA is in DB.` → 找不到 `Windows\boot\EFI_EX\bootmgfw_EX.efi` → `Error code = 0xc1`。Server 2022 镜像**没有** `EFI_EX` | **用被灌镜像自带的 `<OS>:\Windows\System32\bcdboot.exe`**（rc=0）；脚本改为先试镜像自带、再退回宿主。（`$env:BFSVC_USE_EX_BINS='0'` 实测**无效**） |
-| 4 | 阶段脚本空等 ISO 到超时 | `.ps1` 无 BOM 且含中文路径字面量 ⇒ PS 5.1 按 GBK 解码 ⇒ 路径乱码（**项目铁律 8**） | 全部 `.ps1` 一律 UTF-8 **带 BOM**；复核中文行已正确解码 |
+| 4 | 阶段脚本空等 ISO 到超时 | `.ps1` 无 BOM 且含中文路径字面量 ⇒ PS 5.1 按 GBK 解码 ⇒ 路径乱码（**项目发布规则 8**） | 全部 `.ps1` 一律 UTF-8 **带 BOM**；复核中文行已正确解码 |
 | 5 | 客户端角色脚本 `Copy-Item` 报 `Cannot find path ...` / `GUEST_SCRIPT_EXIT=-196608` | 脚本名写成 `role-LAB-SRC01-phase1.ps1`（不存在）；正确名为 `role-SRC01-phase1.ps1` | `run-guest-script.ps1` 增加源文件存在性检查（`exit 6`）+ guest 侧 `Test-Path` 校验（`exit 7`） |
 | 6 | 加域后用**裸** `labadmin` 做 PowerShell Direct **5 分钟超时**（exit=3） | 加域后裸名会被当域名账号解析 | 一律用 **`.\labadmin`**（域控用 `CORP\Administrator`）；DC01 客户端回退链已写进脚本 |
 | 7 | 以域用户身份做本机写入无法取证 | 域用户默认**无**「作为批处理作业登录」特权（`SeBatchLogonRight` 仅 Administrators / Backup Operators / Performance Log Users）；`Start-Process -Credential` 在 PD 会话中报 `0xC0000142` | **不放宽安全策略**；改用该用户自己的令牌经 SMB 访问同一目录取证（见 §14） |

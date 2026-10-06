@@ -121,15 +121,15 @@ public class PmmlContractTests
         Assert.DoesNotContain("<SplitCloseThemeAnimation", roll, StringComparison.Ordinal);
     }
 
-    // ── 5. AGENTS 入口 + Gate ────────────────────────────────────────────────────
+    // ── 5. 公开文档入口 + Gate ───────────────────────────────────────────────────
     [Fact]
-    public void Agents_declares_pmml_entry_and_gate()
+    public void Public_docs_declare_pmml_entry_and_gate()
     {
-        var agents = MustRead("AGENTS.md");
-        Assert.Contains("PMML", agents, StringComparison.Ordinal);
-        Assert.Contains("PCMig-Visual-Motion-Language.md", agents, StringComparison.Ordinal);
-        Assert.Contains("PMML-UI修改硬性规范.md", agents, StringComparison.Ordinal);
-        Assert.Contains("PMML Compliance Gate", agents, StringComparison.Ordinal);
+        var index = MustRead("docs/INDEX.md");
+        Assert.Contains("PMML", index, StringComparison.Ordinal);
+        Assert.Contains("PCMig-Visual-Motion-Language.md", index, StringComparison.Ordinal);
+        Assert.Contains("PMML-UI修改硬性规范.md", index, StringComparison.Ordinal);
+        Assert.Contains("PMML Compliance Gate", index, StringComparison.Ordinal);
     }
 
     // ── 6. 核心术语没有被删 ──────────────────────────────────────────────────────

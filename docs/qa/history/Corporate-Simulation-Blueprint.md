@@ -238,7 +238,7 @@ Firewall ｜ UAC ｜ Restricted User ｜ 更复杂的 GPO
 
 ### D.1 权限事实（必须如实记录）
 
-**本 DSH 会话的 shell 进程始终是 Medium 完整性级别，无法提权**：
+**本机会话的 shell 进程始终是 Medium 完整性级别，无法提权**：
 
 ```
 IsAdmin        : False

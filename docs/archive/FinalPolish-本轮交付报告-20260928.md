@@ -1,7 +1,7 @@
 # Final Polish 本轮交付报告（20260928）
 
 > 依据：`FinalPolish-用户指令原文-20260927.md`（67 节，SHA256 已核对归档）
-> 配套：`handover\history\工作交接-20260928-FinalPolish收尾-Motion修复与裁切证伪.md`、`FinalPolish-完成度审计-20260928.md`
+> 配套：`历史交接记录`、`FinalPolish-完成度审计-20260928.md`
 > 纪律声明：本报告遵守死律 1（功能冻结）、7（看不见的东西不改）、8（脚本 BOM）、9（无破坏性 git）、
 > 10（交接只增不覆）、11（子模型执行 + 主控核验）。**§64：不以 Build 通过 / Tests 通过 / 截图数量 / 「动画代码写了」充当完成。**
 
@@ -76,7 +76,7 @@ Update Log「只列 13 版」这一条仍成立：该面板本就设计为可滚
 `ItemsWrapGrid`/`WrapPanel`，或缩短文案/减小 `Padding`，或把面板 `Width` 提到 ≥ 410。
 **未实施**（属 §3.5 需当轮授权的改动）。
 
-**同理更正**：`handover\history\工作交接-20260928-FinalPolish收尾-Motion修复与裁切证伪.md:109-110` 的这一条结论同样作废。
+**同理更正**：`历史交接记录` 的这一条结论同样作废。
 
 **截图文件名与内容互换**（需记住，避免再次误引）：
 `p-devpanel.png` 实为「更新日志」面板；`p-updatelog.png` 实为「开发者材质调节」面板。
@@ -147,7 +147,7 @@ Update Log「只列 13 版」这一条仍成立：该面板本就设计为可滚
 6. **WinUI 未进发版链路**：`PCMig.sln` 未含 WinUI，`release.ps1` 仍只打包 WPF Gui/CLI。纳入需**单独授权**。
 7. **`tools\uishot.ps1` 与 `lab\*.ps1` 缺 UTF-8 BOM**（死律 8）。
    本轮已修我新增的 `archive\scripts\winui-motion-burst.ps1`；
-   但 `tools\uishot.ps1` 属"发版与验证脚本"，**按 AGENTS.md 三点五需用户当轮明确指令才能改**，故只报告未改。
+   但 `tools\uishot.ps1` 属"发版与验证脚本"，**按发布流程约束（改动发布/验证脚本需当轮明确授权）**，故只报告未改。
 
 ---
 

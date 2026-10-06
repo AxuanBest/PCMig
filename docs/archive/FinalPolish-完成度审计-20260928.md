@@ -25,7 +25,7 @@
 
 | 节 | 要求摘要 | 状态 | 证据（文件:行 + 关键代码/证据文件） |
 |---|---|---|---|
-| §0 | 先逐张放大看「新建文件夹 (5)」人工标注图并出问题清单 | 部分完成 | 目录真实存在且**未被改动**：`<用户目录D>\Desktop\新建文件夹 (5)` 内 4 张 png，mtime 全部 12:35–12:40（未删/未覆盖/未重命名）；`工作交接-...首批...md:23-28` 有 4 行问题表。**缺**：无独立《人工标注问题清单》交付文件；无逐张放大视觉审阅证据（第二批交接 §4 自认视觉后端 11+ 次仅 1 次成功）。 |
+| §0 | 先逐张放大看「新建文件夹 (5)」人工标注图并出问题清单 | 部分完成 | 目录真实存在且**未被改动**：`<用户目录D>\Desktop\新建文件夹 (5)` 内 4 张 png，mtime 全部 12:35–12:40（未删/未覆盖/未重命名）；`首批交接记录:23-28` 有 4 行问题表。**缺**：无独立《人工标注问题清单》交付文件；无逐张放大视觉审阅证据（第二批交接 §4 自认视觉后端 11+ 次仅 1 次成功）。 |
 | §1 | 冻结视觉基线；禁止重新引入 Shell/Workspace/Card/Input/Control AcrylicBrush | 已完成 | `Themes\Materials.xaml:19-27` Layer2–5 全部 `SolidColorBrush`；全项目唯一 `AcrylicBrush` = `Materials.xaml:45 SelectedSurfaceBrush`，只被 `Materials.xaml:61 SelectedNavigationSurface` 引用，而该 Style **无任何引用点**（死资源）→ 无活的嵌套 Acrylic。**注意**：默认 backdrop 是 `MainWindow.xaml:8 <MicaBackdrop Kind="BaseAlt"/>`，非 Desktop Acrylic（见 §3 不符清单 C）。 |
 | §2 | 恢复 Update Log 功能（禁伪造历史、禁删旧记录、开合不得 Hard Cut） | 部分完成 | 真实落地：`Views\ChangelogPanel.xaml(.cs)`、`Presentation\ChangelogEntry.cs:29` `GetManifestResourceStream("PCMig.WinUI.Assets.CHANGELOG.md")`、`PCMig.WinUI.csproj:28` `<EmbeddedResource Include="..\..\docs\更新日志.md" LogicalName="PCMig.WinUI.Assets.CHANGELOG.md"/>`、入口 = `MainWindow.xaml:42` 产品 Header 的 v0.5.0 Badge（`ChangelogButton`）。**数据源是真的**（`ChangelogEntry.cs:32-80` 解析 `## v` 分节 + 顶部版本表取日期），非硬编码。**缺**：关闭是 `MainWindow.xaml.cs:154` 直接 `Visibility=Collapsed` = Hard Cut（违反本节末句）；WPF 版的粗体 Run / "用记事本打开 TXT" 兜底未复刻。 |
 | §3 | 先响应式适配、到极限再禁止缩小 | 部分完成 | 禁止缩小已真做（§9）；适配侧只有密度 + 3 页重排，`Views\Step1ConnectPage.xaml.cs` 全文无 `ApplyLayoutMode`。 |
@@ -92,7 +92,7 @@
 | §64 | 禁止虚假完成（Build 0 error / Tests 全过 / 截图 4/4 / 动画代码写了 ≠ 完成） | 已完成 | 第二批交接 §4 用表格逐条列出 **9 项未完成/未验证**（DPI 125/150、人眼自查、真视频、Motion 其余四项、Update Log 视觉、Settings 影响、125/150 断点、退出码、stability-test），并在 §5 把目标标为 blocked 而非完成 ✓ 未虚报。 |
 | §65 | 最终目标（功能无回归/窗口行为正常/各比例各 DPI 可用/视觉一致/数字完整/文字居中/按钮有层次/无裁切重叠/动效自然/Material 稳定） | 部分完成 | 达标：功能无回归（§48/§49）、窗口行为（§9）、部分无裁切（§39 卡片侧）、Material 稳定（§1）。**未达标**：各比例（§42）、各 DPI（§43）、视觉一致（§34）、数字完整（§10–§13）、按钮层次（§18 Secondary）、动效自然（§26–§30）。 |
 | §66 | 协作模型 / 子模型执行要求 | 不适用 | 过程性条款。侧证：`archive\scripts\` 下存在大量按职责拆分的子任务脚本（`dpi-measure.ps1`、`uishot-winui.ps1`、`winui-*.ps1`），两份交接均有"子任务归属判据"表 → 有委派痕迹，但无法从代码验证"主模型是否逐项复核"。 |
-| §67 | 立即执行四步（读标注图 → 查 Git 历史 → 查 Resize 架构 → 交调查报告） | 部分完成 | 第 1 步：目录真实存在且完好，4 图清单已记录（首批 §2）✓（但无逐张放大审阅证据）。第 2 步 ✓（首批 §3）。第 3 步 ✓（首批 §7 / 第二批 §3.1-3.2）。**第 4 步"把调查结果和正式实施方案报告给我"无独立交付文件** —— 内容散在两份工作交接里，用户拿不到一份可审的方案书。 |
+| §67 | 立即执行四步（读标注图 → 查 Git 历史 → 查 Resize 架构 → 交调查报告） | 部分完成 | 第 1 步：目录真实存在且完好，4 图清单已记录（首批 §2）✓（但无逐张放大审阅证据）。第 2 步 ✓（首批 §3）。第 3 步 ✓（首批 §7 / 第二批 §3.1-3.2）。**第 4 步"把调查结果和正式实施方案报告给我"无独立交付文件** —— 内容散在两份阶段性交接记录里，用户拿不到一份可审的方案书。 |
 
 ### 2.1 状态汇总
 
@@ -112,7 +112,7 @@
 > 均给出双方原文证据。**注意**：两份交接之间大量"首批说未完成 → 第二批说已完成"属正常时间推进，单列在第 4 条。
 
 ### 不符 A（严重 · 互相矛盾，无法自行裁决）：本机实测过的 DPI 档位
-- **第二批交接**（`handover\history\工作交接-20260927-FinalPolish后半程实现与DPI验收卡点.md:104`）："本机：**单显示器 1920×1080、`GetDpiForWindow = 96`（100%）、无 `PerMonitorSettings` 覆盖**"；`:133` "**DPI 125% / 150% 真实实测：完全未做**"。
+- **第二批交接**（`历史交接记录`）："本机：**单显示器 1920×1080、`GetDpiForWindow = 96`（100%）、无 `PerMonitorSettings` 覆盖**"；`:133` "**DPI 125% / 150% 真实实测：完全未做**"。
 - **代码侧（测试文件）**：`tests\PCMig.Core.Tests\WinUiDpiContractTests.cs:14`："本机只实测过 **125%（120 DPI）** 一种缩放率（100% / 150% 均无实测条件）"（该文件 mtime **09-26 19:07**，早于 09-27 的实测）。
 - **裁决依据**：真实证据 `archive\screenshots\final-polish-20260927\dpi-matrix-results.txt`（09-27 15:49）明确 `GetDpiForWindow: 96`、`scale 1 (100%)` → **09-27 当时确实只有 100%**。但 09-26 是否真在 125% 下跑过，**本审计无法确认**（机器缩放可能被改过）。→ **两处陈述至少有一处失真，需当事人澄清**；建议把 `WinUiDpiContractTests.cs:14` 的注释改为与 dpi-matrix-results.txt 一致，否则未来读者会以为 125% 已有实测覆盖。
 

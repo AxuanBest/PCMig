@@ -1,7 +1,7 @@
 ﻿# PCMig V0.4.6 Test Execution Report（详细执行报告）
 
 > 基线：**v0.4.6**（tag `v0.4.6` → `9a77381`，起点 HEAD `d818f95`）
-> 执行者：Captain（DSH 会话）+ 7 个并行只读审计子代理
+> 执行者：Captain（本机会话）+ 7 个并行只读审计子代理
 > 备份基线：tag `v0.4.6-before-testlab` → `d818f95`（2026-09-19 14:21 打）
 > 状态：**增量填充中**（已完成 B0 / B1 批次；B2+ 待用户决策）
 > 配套：`Private-Test-Lab-Blueprint.md`（设计）｜ `Coverage-Matrix-V046.md`（矩阵）
@@ -196,7 +196,7 @@
 | S2 | **`Compare-Tree` 不比对目录** | 空目录丢失完全检测不到 | 新增双向目录相对路径集合比对（**已实测：删掉空目录立刻判 FAIL**） |
 | S3 | **退出码陷阱** | `CompletedWithErrors`（含盘满）也返回 0 | 判定一律读 `job-state.json` 的 phase+failedObjects+回执 |
 | S4 | **无 job 隔离** | 任务落进生产 `%ProgramData%\PCMig\Jobs`（已有 25 个历史 Job） | 所有 CLI 调用强制 `--jobs <外置实验室盘>\jobs` |
-| S5 | **`write`/`edit` 工具丢 BOM** | 实测：写完 `.ps1` 前 3 字节变 `3C 23 0A`，PS 5.1 按 GBK 读中文脚本 → **字符串闭合被破坏、解析失败**（铁律 8 的经典事故） | 改后立即复查并补 `EF BB BF`；`.ps1` 改用 PowerShell `ReplaceExact` 修改 |
+| S5 | **`write`/`edit` 工具丢 BOM** | 实测：写完 `.ps1` 前 3 字节变 `3C 23 0A`，PS 5.1 按 GBK 读中文脚本 → **字符串闭合被破坏、解析失败**（发布规则 8 的经典事故） | 改后立即复查并补 `EF BB BF`；`.ps1` 改用 PowerShell `ReplaceExact` 修改 |
 | S6 | **PS 5.1 语法** | 误用 `$(if ...)` 与 `$args`（自动变量） | 全部改 if/else 赋值 + 重命名 `$cliArgs` |
 | S7 | **汇总输出污染返回值** | `Complete-LabRun` 用 `Write-Output` → 多行文本被当成场景结果，导致"2 个场景非 PASS"误报 | 改 `Write-Host`（不进管道） |
 | S8 | **单元素数组解包** | `Get-LabResults` 返回嵌套数组 → 6 条断言被当成 1 条显示 | 返回 `@(...)` 并修正汇总格式 |

@@ -46,4 +46,4 @@
 | 历史自动化脚本 | `PCMig\archive\scripts\` |
 | 历史证据批次 | `PCMig\archive\evidence\` |
 | 测试报告（公司环境） | `PCMig\docs\测试报告-公司环境.md` |
-| 发版铁律 | `PCMig\docs\发版铁律.md` |
+| 发布规则 | `PCMig/docs/RELEASE.md` |
