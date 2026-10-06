@@ -1,0 +1,72 @@
+PCMig 三 VM 实验室 — 网络与磁盘配置快照（20261006）
+
+===== LAB-DC01  State=Off  Gen=2  vCPU=2  MemStart=4096MB =====
+
+Name        : 网络适配器
+SwitchName  : PCMig-Lab-Switch
+MacAddress  : 00155DFC4304
+IPAddresses : {}
+
+
+
+Path               : E:\PCMigLab\VMs\LAB-DC01\LAB-DC01-OS_E5F92599-7BC1-4EE4-9E94-5BC8F897B07E.avhdx
+ControllerType     : SCSI
+ControllerNumber   : 0
+ControllerLocation : 0
+
+
+
+===== LAB-DST01  State=Off  Gen=2  vCPU=4  MemStart=6144MB =====
+
+Name        : 网络适配器
+SwitchName  : PCMig-Lab-Switch
+MacAddress  : 00155DFC4303
+IPAddresses : {}
+
+
+
+Path               : E:\PCMigLab\VMs\LAB-DST01\LAB-DST01-OS_CA2DFED2-C55B-45E9-AB7C-12910ECDB64E.avhdx
+ControllerType     : SCSI
+ControllerNumber   : 0
+ControllerLocation : 0
+
+Path               : E:\PCMigLab\VMs\LAB-DST01\LAB-DST01-Data1_9405220C-0F5D-4506-A3EC-AFEEA0C07C46.avhdx
+ControllerType     : SCSI
+ControllerNumber   : 0
+ControllerLocation : 1
+
+Path               : E:\PCMigLab\VMs\LAB-DST01\LAB-DST01-Data2_B9138438-19FA-4E4E-917A-25C3A6831064.avhdx
+ControllerType     : SCSI
+ControllerNumber   : 0
+ControllerLocation : 2
+
+
+
+===== LAB-SRC01  State=Off  Gen=2  vCPU=4  MemStart=6144MB =====
+
+Name        : 网络适配器
+SwitchName  : PCMig-Lab-Switch
+MacAddress  : 00155DFC4302
+IPAddresses : {}
+
+
+
+Path               : E:\PCMigLab\VMs\LAB-SRC01\LAB-SRC01-OS_C7BDF0E7-CE0F-46C9-BFFF-2E4A4A63879A.avhdx
+ControllerType     : SCSI
+ControllerNumber   : 0
+ControllerLocation : 0
+
+Path               : E:\PCMigLab\VMs\LAB-SRC01\LAB-SRC01-Data1_E1F650E0-E596-4AB9-BB62-04C13960CC4E.avhdx
+ControllerType     : SCSI
+ControllerNumber   : 0
+ControllerLocation : 1
+
+
+--- VMSwitch ---
+
+Name             SwitchType NetAdapterInterfaceDescription
+----             ---------- ------------------------------
+Default Switch     Internal 
+PCMig-Lab-Switch   Internal 
+
+

@@ -1,0 +1,15 @@
+
+Name      Path                               Description
+----      ----                               -----------
+ADMIN$    C:\WINDOWS                         远程管理
+C$        C:\                                默认共享
+D$        D:\                                默认共享
+E$        E:\                                默认共享
+F$        F:\                                默认共享
+G$        G:\                                默认共享
+IPC$                                         远程 IPC
+PCMIG-DS1 C:\Users\User\PCMigLab-RG\ds-small 
+PCMIG-DS2 C:\Users\User\PCMigLab-RG\ds-large 
+Users     C:\Users                           
+
+

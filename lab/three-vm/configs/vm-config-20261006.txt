@@ -1,0 +1,26 @@
+
+Name           : LAB-DC01
+State          : Off
+Generation     : 2
+ProcessorCount : 2
+MemoryStartup  : 4294967296
+MemoryMinimum  : 536870912
+Path           : E:\PCMigLab\VMs\LAB-DC01\LAB-DC01
+
+Name           : LAB-DST01
+State          : Off
+Generation     : 2
+ProcessorCount : 4
+MemoryStartup  : 6442450944
+MemoryMinimum  : 536870912
+Path           : E:\PCMigLab\VMs\LAB-DST01\LAB-DST01
+
+Name           : LAB-SRC01
+State          : Off
+Generation     : 2
+ProcessorCount : 4
+MemoryStartup  : 6442450944
+MemoryMinimum  : 536870912
+Path           : E:\PCMigLab\VMs\LAB-SRC01\LAB-SRC01
+
+
