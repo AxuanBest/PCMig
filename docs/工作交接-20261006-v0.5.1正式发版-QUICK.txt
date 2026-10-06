@@ -1,0 +1,91 @@
+PCMig v0.5.1 正式发版 · 交接短卡（2026-10-06）
+================================================================
+完整交接：docs\工作交接-20261006-v0.5.1正式发版.md
+
+■ 一句话状态
+  PCMig v0.5.1 已正式发布完毕。release commit 8d38f3b，annotated tag
+  v0.5.1。v0.5.0 tag 与 PCMigSetup-0.5.0.exe 均未被移动/覆盖。
+  旧 WPF 前端自本版起退出正式交付链。未 push（本仓库没有远端）。
+  状态：WAITING FOR HUMAN INSTRUCTION。下一版版本号未定，不得推断。
+
+■ 坐标
+  权威工作区 E:\Project\deepseek work\PCMig  分支 feature/winui-v0.5.0
+  交付区 E:\Project\PCMig   工作副本 D:\PCMig   脚本 tools\release.ps1
+  实验室 E:\PCMigLab   备份根 E:\Project\镜像备份源码
+  桌面交付根 D:\Users\User\Desktop\新建文件夹 (4)
+
+■ v0.5.1 是什么
+  v0.5.0 的可信度紧急修正版，不是新功能版（功能与界面不变）。六项：
+  1 场景 H 修复：目标盘写满时不再虚报 99.9% / 约 42 GiB
+    · TransferOrchestrator 的 OutputLine 委托注册顺序修正：真值错误处理
+      （字节回冲 / 错误码 112·39 写满熔断 / 错误风暴熔断）优先于界面转发
+    · MigrationSessionViewModel.AddFail 改为界面线程更新失败列表
+    · RobocopyRunner 两处空 catch 改为可观测日志
+  2 P3 收尾：删 ProgressMotionDriver.cs、修 TargetBytes 注释、忽略 TestResults
+  3 补齐验证：CanvasControl 性能 / 生命周期矩阵 / 非默认 DPI·UniformScale
+  4 发版链修复：v0.5.0 曾漏改 WinUI 两处运行时版本徽章（TitleBarVersionText
+    与更新日志徽章）；本版新增第 10 条 Patch + 反向自查，已验证生效
+  5 旧 WPF 前端退出正式交付链（见下）
+  6 根因定论报告：E:\PCMigLab\Evidence\Trust-Critical-Recovery\
+    SCENARIO-H-ROOT-CAUSE-20261006-REV2.md
+    （无 -REV2 的那份是已被推翻的首版，不可作定论引用）
+
+■ 旧 WPF 退出（v0.5.1 起唯一 WinUI 主前端）
+  release.ps1 停止 publish PCMig.Gui；iss 删除「经典界面·回退」
+  [Icons]/[Run]；逐文件哈希 9 组 → 7 组；新增 dist\app / Portable / 工作
+  副本三处「不得含 PCMig-classic.exe」硬门禁；新增工作副本陈旧残留清理。
+  铁律 13-A 重写、铁律 18/19 去掉旧 WPF 校验项、铁律 20 改正为「历史安装
+  包并列全量保留」。src\PCMig.Gui 源码保留（契约测试
+  V5PresentationContractTests.cs:91 仍断言 PCMIG_CLASSIC_UI）。
+  不允许以「备用/经典界面/回退」任何名义随包发布。
+
+■ 产物
+  PCMigSetup-0.5.1.exe  93,276,509 B（88.96 MB）
+  SHA256 4255FBD6E77CCEE1190ACDC05FC66F8A4843BE197FE993BDBE78FE495B329937
+  Portable 538 文件 / 274,430,131 B（不含 PCMig-classic.exe）
+  并列安装包 15 个（v0.2.27 … v0.4.9 + v0.5.0 + v0.5.1，全部保留）
+  PCMigSetup-0.5.0.exe 158,468,801 B / SHA256 8392B7013CAE9A6B… 未被覆盖
+
+■ 门禁与三验
+  Build 0 error / 4 warning（xUnit2031 ×1 + WMC1506 ×3 = 既有基线）
+  Core 569/569   Diagnostics 382/382
+  release.ps1 五道闸门 + 10 处声明 + 2 处徽章自查通过；7 组哈希全 MATCH
+  ① 应用内 UIA：标题 v0.5.1，TitleBarVersionText=v0.5.1，四页均可用
+  ② 文件：更新日志.txt BOM 正常且含 v0.5.1
+  ③ 命令行：pcmig-cli.exe changelog 输出含 v0.5.1，EXIT=0
+  守卫：v0.5.0 tag → 022377e（未移动）
+
+■ 提交链
+  022377e release: PCMig v0.5.0 → 66d8ced → 1594fe0 → 43718ce →
+  0fcc2a7 → 8d38f3b release: PCMig v0.5.1（HEAD，tag v0.5.1）
+  最新 HEAD 一律用 git log --oneline -1 实读，不写死。
+
+■ 未做（如实）
+  未 push / 未做人工视觉终验（截图已取，模型无图像输入，视觉终验永远是人
+  工）/ 未真机复验 / 回冲路径补测未做（HIT-RETRACT=0，窗口未触发）/
+  未录屏 / docs\ 根多份历史交接未成组归档 / 未配远端未打其它 tag /
+  铁律 18·21 与附录 A 的旧坐标 I:\PCMig 未统一（已在铁律内标注）
+
+■ 回退
+  提交级 git revert 8d38f3b
+  文件级 三重备份（源码镜像 2786 文件 2786/2786 MATCH + git bundle 通过
+  克隆复原 + 基线 tag v0.5.0-before-v051-release-20261006 → 0fcc2a7）
+  禁止 reset --hard / checkout . / restore . / clean -fd / rebase / amend
+
+■ 三条最容易踩的坑
+  1 PS 5.1 把无 BOM 的 .ps1 按 GBK 解码（中文吞引号）；edit 工具每次剥
+    BOM ⇒ 改完立刻复核前三字节 EF BB BF；iss 无 BOM 会中文乱码
+  2 Build 前先 Stop-Process PCMig.WinUI,PCMig.Cli,PCMig.Gui
+  3 docs\更新日志.txt 里 ## 已变成 ■ ⇒ 别用 ^## v0.5.1 去匹配 txt
+
+■ 开工必读链
+  1 E:\Project\deepseek work\AGENTS.md
+  2 PCMig\AGENTS.md（十一条死律 + 权限条款 + 状态表）
+  3 PCMig\docs\INDEX.md（唯一导航入口）
+  4 完整交接 docs\工作交接-20261006-v0.5.1正式发版.md
+  5 docs\测试报告-公司环境.md 末尾「## v0.5.1 发版记录（2026-10-06）」
+  6 docs\发版铁律.md（2 / 12 / 13 / 13-A / 18 / 19 / 20 / 20-A / 37 / 43–48）
+  7 改 UI 前必读 PMML 链（四篇，见 docs\INDEX.md）
+
+■ 口令
+  「进度暂停」= 立刻冻结只读待命；「进度恢复」= 才继续
