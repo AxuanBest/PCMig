@@ -56,7 +56,12 @@ $testProj = Join-Path $repo 'tests\PCMig.Core.Tests\PCMig.Core.Tests.csproj'
 if (-not (Test-Path $testProj)) { Abort '找不到测试项目 tests\PCMig.Core.Tests（缺少安全网，不允许发版）' }
 $testOut = & dotnet test $testProj -c Release --nologo -v minimal 2>&1
 $testOut | Select-String -Pattern '已通过|失败|error CS' | Select-Object -Last 3 | ForEach-Object { Write-Output ('   ' + $_.Line.Trim()) }
-if ($LASTEXITCODE -ne 0) { Abort 'dotnet test 未全绿 —— 先修测试再发版' }
+if ($LASTEXITCODE -ne 0) { Abort 'Core.Tests 未全绿 —— 先修测试再发版' }
+$diagnosticsTestProj = Join-Path $repo 'tests\PCMig.Diagnostics.Tests\PCMig.Diagnostics.Tests.csproj'
+if (-not (Test-Path $diagnosticsTestProj)) { Abort '找不到测试项目 tests\PCMig.Diagnostics.Tests（缺少诊断安全网，不允许发版）' }
+$diagnosticsTestOut = & dotnet test $diagnosticsTestProj -c Release --nologo -v minimal 2>&1
+$diagnosticsTestOut | Select-String -Pattern '已通过|失败|error CS' | Select-Object -Last 3 | ForEach-Object { Write-Output ('   ' + $_.Line.Trim()) }
+if ($LASTEXITCODE -ne 0) { Abort 'Diagnostics.Tests 未全绿 —— 先修测试再发版' }
 Log '闸门 1/4：更新日志正文'
 $clPath = Join-Path $repo 'docs\更新日志.md'
 if (-not (Test-Path $clPath)) { Abort 'docs\更新日志.md 不存在' }
