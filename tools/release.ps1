@@ -4,7 +4,10 @@
 #   本机（个人电脑）：仓库 E:\Project\deepseek work\PCMig ｜ 交付 E:\Project\PCMig ｜ 工作副本 D:\PCMig ｜ 源码镜像 E:\Project\镜像备份源码\PCMig
 #   公司电脑        ：仓库 E:\deepseek work\PCMig ｜ 交付 E:\K\PCMig ｜ 工作副本 D:\PCMig ｜ 源码镜像（按需指定）
 #   换机只改下面这几行，其余一律不动。$mirror 留空＝跳过镜像；镜像不含 dist/bin/obj，放在交付盘之外。
-param([Parameter(Mandatory = $true)][string]$Version)
+param(
+  [Parameter(Mandatory = $true)][string]$Version,
+  [switch]$AllowReplaceDeliveryInstaller
+)
 $ErrorActionPreference = 'Stop'
 $repo = 'E:\Project\deepseek work\PCMig'
 $delivery = 'E:\Project\PCMig'
@@ -80,8 +83,12 @@ if (([IO.File]::ReadAllText($umPath, [Text.Encoding]::UTF8)) -notmatch ('v' + [r
   Abort ('docs\使用说明.txt 里没有 v' + $Version + ' 的说明段落。')
 }
 Log '闸门 4/4：未重复发版'
-if (Test-Path (Join-Path $delivery ('PCMigSetup-' + $Version + '.exe'))) {
-  Abort ('交付目录里已经存在 PCMigSetup-' + $Version + '.exe —— 换一个版本号（或先删掉旧包）。')
+$existingInstaller = Join-Path $delivery ('PCMigSetup-' + $Version + '.exe')
+if ((Test-Path $existingInstaller) -and -not $AllowReplaceDeliveryInstaller) {
+  Abort ('交付目录里已经存在 PCMigSetup-' + $Version + '.exe —— 默认禁止覆盖；仅在用户明确授权后传入 -AllowReplaceDeliveryInstaller。')
+}
+if (Test-Path $existingInstaller) {
+  Write-Output ('   已获明确授权，将覆盖交付安装包 ' + $existingInstaller)
 }
 Write-Output '   四处闸门通过：日志、对照表、使用说明都已写好本版内容。'
 
