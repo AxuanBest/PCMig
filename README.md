@@ -79,7 +79,7 @@ PCMig 的“简单”不是减少底层能力，而是把用户原本需要手�
 Preflight → Scan → Plan → 人工确认 → Transfer → Verify → Report
 
 Robocopy：数据传输执行器
-PCMig：规划 + 状态 + 真值 + 呈现 + Diagnostics
+PCMig：规划 + 状态 + 可信进度 + 呈现 + Diagnostics
 ```
 
 ---
@@ -173,7 +173,7 @@ PMML 的冻结规范、真实资源参数和偏差审计分别见：
 - [`docs/PMML-Implementation-Audit.md`](docs/PMML-Implementation-Audit.md)
 - [`docs/PMML-Legacy-Deviations.md`](docs/PMML-Legacy-Deviations.md)
 
-**KNOWN GAP**：Dark Theme 尚未完全闭合；部分 XAML 动画尚未完全遵循 Reduced Motion；部分现有资源与 PMML 的 L0–L4 语义仍有历史偏差。不得据此宣称“PMML 已完全实现”。
+**KNOWN GAP**：Dark Theme 尚未完全闭合；部分 XAML 动画尚未完全遵循 Reduced Motion；现有资源与 PMML L0–L4 语义之间仍存在历史偏差，因此当前 PMML 仍属于持续收口状态。
 
 ### Immersive Progress
 
@@ -295,11 +295,11 @@ PCMig 将业务真值、运行中 checkpoint 与 UI 呈现分开：
 
 | 问题 | 风险 | 当前防线与边界 |
 |------|------|------|
-| **0/0 假成功** | Source / Target 都统计为 0 时，简单数值相等可能产生假 OK | 扫描完整性与数值相等分开；Complete / Partial / Unknown 进入验证和诊断证据链。**边界**：不能仅凭 `0 == 0` 宣称完整迁移。 |
+| **0/0 假成功** | Source / Target 都统计为 0 时，简单数值相等可能产生假 OK | 扫描完整性与数值相等分开记录；Complete / Partial / Unknown 进入诊断证据链。Verifier 的数值比对本身仍可能出现 0/0 相等，因此不得仅凭 `CountMatch` / `BytesMatch` 判定一次迁移完整成功。 |
 | **预分配假进度** | 目标长度可能提前达到最终值 | Committed、可信 checkpoint 与 Presentation 分层；预分配通道长度不直接计入。 |
 | **Scenario H：盘满近 99.9%** | UI 订阅方跨线程异常曾阻断后续 truth subscriber，导致回冲/熔断未执行 | truth subscriber 优先注册 + UI subscriber 隔离 + 订阅异常可观测。该事故与 `/Z` 预分配是不同根因；细节见[更新日志](docs/更新日志.md)。 |
 | **`CompletedWithErrors` 伪装成功** | 部分对象失败却显示完整完成 | UI 区分 Completed 与 CompletedWithErrors，不强制 `100%`。**KNOWN LIMIT**：CLI 为历史兼容在 `CompletedWithErrors` 下仍可能返回 exit code `0`；自动化必须读取 phase、失败对象与 Receipt，不能只看 exit code。 |
-| **同名共享换底** | Resume 从已变化的源继续复制 | Run / Resume / Repair 前校验 SourceIdentity，不符即拒绝继续。 |
+| **同名共享换底** | Resume 从已变化的源继续复制 | `TransferOrchestrator.RunAsync` 在 Run / Resume / Repair 共用入口调用 `SourceIdentityGuard.Evaluate`；计划基线与当前身份均可获取且不一致时，拒绝继续传输。旧计划没有基线或当前身份不可获取时为兼容性跳过该检查。 |
 
 可靠性来自可验证机制和对失败状态的显式呈现，不来自“绝对不会出错”的承诺。
 
@@ -362,8 +362,6 @@ dotnet test tests/PCMig.Diagnostics.Tests/PCMig.Diagnostics.Tests.csproj -c Rele
 ```
 
 ### 当前登记的 v0.5.1 发布验证基线
-
-> 本 README 改版未重新运行构建或测试；以下是已登记的发布验证基线，不是本次文档修改的新测试结果。
 
 | 项目 | 结果 |
 |------|------|
