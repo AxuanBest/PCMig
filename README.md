@@ -2,7 +2,7 @@
 
 > 在新电脑上运行 PCMig，输入旧电脑的 IP 或计算机名，通过 SMB 把旧机器共享盘上的数据完整拉到新机器。
 > 全程可暂停、可恢复、可验证、可追溯。
-<img width="1917" height="1138" alt="屏幕截图 2026-10-06 163752" src="https://github.com/user-attachments/assets/e7b93a7b-1e32-4ad9-81be-d13d28c26f27" />
+
 
 **直拉模式（Direct Pull）** —— 旧机不装代理、不落中转盘、不上云，数据只在新旧两台机器之间流动。
 
