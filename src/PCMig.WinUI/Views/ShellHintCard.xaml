@@ -87,7 +87,13 @@
                            x:Name="HintStatusText"/>
             </StackPanel>
             <Border Grid.Row="3" Height="1" Background="{StaticResource InsetBorderBrush}" Margin="0,2,0,2"/>
-            <TextBlock Grid.Row="4" Style="{StaticResource PCMigTextHintCredit}" Text="由 郑子轩 个人制作"/>
+            <TextBlock Grid.Row="4" Style="{StaticResource PCMigTextHintCredit}">
+                <Run Text="由 "/>
+                <Hyperlink NavigateUri="https://github.com/AxuanBest/PCMig">
+                    <Run Text="AxuanBest"/>
+                </Hyperlink>
+                <Run Text=" 个人制作"/>
+            </TextBlock>
         </Grid>
     </Border>
 </UserControl>
