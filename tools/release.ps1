@@ -123,7 +123,7 @@ Patch 'src\PCMig.WinUI\MainWindow.xaml' 'Text="v[0-9.]+"' ('Text="v' + $Version 
 Patch 'src\PCMig.Cli\PCMig.Cli.csproj' '<Version>[0-9.]+</Version>' ('<Version>' + $Version + '</Version>')
 Patch 'src\PCMig.Core\PCMig.Core.csproj' '<Version>[0-9.]+</Version>' ('<Version>' + $Version + '</Version>')
 Patch 'src\PCMig.Gui\MainWindow.xaml' 'Title="PCMig 迁移工具 v[0-9.]+"' ('Title="PCMig 迁移工具 v' + $Version + '"')
-Patch 'README.md' '\*\*当前版本：v[0-9.]+\*\*' ('**当前版本：v' + $Version + '**')
+Patch 'README.md' '\*\*当前稳定版本：v[0-9.]+\*\*' ('**当前稳定版本：v' + $Version + '**')
 Patch 'installer\pcmig.iss' '#define MyAppVersion "[0-9.]+"' ('#define MyAppVersion "' + $Version + '"')
 Patch 'installer\pcmig.iss' 'VersionInfoVersion=[0-9.]+\.0' ('VersionInfoVersion=' + $Version + '.0')
 # 声明式自查：逐个文件核对“该出现的那行”是否确实是新版本。
@@ -136,7 +136,7 @@ $expect = @(
   [pscustomobject]@{ F = 'src\PCMig.Cli\PCMig.Cli.csproj'; P = ('<Version>' + $Version + '</Version>') },
   [pscustomobject]@{ F = 'src\PCMig.Core\PCMig.Core.csproj'; P = ('<Version>' + $Version + '</Version>') },
   [pscustomobject]@{ F = 'src\PCMig.Gui\MainWindow.xaml'; P = ('Title="PCMig 迁移工具 v' + $Version + '"') },
-  [pscustomobject]@{ F = 'README.md'; P = ('**当前版本：v' + $Version + '**') },
+  [pscustomobject]@{ F = 'README.md'; P = ('**当前稳定版本：v' + $Version + '**') },
   [pscustomobject]@{ F = 'installer\pcmig.iss'; P = ('#define MyAppVersion "' + $Version + '"') },
   [pscustomobject]@{ F = 'installer\pcmig.iss'; P = ('VersionInfoVersion=' + $Version + '.0') }
 )
