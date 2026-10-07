@@ -1,239 +1,348 @@
-﻿# PCMig — 企业内网 Windows 数据与用户环境迁移工具
+# PCMig — Windows PC-to-PC 数据迁移工具
 
-> 在新电脑上运行 PCMig，输入旧电脑的 IP 或计算机名，通过 SMB 把旧机器共享盘上的数据完整拉到新机器。
-> 全程可暂停、可恢复、可验证、可追溯。
+> 在新电脑上运行 PCMig，输入旧电脑的 IP 或计算机名，通过 SMB 将共享数据直接拉取到新电脑。
+> 迁移流程可规划、可暂停、可恢复、可验证，并保留可追溯的任务与诊断证据。
 
-
-**直拉模式（Direct Pull）** —— 旧机不装代理、不落中转盘、不上云，数据只在新旧两台机器之间流动。
-
-**当前稳定版本：v0.5.1**（2026-10-06） ｜ 开发：（[Axuanbest](https://github.com/Axuanbest)）
+**直拉模式（Direct Pull）** —— 旧机不装代理、不落中转盘、不依赖云服务；数据仅在新旧两台机器之间流动。
+**当前稳定版本：v0.5.1**（2026-10-06）｜作者：[AxuanBest](https://github.com/AxuanBest)｜仓库：[AxuanBest/PCMig](https://github.com/AxuanBest/PCMig)
 
 ---
 
 ## 目录
 
 - [1. 项目简介](#1-项目简介)
-- [2. 当前稳定版本](#2-当前稳定版本)
-- [3. 适用场景与定位](#3-适用场景与定位)
-- [4. 主流程](#4-主流程)
-- [5. 技术栈](#5-技术栈)
-- [6. 前端形态](#6-前端形态)
-- [7. 传输引擎：双通道 Robocopy](#7-传输引擎双通道-robocopy)
-- [8. 暂停、恢复、断点续传与异常恢复](#8-暂停恢复断点续传与异常恢复)
-- [9. 可信度体系：Diagnostics / Flight Recorder / Loss Ledger](#9-可信度体系diagnostics--flight-recorder--loss-ledger)
-- [10. 三 VM 测试框架](#10-三-vm-测试框架)
-- [11. 构建与测试](#11-构建与测试)
-- [12. 快速开始](#12-快速开始)
-- [13. CLI 命令一览](#13-cli-命令一览)
-- [14. 项目结构](#14-项目结构)
-- [15. 更新日志](#15-更新日志)
-- [16. 版本、Tag 与发布流程](#16-版本tag-与发布流程)
-- [17. 安全边界](#17-安全边界)
-- [18. 已知限制与未验证事项](#18-已知限制与未验证事项)
-- [19. 路线图](#19-路线图)
-- [20. 许可与致谢](#20-许可与致谢)
+- [2. 设计目标与技术路线](#2-设计目标与技术路线)
+- [3. 当前稳定版本](#3-当前稳定版本)
+- [4. 适用场景与定位](#4-适用场景与定位)
+- [5. 主流程](#5-主流程)
+- [6. 技术栈](#6-技术栈)
+- [7. WinUI 3 / PMML 前端架构](#7-winui-3--pmml-前端架构)
+- [8. 传输引擎：Robocopy 多 Pass 编排](#8-传输引擎robocopy-多-pass-编排)
+- [9. 任务持久化、暂停、恢复与异常恢复](#9-任务持久化暂停恢复与异常恢复)
+- [10. Progress Truth / Committed Truth](#10-progress-truth--committed-truth)
+- [11. Diagnostics / Flight Recorder / Loss Ledger](#11-diagnostics--flight-recorder--loss-ledger)
+- [12. 可靠性防线](#12-可靠性防线)
+- [13. 三 VM 与测试体系](#13-三-vm-与测试体系)
+- [14. 构建与测试](#14-构建与测试)
+- [15. 快速开始](#15-快速开始)
+- [16. CLI 命令一览](#16-cli-命令一览)
+- [17. 项目结构](#17-项目结构)
+- [18. 更新日志](#18-更新日志)
+- [19. 版本、Tag 与发布流程](#19-版本tag-与发布流程)
+- [20. 安全边界](#20-安全边界)
+- [21. 已知限制与未验证事项](#21-已知限制与未验证事项)
+- [22. 路线图](#22-路线图)
+- [23. 许可与致谢](#23-许可与致谢)
 
 ---
 
 ## 1. 项目简介
 
-PCMig 是一个面向**企业内网换机场景**的 Windows 迁移工具。它在**新电脑**上运行，通过 SMB/UNC 直接把**旧电脑**上的数据拉过来，不需要在旧电脑安装任何常驻代理，也不需要先拷到移动硬盘或中转服务器。
+PCMig 是一个建立在 Windows 原生 **Robocopy** 之上的 PC 数据迁移工具。它通过图形化交互、迁移规划、任务持久化、异常恢复、结果验证、可信进度和诊断取证，把原本需要手工掌握的 Robocopy 迁移流程封装为一套可操作、可恢复、可验证的迁移流程。
 
-它解决的问题不是"能不能拷过去"，而是换机迁移里真正会出事的三件事：
+Robocopy 负责数据搬运；PCMig 负责环境预检、源数据扫描、迁移计划、参数与 pass 编排、任务状态、暂停/停止/恢复、结果验证、Progress Truth 与 Diagnostics。
 
-- **漏传与静默失败** —— 扫描残缺、路径引号被吃掉、排除规则不一致导致的整目录漏传，工具必须自己发现并且拒绝"看起来成功"。
-- **进度不可信** —— 界面显示 99.9%、实际目标盘已写满；或者反过来，明明在传却显示 0%。进度必须是**可被来源约束**的，而不是估算出来的。
-- **中断之后说不清状态** —— 断网、断电、进程被强杀之后，"已经传了多少"必须有权威依据，不能靠猜。
+随着实际换机场景扩大，项目重点落在三类问题：
 
-对应地，PCMig 的核心设计取舍是：
+- **漏传与静默失败** —— 扫描残缺、路径引号、排除规则不一致等问题不能被包装成“成功”。
+- **进度不可信** —— 目标文件存在或长度达到最终值，不等于数据已经真实完成。
+- **中断后状态不明** —— 断网、断电或进程终止后，任务需要有可解释、可续传的依据。
 
-| 取舍 | 做法 |
+| 设计问题 | 当前做法 |
 |------|------|
-| 权威状态从哪来 | **只追加的 Receipt** 是权威来源；`job-state.json` 损坏可由 Receipt 重建 |
-| 进度能不能信 | 字节数只接受**已确认落盘**的来源；预分配通道（`/Z`、`/J`）的目标文件长度**永不**计入 |
-| 失败能不能兜住 | 排除口径由**策略矩阵**统一驱动扫描 / 传输 / 验证三方，避免三方不一致 |
-| 出事能不能复盘 | 内置 **Diagnostics** 子系统（Flight Recorder + Loss Ledger + 证据包导出） |
+| 已结算状态从哪来 | `Receipt` 记录已结算对象；`job-state.json` 是状态投影，可由 Receipt 重建 |
+| 运行中进度从哪来 | 已结算事实加受约束的可信 checkpoint；预分配通道的目标长度不直接计入 |
+| 三个阶段如何同口径 | 策略矩阵统一驱动扫描、传输与验证的排除规则 |
+| 出事如何复盘 | Diagnostics 提供 Flight Recorder、Loss Ledger、Sequence Ledger 与证据包导出 |
+
+> 本项目不宣称任意断电均无状态损失、所有迁移均无漏传，或所有故障矩阵均已完成验证。限制与未验证范围见[第 21 节](#21-已知限制与未验证事项)。
 
 ---
 
-## 2. 当前稳定版本
+## 2. 设计目标与技术路线
 
-**v0.5.1**（2026-10-06）—— 可信度紧急修正版，相对 v0.5.0 的实质变化：
+PCMig 的“简单”不是减少底层能力，而是把用户原本需要手工处理的判断、参数和状态移入程序内部。
 
-1. **目标盘写满不再虚报**：修复传输编排器的事件委托注册顺序缺陷（跨线程写 `ObservableCollection` 导致多播订阅链被空 `catch` 静默中断），该缺陷会让字节回冲与盘满 / I/O 风暴双熔断**同时失效**，从而在磁盘写满时把进度虚报成 `completedBytes = 45097156608` / `percent = 99.9`。
-2. **旧 WPF 前端退出正式交付物**：正式用户交付树只允许 `PCMig.WinUI.exe` 与 `pcmig-cli.exe` 两个可执行入口，发版脚本带硬门禁拦截历史经典入口文件。**WPF 源码仍保留在仓库中作为历史实现与回退参考**（见 [第 6 节](#6-前端形态)）。
-3. **发版链自身缺陷修复**：WinUI 标题栏版本徽章曾漏改，v0.5.1 起把版本声明点纳入发版自查（含反向自查）。
+| 用户原本需要处理 | PCMig 负责 |
+|------|------|
+| 主机/IP/UNC 与凭据 | 连接、共享访问与 Preflight |
+| 源数据结构 | `SourceScanner` 扫描与对象划分 |
+| 迁移对象和目标映射 | `Planner` 生成计划 |
+| `/MT`、`/J`、`/Z`、`/MIN`、`/MAX` | `RobocopyRunner` 多 pass 参数编排 |
+| 排除规则 | `matrix/migration-matrix.yaml` 统一口径 |
+| 重试、盘满、错误风暴 | `TransferOrchestrator` 编排与熔断 |
+| 中断后的继续执行 | Job、Receipt、checkpoint、Resume |
+| 结果判断 | `Verifier` 的 L1/L2 验证 |
+| 故障复盘 | Diagnostics 事件、丢失台账与证据导出 |
 
-**v0.5.0**（2026-10-06）为并列保留的正式版本：引入 WinUI 3 全新界面、Diagnostics 可信度体系与沉浸式传输进度。两个版本各自有独立的 release commit 与 annotated tag，历史安装包全部保留、互不覆盖。
+```text
+Preflight → Scan → Plan → 人工确认 → Transfer → Verify → Report
 
-完整版本历史见 [`docs/更新日志.md`](docs/更新日志.md)；各版本的**证据核对**（正式安装包、更新日志条目、公司环境测试章节、是否留有精确源码快照）见 [`docs/历史版本索引.md`](docs/历史版本索引.md)。
+Robocopy：数据传输执行器
+PCMig：规划 + 状态 + 真值 + 呈现 + Diagnostics
+```
 
 ---
 
-## 3. 适用场景与定位
+## 3. 当前稳定版本
+
+**v0.5.1**（2026-10-06）是当前稳定版，也是相对 v0.5.0 的可信度紧急修正版。
+
+- 修复目标盘写满时，UI 可能长期显示接近 `99.9%` 的可信度问题。
+- 正式交付物只保留 `PCMig.WinUI.exe` 与 `pcmig-cli.exe`；旧 WPF 源码保留作历史/回退参考，但不再随包发布。
+- 发版脚本纳入 WinUI 标题栏版本点的写入与反向检查。
+
+**v0.5.0** 同为保留的正式版本，引入 WinUI 3 前端、Diagnostics 可信度体系与沉浸式传输进度。详细变更、根因和验证记录见[更新日志](docs/更新日志.md)；版本证据见[历史版本索引](docs/历史版本索引.md)。
+
+---
+
+## 4. 适用场景与定位
 
 - **目标环境**：企业内网、Windows 域或工作组环境下的 PC 换机（旧机 → 新机）。
-- **数据面**：旧机 **D 盘等数据盘完整迁移**；系统盘只迁移**用户 Profile**与经批准的配置项，不动系统目录与整盘 ACL。
-- **传输链路**：SMB / UNC（`\\主机\D$` 或已发布的共享），支持 IP 直连、DNS 不可达但 IP 可达、共享被撤销、权限不足、路径过长、锁文件等真实企业网络故障形态。
-- **不依赖**：不要求旧机安装客户端，不要求域管理权限即可开始（凭据由操作者提供），不依赖公网或云服务。
+- **当前数据面**：通过 SMB/UNC 拉取数据卷、共享目录或经批准的源根；不迁移 Windows 系统目录和整盘 ACL。
+- **传输链路**：支持 IP 直连、DNS 不可达但 IP 可达、共享撤销、权限不足、路径过长、锁文件等场景的预检、执行或错误呈现。
+- **不依赖**：旧机不要求安装 PCMig，不要求公网或云服务；凭据由操作者提供。
 
-> 面向的是"内网 + 管理可控 + 需要一个能说清楚状态"的迁移，而不是跨公网的大规模自动化。
+> 当前定位是“受控内网环境中的数据迁移”，不是跨公网的大规模自动化、通用备份产品，也不是完整应用状态迁移工具。
 
 ---
 
-## 4. 主流程
+## 5. 主流程
 
-```
-新电脑 (Windows 11, 运行 PCMig)
-   │  ① 输入旧机 IP / 计算机名 + 凭据
-   │  ② Preflight → Scan → Plan → (人工确认) → Transfer → Verify → Report
+```text
+新电脑（运行 PCMig）
+   │ ① 输入旧机 IP / 计算机名与凭据
+   │ ② Preflight → Scan → Plan →（人工确认）→ Transfer → Verify → Report
    ▼
-\\旧机\D$  ──SMB──▶  Robocopy 双通道  ──▶  新机目标路径
+\\旧机\共享  ── SMB ──▶  Robocopy 多 Pass 编排  ──▶  新机目标路径
 ```
 
 | 阶段 | 做什么 | 关键产物 |
 |------|--------|----------|
-| **Preflight** | 连通性、共享可达性、权限、目标盘剩余空间预检 | `preflight.json` |
-| **Scan** | 按策略矩阵扫描源根，建立对象清单与文件统计 | 扫描统计（含分流阈值之上的大文件数） |
-| **Plan** | 每个一级目录 = 一个迁移对象，产出对象级计划与排除口径 | `plan.json` |
-| **Transfer** | 逐对象执行 Robocopy 双通道，支持暂停 / 停止 / 重试 | `job-*.jsonl`、robocopy 原始日志、**Receipt** |
-| **Verify** | L1 文件数 + 字节比对；L2 抽样哈希校验 | 验证结果（抽样 0 项会明确告警） |
-| **Report** | 生成可读报告（可 `--open` 直接打开） | `report.*` |
+| **Preflight** | 连通性、共享、权限、目标盘空间与 Robocopy 能力检查 | `preflight.json` |
+| **Scan** | 按策略扫描源根，建立对象清单与统计 | 扫描统计 |
+| **Plan** | 生成对象级计划、目标映射和排除口径 | `plan.json` |
+| **Transfer** | 逐对象执行 Robocopy pass，支持暂停、停止、重试 | Receipt、原始 Robocopy 日志 |
+| **Verify** | L1 文件数/字节比对；L2 抽样哈希 | `verify-report.json` |
+| **Report** | 生成可读报告 | `report/` |
 
-计划产出后需要**人工确认**才开始传输（CLI 用 `--yes` 可跳过确认）。
+计划产出后默认需要人工确认；CLI 的 `--yes` 可跳过确认。
 
 ---
 
-## 5. 技术栈
+## 6. 技术栈
 
 | 层 | 选型 |
 |----|------|
 | 语言 / 运行时 | **C# / .NET 8** |
 | 桌面前端 | **WinUI 3**（Windows App SDK，`net8.0-windows10.0.19041.0`） |
 | 命令行前端 | .NET 8 控制台（`pcmig-cli.exe`） |
-| 传输引擎 | **Robocopy**（多通道、多 pass 编排） |
-| 日志 | **Serilog**（应用级 + 任务级 + robocopy 原始日志，文本 + 结构化 JSONL） |
-| 诊断 | 自研 **PCMig.Diagnostics**（事件总线、分段写入、保留策略、规则引擎、证据包导出） |
-| 配置 | **YAML** 策略矩阵（`matrix/migration-matrix.yaml`） |
-| 测试 | **xUnit**（两个测试工程，见 [第 11 节](#11-构建与测试)） |
-| 打包 | **Inno Setup**（安装包）+ 目录形态 Portable |
+| 传输引擎 | Windows **Robocopy**（多 pass 编排） |
+| 日志 | **Serilog**（应用、任务和 Robocopy 原始日志；文本与 JSONL） |
+| 诊断 | 自研 **PCMig.Diagnostics**（事件、分段写入、规则与证据导出） |
+| 配置 | YAML 策略矩阵（[`matrix/migration-matrix.yaml`](matrix/migration-matrix.yaml)） |
+| 测试 | **xUnit**（Core 与 Diagnostics 两个测试工程） |
+| 打包 | **Inno Setup** + Portable 目录交付 |
 
 ---
 
-## 6. 前端形态
+## 7. WinUI 3 / PMML 前端架构
 
-**v0.5.1 起，正式发布物只包含 WinUI 3 前端。**
+### 正式前端与历史 WPF
 
-| 交付物 | 说明 |
-|--------|------|
-| `PCMig.WinUI.exe` | **正式前端**：WinUI 3 四页向导（连接 → 选择 → 执行 → 结果）+ 沉浸式传输进度 |
-| `pcmig-cli.exe` | 命令行入口，脚本化与自动化场景使用 |
-| ~~`PCMig-classic.exe`~~ | **已退出交付物**（v0.5.0 及以前作为"经典界面·回退"随包发布） |
+| 入口 / 工程 | 状态 | 说明 |
+|------|------|------|
+| `PCMig.WinUI.exe` / `src/PCMig.WinUI` | **IMPLEMENTED / 正式前端** | WinUI 3 四页向导：连接、选择、执行、结果 |
+| `pcmig-cli.exe` / `src/PCMig.Cli` | **IMPLEMENTED** | CLI 与脚本化入口 |
+| `src/PCMig.Gui` | **历史/回退参考** | WPF 源码保留；不 publish、不进 Portable、安装包、开始菜单或 SHA256 清单 |
 
-- 交付树（本地构建输出，见第 14 节）与安装后的工作副本都带**硬门禁**：出现 `PCMig-classic.exe` / `PCMig.exe` 会当场中止发版。
-- **旧 WPF 源码（`src/PCMig.Gui/`）保留在仓库中**，作为历史实现与回退参考，仅"不再 publish、不再进安装包"，并未删除。
-- 界面视觉与动效遵循仓库内的 PMML 规范文档（`docs/PCMig-Visual-Motion-Language.md` 等）。**装饰层（光波 / 粒子 / 涟漪 / 光晕）永远不得影响进度真值、字节数、回执与任务状态。**
+### PMML
+
+**PMML（PCMig Material Motion Language）** 是 PCMig 自己的 UI 材质与动效规范，不是 Microsoft、Apple 或 WinUI 官方标准。其作用是冻结并审计当前界面的资源、层级、动效与已知偏差，而不是把视觉表现变成业务真值。
+
+- `Themes/Colors.xaml`、`Materials.xaml`、`Typography.xaml`、`Controls.xaml`、`Motion.xaml`：颜色、材质、控件、文字与动效资源。
+- `MotionDirector`：动效 token 与 Composition 动画。
+- `PageTransitionCoordinator`：只管理页面可见性与 Composition translation，不重建页面、ViewModel 或 binding。
+- `FluidZoomTransitionCoordinator`：入口与工具面之间的形态过渡。
+- `InteractionFeedback`：Hover/Pressed 反馈；当前以 Translation 为主，不用 Scale 放大。
+- `UniformScaleHost`：当前生产界面的主要整体缩放路径（`DesignSurface → UniformScaleHost → Viewbox/Uniform scaling`）。`ResponsiveLayoutController` 不是默认主路径。
+
+PMML 的冻结规范、真实资源参数和偏差审计分别见：
+
+- [`docs/PCMig-Visual-Motion-Language.md`](docs/PCMig-Visual-Motion-Language.md)
+- [`docs/PMML-Implementation-Audit.md`](docs/PMML-Implementation-Audit.md)
+- [`docs/PMML-Legacy-Deviations.md`](docs/PMML-Legacy-Deviations.md)
+
+**KNOWN GAP**：Dark Theme 尚未完全闭合；部分 XAML 动画尚未完全遵循 Reduced Motion；部分现有资源与 PMML 的 L0–L4 语义仍有历史偏差。不得据此宣称“PMML 已完全实现”。
+
+### Immersive Progress
+
+沉浸式进度的实际数据链为：
+
+```text
+Robocopy / TransferOrchestrator
+  → ProgressTruthSnapshot
+  → MigrationSessionViewModel
+  → ProgressPresentationCoordinator
+  → ImmersiveTransferProgress / Bottom Bar
+```
+
+`ProgressPresentationCoordinator` 可平滑视觉呈现，但满足 `VisualProgress <= ConfirmedProgress`。`ImmersiveTransferProgress` 的 fill、particles、light band、halo、ripple 和 Compact/Full 表现只读取 `Value` 与进度状态，禁止写回 Receipt、committed bytes、job state 或 transfer phase。
 
 ---
 
-## 7. 传输引擎：双通道 Robocopy
+## 8. 传输引擎：Robocopy 多 Pass 编排
 
-源根下的每个一级目录是一个**迁移对象**，逐对象执行；每个对象内部按需跑多个 pass：
+每个源根的一级目录会成为迁移对象；对象内再按文件类型和阈值运行多个 pass。
 
-| 通道 | 触发条件 | 实际命令行要点 |
+| Pass | 触发条件 | 主要参数与职责 |
 |------|----------|----------------|
-| **Bulk**（默认主通道） | 对象内未超过分流阈值的文件 | `/MT:<线程数>`；开启分流时附加 `/MAX:<阈值-1>` |
-| **Large**（大文件通道） | 对象内存在 ≥ 阈值（默认 **512 MB**）的文件 | `/MIN:<阈值>`；模式见下 |
-| **RootFiles** | 源根目录下散落的文件 | `/MT`，网络链路可加 `/J` |
+| **Bulk** | 未超过分流阈值的常规文件 | `/MT:<线程数>`；开启分流时带 `/MAX:<阈值-1>` |
+| **Large** | 大于等于阈值的文件（默认 **512 MB**） | `/MIN:<阈值>`；可选择 `auto`、`restartable`、`multithreaded` |
+| **RootFiles** | 源根目录的散落文件 | 根层文件 pass，使用 `/MT`，网络路径可加 `/J` |
 
-**Large 通道的三种模式**（`--large-channel`）：
+`--large-channel` 行为：
 
-- `auto`（默认）：首次用 `/MT + /J`（SMB 高延迟链路上无缓冲 I/O，吞吐显著高于单线程 `/Z`）；**对象级重试（第 2 次尝试起）自动退回 `/Z`**，优先保证"文件内部可续传"。
-- `restartable`：恒定使用 `/Z`（单线程、缓冲 I/O，文件内部可断点续传）。
-- `multithreaded`：恒定使用 `/MT + /J`。
+- `auto`（默认）：首次使用 `/MT + /J`；对象级重试从第 2 次起回退 `/Z`，优先文件内部续传。
+- `restartable`：固定使用 `/Z`。
+- `multithreaded`：固定使用 `/MT + /J`。
 
-> 为什么不是"大文件一律 `/Z`"：真实生产实测下，恒定 `/Z` 单线程吞吐只有手工 `robocopy /MT:32` 的约 1/3（30 MB/s vs 90–137 MB/s）。因此默认走 `/MT + /J`，把 `/Z` 留给真正需要续传的重试场景。
->
-> `/J` 只在链路任一端是网络路径时启用：本机 NVMe 的 A/B 实测显示 `/J` 会让本地吞吐掉到 `/Z` 的 0.5–0.6 倍。
+`RobocopyRunner` 同时负责路径引用、Unicode 日志、排除项、源/目标参数和进程树守护；`TransferOrchestrator` 负责对象顺序、重试、熔断、状态与 Receipt。
 
-**其它引擎特性**：对象级重试与退避、Unicode 日志、排除口径由策略矩阵统一驱动、目标盘写满 / I/O 风暴熔断。
+> 历史实测曾比较 `/Z` 与 `/MT` 的吞吐；性能会受网络、磁盘、文件尺寸和线程数影响，不将历史数字表述为通用承诺。
 
 ---
 
-## 8. 暂停、恢复、断点续传与异常恢复
+## 9. 任务持久化、暂停、恢复与异常恢复
 
-| 能力 | 实现方式 |
-|------|----------|
-| **协作式暂停**（`pause`） | `pause.request` 文件驱动，当前文件传完后干净停下 |
-| **立即暂停 / 停止**（`stop`） | 终止当前 robocopy 进程；已完成部分由 Receipt 记录，可续传 |
-| **恢复**（`resume`） | 不指定 `--job` 时自动选择最近一个未完成任务；按通道分别计算**可信续传基线** |
-| **断点续传** | **Receipt（只追加）为权威状态**；`job-state.json` 损坏可由 Receipt 重建；大文件通道退回 `/Z` 后可从文件内部续上 |
-| **异常恢复** | 断网、断电、进程被强杀后，按"通道是否可能预分配"判定目标文件长度是否可信（预分配通道**永不**采信长度），避免把"预分配成全长"误当成"已传完" |
-| **失败可见** | 失败与暂停状态在界面上显著呈现；抽样验证 0 项会明确告警而不是静默通过 |
+一个 Job 的目录通常包含：
 
-> 设计原则：**"目标文件存在且长度正确"不等于"内容已落盘"**。任何会预分配最终长度的通道（`/Z`、`/J`）都不能作为进度分子来源。
+```text
+job.json                 # 创建参数
+plan.json                # 迁移计划
+job-state.json           # 当前状态投影
+preflight.json           # 预检结果
+receipts/                # append-only 对象结算事实
+logs/robocopy/           # Robocopy 原始日志
+verify-report.json       # 验证结果
+report/                  # 可读报告
+job.lock                 # 互斥锁
+```
+
+| 原则 | 实现 |
+|------|------|
+| 已结算事实 | Receipt 是 append-only 记录；`Completed` Receipt 形成恢复基线 |
+| 状态投影 | `job-state.json` 不是唯一真相；损坏时可按 Receipt 重建 |
+| 异常识别 | 已存在但不可读取的 state 文件按 `Interrupted` 处理，而不是伪装成新任务 |
+| Resume | 读取 Job 与 Receipt；`Completed` 对象跳过，`Failed` / `CompletedWithErrors` / `Interrupted` 重跑；Robocopy 增量跳过一致文件 |
+| 并发保护 | `JobLock` 防止两个 Resume 同时操作同一 Job |
+| 暂停达成 | 是否真暂停以 worker/进程实际停止为准，而不只看请求文件 |
+
+Resume 不是恢复已经死亡的 Robocopy 进程，而是以 Job/Receipt 重建任务，并让 Robocopy 对目标执行增量补差。
+
+**KNOWN LIMIT**：状态写入采用临时文件、替换与重试等机制，但当前不宣称具有 `FlushFileBuffers` 级别的绝对物理断电持久化保证；不能宣传“任何断电都绝不丢最后一次状态”。
 
 ---
 
-## 9. 可信度体系：Diagnostics / Flight Recorder / Loss Ledger
+## 10. Progress Truth / Committed Truth
 
-`src/PCMig.Diagnostics/` 是独立于业务逻辑的**自诊断子系统**，目标是在没有人盯着的情况下，事后也能回答"当时到底发生了什么、有没有丢东西"。
+PCMig 将业务真值、运行中 checkpoint 与 UI 呈现分开：
+
+| 层 | 含义 |
+|------|------|
+| **Committed** | 已 `Completed` 且有持久化 Receipt 支撑的结算事实 |
+| **可信 In-flight Progress** | 运行中经过约束的 checkpoint；不是预分配长度 |
+| **Presentation Progress** | UI 的平滑显示；不得领先已确认进度 |
+
+关键规则：
+
+- 目标文件存在或达到最终长度，**不等于**内容已经完成。
+- `/Z`、`/J` 等可能预分配的通道中，目标长度不能直接作为可信已完成字节来源。
+- 运行中显示最高为 `99.9%`；只有任务 settled 后才允许进入 `100%`。
+- 视觉层只可向真值靠拢，不能反向影响 Receipt、对象状态或传输 phase。
+
+这套口径的目的不是让 UI “看起来更快”，而是避免失败或预分配场景被误呈现为完成。
+
+---
+
+## 11. Diagnostics / Flight Recorder / Loss Ledger
+
+`src/PCMig.Diagnostics/` 不只是普通日志系统。它试图同时回答：**发生了什么、当前证据是否完整、Diagnostics 自己是否发生丢失。**
 
 | 组件 | 作用 |
 |------|------|
-| **DiagnosticHub** / `DiagnosticRuntime` | 事件总线与运行时装配：活动（Activity）、计量（Meters）、健康（Health） |
-| **JsonlSegmentWriter** / `SegmentRecovery` | 分段结构化 JSONL 落盘与损坏段恢复 |
-| **Flight Recorder** | 环形飞行记录：保留最近一段窗口的完整事件，崩了也能取到最后现场 |
-| **Loss Ledger** | **丢失台账**：显式记录"哪些事件没有落盘、丢了多少"，让"没记到"本身可见，而不是假装完整 |
-| **SequenceLedger** | 事件序号连续性核验（配合 Loss Ledger 判断缺口） |
-| **ByteBudget** / `FanOutStage` / `BoundedBranch` | 背压与预算控制，保证诊断自身不会拖垮数据面 |
-| **RetentionManager** / `RedactionPolicy` | 保留策略与脱敏策略（凭据等敏感字段不落盘） |
-| **RuleEngine** / `EvidenceRules` / `FeedbackRules` | 基于证据的规则引擎：把事件序列判定为事件（Incident）与结论 |
-| **DiagnosticPackageExporter** | 导出可交付的诊断证据包（诊断中心 / 自诊断场景使用） |
+| **DiagnosticHub** / `DiagnosticRuntime` | 事件摄入、运行时装配、健康与停止语义 |
+| **JsonlSegmentWriter** / `SegmentRecovery` | 分段 JSONL 落盘、尾部损坏恢复与 manifest |
+| **Flight Recorder** | 有界环形现场记录 |
+| **Loss Ledger** | 显式记录 retention overwrite、coalesced 与实际丢失 |
+| **Sequence Ledger** | 只有连续 settled sequence 才形成覆盖水位 |
+| **ByteBudget** / `FanOutStage` / `BoundedBranch` | 背压与资源预算，避免诊断拖垮数据面 |
+| **RetentionManager** / `RedactionPolicy` | 保留与敏感字段脱敏 |
+| **RuleEngine** / `EvidenceRules` / `FeedbackRules` | 基于事件、健康和完整性产生结论 |
+| **DiagnosticPackageExporter** | 生成诊断证据包；manifest 与 summary 共享完整性判定 |
 
-配套的可核对产物（由测试每次运行重新生成，属于"可复验而非口头声明"）：
+如果发生诊断事件丢失，目标是将“丢失本身”变成可观察事实，而不是宣称 Diagnostics 永远不会丢事件。
 
-- [`docs/诊断系统实施-事件覆盖矩阵.md`](docs/诊断系统实施-事件覆盖矩阵.md) —— 扫描生产源码里的事件发布点，统计 Produced / Deep-only / Reserved / Retired。
-- [`docs/诊断系统实施-配置项接线审计.md`](docs/诊断系统实施-配置项接线审计.md) —— 逐项统计运行时源码里的**真实消费者**，只有 `Active` 才代表该配置真的生效。
+配套可复验文档：
 
-架构与实施记录见 [`docs/方案-诊断中心与自诊断架构.md`](docs/方案-诊断中心与自诊断架构.md) 与 `docs/诊断系统实施-*.md`。
-
----
-
-## 10. 三 VM 测试框架
-
-真实迁移的故障形态（盘满、断网、共享撤销、域不可达、路径过长、锁文件）无法在单机上稳定复现，因此仓库内保留了一套**三 VM 实验框架**：
-
-```
-lab/three-vm/
-├── README.md            框架总览：VM 快照、宿主共享、canonical 路径、执行纪律
-├── configs/             VM 配置、网络与磁盘、宿主共享配置快照
-├── docs/                框架文档索引 + 正式证据 canonical 路径表
-├── scenarios/           场景脚本（场景 G/H、暂停恢复、停止恢复、case04/05/07/08、数据集生成、打包）
-├── runner/              UI 自动化 Runner（窗口激活、InvokePattern 点击、滚动、取值、OCR）
-├── scripts/             用例矩阵库与夹具生成原语（lib-cases.ps1 / labfile.ps1）
-└── evidence-template/   证据包模板与最小构成要求
-```
-
-| 能力 | 说明 |
-|------|------|
-| 环境形态 | 域控（DC01）+ 源机（SRC01）+ 目标机（DST01），Hyper-V 虚拟机 + 宿主 SMB 共享 |
-| 故障注入 | 断网 / 断电、DNS 不可达但 IP 可达、权限不足、共享撤销、目标盘写满、路径过长、锁文件、域不可达 |
-| 数据生成 | `scenarios/make-dataset.ps1`（大文件与目录骨架）、`scripts/lib-cases.ps1`（大规模小文件树）——**数据本体按需重建，不长期占盘** |
-| 小型回归数据 | `lab/smoke-data/`（约 57 MB）：覆盖小文件、多层目录、中文名、空目录、只读、合法长路径、较大样本、特殊扩展名 |
-| 证据采集 | 场景脚本自带 UIA 取证与自检标记；证据包模板见 `evidence-template/` |
-
-> 框架的定位是**保留测试能力**：VM 本体、场景定义、Runner、生成器与证据模板长期保留；大体积合成测试数据按需重新生成，不作为仓库资产入库。
+- [`docs/诊断系统实施-事件覆盖矩阵.md`](docs/诊断系统实施-事件覆盖矩阵.md)
+- [`docs/诊断系统实施-配置项接线审计.md`](docs/诊断系统实施-配置项接线审计.md)
+- [`docs/方案-诊断中心与自诊断架构.md`](docs/方案-诊断中心与自诊断架构.md)
 
 ---
 
-## 11. 构建与测试
+## 12. 可靠性防线
+
+| 问题 | 风险 | 当前防线与边界 |
+|------|------|------|
+| **0/0 假成功** | Source / Target 都统计为 0 时，简单数值相等可能产生假 OK | 扫描完整性与数值相等分开；Complete / Partial / Unknown 进入验证和诊断证据链。**边界**：不能仅凭 `0 == 0` 宣称完整迁移。 |
+| **预分配假进度** | 目标长度可能提前达到最终值 | Committed、可信 checkpoint 与 Presentation 分层；预分配通道长度不直接计入。 |
+| **Scenario H：盘满近 99.9%** | UI 订阅方跨线程异常曾阻断后续 truth subscriber，导致回冲/熔断未执行 | truth subscriber 优先注册 + UI subscriber 隔离 + 订阅异常可观测。该事故与 `/Z` 预分配是不同根因；细节见[更新日志](docs/更新日志.md)。 |
+| **`CompletedWithErrors` 伪装成功** | 部分对象失败却显示完整完成 | UI 区分 Completed 与 CompletedWithErrors，不强制 `100%`。**KNOWN LIMIT**：CLI 为历史兼容在 `CompletedWithErrors` 下仍可能返回 exit code `0`；自动化必须读取 phase、失败对象与 Receipt，不能只看 exit code。 |
+| **同名共享换底** | Resume 从已变化的源继续复制 | Run / Resume / Repair 前校验 SourceIdentity，不符即拒绝继续。 |
+
+可靠性来自可验证机制和对失败状态的显式呈现，不来自“绝对不会出错”的承诺。
+
+---
+
+## 13. 三 VM 与测试体系
+
+真实迁移故障难以在单机稳定复现，仓库保留三 VM 框架：
+
+```text
+DC01（域控） + SRC01（源机） + DST01（目标机 / 运行 PCMig）
+```
+
+框架位置：[`lab/three-vm/`](lab/three-vm/)，其中包含 VM/网络配置、故障场景脚本、UIA/OCR Runner、数据集生成工具及 evidence template。
+
+### VERIFIED（有明确历史实测记录）
+
+- Scenario H 的目标盘写满可信度问题及其修复后的历史验证。
+- 部分公司环境真实迁移、状态损坏/恢复、盘满等历史测试记录，见[`docs/测试报告-公司环境.md`](docs/测试报告-公司环境.md)。
+- 发布验证基线中的 Core/Diagnostics 自动化测试，见[第 14 节](#14-构建与测试)。
+
+### PARTIALLY VERIFIED（框架/脚本/部分场景存在，不等于全矩阵通过）
+
+- 三 VM 框架、UIA Runner、OCR、故障脚本与证据模板均在仓库中。
+- 场景设计覆盖断网、断电、DNS、权限、共享撤销、盘满、路径过长、锁文件、暂停/恢复等。
+
+### NOT YET FULLY RE-RUN
+
+- 当前 HEAD 的完整三 VM 故障矩阵。
+- 全量 UIA 自动化与所有场景的最新 evidence package。
+- 百万/两百万文件级压力验证。
+
+> 测试框架存在不等于当前版本全矩阵全部通过。三 VM Phase 0 readiness 审计明确记录其本身未创建 VM、未运行任何 Case，见[`docs/qa/PCMig-Three-VM-Readiness-Report-20261002.md`](docs/qa/PCMig-Three-VM-Readiness-Report-20261002.md)。
+
+---
+
+## 14. 构建与测试
 
 ### 环境要求
 
 - Windows 10 1809+ / Windows 11
 - .NET SDK 8.0
-- 构建 WinUI 前端需要 Windows App SDK 对应的 Windows SDK 组件
+- 构建 WinUI 前端需对应 Windows SDK / Windows App SDK 组件
 
 ### 构建
 
@@ -241,7 +350,7 @@ lab/three-vm/
 # 编译整个解决方案
 dotnet build PCMig.sln -c Release
 
-# 构建前建议先结束占用文件的进程，否则可能出现 MSB3021 / MSB3027 假失败
+# 若输出文件被运行中程序占用，先结束进程
 Get-Process PCMig.WinUI, PCMig.Cli, PCMig.Gui, PCMig -ErrorAction SilentlyContinue | Stop-Process -Force
 ```
 
@@ -252,7 +361,9 @@ dotnet test tests/PCMig.Core.Tests/PCMig.Core.Tests.csproj -c Release
 dotnet test tests/PCMig.Diagnostics.Tests/PCMig.Diagnostics.Tests.csproj -c Release
 ```
 
-### 当前验证基线（v0.5.1）
+### 当前登记的 v0.5.1 发布验证基线
+
+> 本 README 改版未重新运行构建或测试；以下是已登记的发布验证基线，不是本次文档修改的新测试结果。
 
 | 项目 | 结果 |
 |------|------|
@@ -260,217 +371,142 @@ dotnet test tests/PCMig.Diagnostics.Tests/PCMig.Diagnostics.Tests.csproj -c Rele
 | `tests/PCMig.Core.Tests` | **569 / 569 通过**（失败 0、跳过 0） |
 | `tests/PCMig.Diagnostics.Tests` | **382 / 382 通过**（失败 0、跳过 0） |
 
-4 条已知警告为构建与测试基础设施提示，非功能性缺陷：`WMC1506` ×3（WinUI XAML 中可静态化的动态资源引用）与 `xUnit2031` ×1（测试断言写法建议）。
-
-> ⚠️ **发版 / 发布 / 安装包制作只能通过 `tools/release.ps1` 执行**，不要手工 `dotnet publish` 或直接调用 Inno Setup —— 手工路径会绕过版本声明自查、口令残留扫描与逐文件哈希校验。
+4 条已知警告为 `WMC1506` ×3 与 `xUnit2031` ×1。发布或制作安装包只能通过 [`tools/release.ps1`](tools/release.ps1)，不要手工 `dotnet publish` 或直接调用 Inno Setup。
 
 ---
 
-## 12. 快速开始
+## 15. 快速开始
 
-### 方式一：安装包
+### 安装包
 
-运行 `PCMigSetup-0.5.1.exe`，按向导安装（默认安装到 `%ProgramFiles%\PCMig`）。
+运行 `PCMigSetup-0.5.1.exe`，按向导安装（默认 `%ProgramFiles%\PCMig`）。
 
-### 方式二：Portable 绿色目录
+### Portable
 
-交付区的 `Portable` 目录（本地构建输出，**不入 Git 仓库**）是自包含目录版，复制到目标机器直接运行 `PCMig.WinUI.exe` 即可（WinUI 需要与其原生组件同目录）。
+交付区的 `Portable` 目录是自包含目录版；复制至目标机器后运行 `PCMig.WinUI.exe`。Portable 为本地构建输出，不入 Git。
 
-### 方式三：命令行
+### CLI
 
 ```powershell
 # 预检：连通性 / 共享 / 权限 / 目标盘空间
 pcmig-cli.exe preflight --host OLD-PC --user OLD-PC\Administrator
 
-# 建任务（含预检 + 扫描 + 计划）
+# 创建任务：预检 + 扫描 + 计划
 pcmig-cli.exe new --host OLD-PC --source \\OLD-PC\D$ --target D:\ --user Administrator
 
-# 执行（计划需人工确认；--yes 跳过确认）
+# 执行（计划默认需要确认；--yes 跳过）
 pcmig-cli.exe run --job JOB-20260913-0001
 
-# 查看进度（--watch 持续刷新）
+# 查看进度
 pcmig-cli.exe status --job JOB-20260913-0001 --watch
 
 # 验证与报告
 pcmig-cli.exe verify --job JOB-20260913-0001 --level 2
 pcmig-cli.exe report --job JOB-20260913-0001 --open
-
-# 一条龙（预检 + 扫描 + 计划 + 传输）
-pcmig-cli.exe quick --host OLD-PC --target D:\ --user OLD-PC\Administrator
 ```
 
 ---
 
-## 13. CLI 命令一览
+## 16. CLI 命令一览
 
 | 命令 | 说明 |
 |------|------|
-| `preflight` | 预检（连通性 / 共享 / 权限 / 空间） |
-| `new` | 创建迁移任务（含预检 + 扫描 + 计划） |
-| `quick` | 一条龙（预检 + 扫描 + 计划 + 传输） |
+| `preflight` | 预检：连通性、共享、权限、空间 |
+| `new` | 创建任务：预检、扫描、计划 |
+| `quick` | 一条龙：预检、扫描、计划、传输 |
 | `run` | 执行任务 |
-| `pause` | 协作式暂停 |
-| `stop` | 立即暂停（终止当前 robocopy，可续传） |
-| `resume` | 恢复任务（不带 `--job` 自动选最近未完成任务） |
-| `status` | 查看进度（`--watch` 持续刷新） |
-| `verify` | 验证传输结果（`--level 2` 抽样哈希） |
-| `report` | 生成报告（`--open` 直接打开） |
-| `list` | 列出所有任务 |
+| `pause` | 请求协作式暂停 |
+| `stop` | 终止当前 Robocopy；任务可续传 |
+| `resume` | 恢复任务；省略 `--job` 时选择最近未完成任务 |
+| `status` | 查看进度；`--watch` 持续刷新 |
+| `verify` | 验证结果；`--level 2` 为抽样哈希 |
+| `report` | 生成报告；`--open` 直接打开 |
+| `list` | 列出任务 |
 | `changelog` | 查看内置更新日志（别名 `log` / `history`） |
 
-常用选项：`--host` `--user` `--password` `--source` `--target` `--job` `--jobs` `--level`
-`--threads` `--largemb` `--large-channel` `--matrix` `--xd` `--xf` `--yes`
-`--allow-incomplete-scan` `--quiet` `--watch` `--kind` `--bench` `--open` `--help`
+常用选项：`--host`、`--user`、`--password`、`--source`、`--target`、`--job`、`--jobs`、`--level`、`--threads`、`--largemb`、`--large-channel`、`--matrix`、`--xd`、`--xf`。
 
 ---
 
-## 14. 项目结构
+## 17. 项目结构
 
-```
-PCMig.sln
-├─ src/
-│  ├─ PCMig.Core/                   核心引擎（Preflight / Scan / Plan / Transfer / Verify / Report / Jobs / Logging / Matrix）
-│  ├─ PCMig.WinUI/                  ★ 正式前端：WinUI 3 四页向导 + 沉浸式传输进度
-│  ├─ PCMig.Cli/                    命令行入口（发布名 pcmig-cli.exe）
-│  ├─ PCMig.Gui/                    旧 WPF 前端（历史实现 / 回退参考，v0.5.1 起不发布）
-│  ├─ PCMig.Diagnostics/            自诊断子系统（Flight Recorder / Loss Ledger / 规则引擎 / 证据包导出）
-│  └─ PCMig.Diagnostics.Abstractions/  诊断抽象层
-├─ tests/
-│  ├─ PCMig.Core.Tests/             核心引擎测试（569 例）
-│  └─ PCMig.Diagnostics.Tests/      诊断子系统测试（382 例）
-├─ matrix/
-│  └─ migration-matrix.yaml         迁移策略矩阵（扫描 / 传输 / 验证三方统一排除口径）
-├─ installer/
-│  ├─ pcmig.iss                     Inno Setup 安装脚本
-│  └─ pcmig.ico                     安装包与产品图标
-├─ tools/
-│  ├─ release.ps1                   ★ 唯一发版入口（版本写入 + 自查 + 打包 + 逐文件哈希校验）
-│  ├─ stability-test.ps1            稳定性测试
-│  ├─ uishot.ps1                    界面截图（带自检标记）
-│  ├─ pcmiglab-vm.ps1 / l3-*.ps1    三 VM 实验环境编排
-│  └─ md2txt.py                     Markdown → 纯文本（生成 docs/更新日志.txt）
-├─ lab/
-│  ├─ three-vm/                     三 VM 测试框架（见第 10 节）
-│  └─ smoke-data/                   小型回归测试数据
-└─ docs/                            使用说明、更新日志、发布规则、测试报告、诊断与视觉规范
+```text
+src/
+  PCMig.Core/                    # 扫描、计划、传输、验证、Job 与状态
+  PCMig.WinUI/                   # 正式 WinUI 3 前端与 PMML 资源
+  PCMig.Cli/                     # 命令行入口
+  PCMig.Gui/                     # 历史 WPF 实现（不进入正式交付）
+  PCMig.Diagnostics/             # Diagnostics 运行时与证据导出
+  PCMig.Diagnostics.Abstractions/# 诊断事件、载荷与抽象
+
+tests/                           # Core 与 Diagnostics xUnit 测试
+matrix/                          # 迁移策略矩阵
+installer/                       # Inno Setup 脚本
+tools/                           # 发布、稳定性、截图与实验室辅助工具
+lab/                             # 三 VM 框架、场景、Runner 与证据模板
+docs/                            # 用户、架构、QA、PMML 与发布文档
 ```
 
-> 上面的目录树**只列出进入 Git 仓库的内容**。构建与发版产物目录、本地历史归档（`dist`、`archive` 等）均已在 `.gitignore` 中排除，**不随仓库发布、在 GitHub 上不存在**。
+---
+
+## 18. 更新日志
+
+完整版本历史、用户可见变更、根因与修复说明见 [`docs/更新日志.md`](docs/更新日志.md)。
 
 ---
 
-## 15. 更新日志
+## 19. 版本、Tag 与发布流程
 
-**Changelog 入口：[`docs/更新日志.md`](docs/更新日志.md)**
+- 当前稳定版是 `v0.5.1`；`v0.5.0` 为并列保留的正式版本。
+- 正式版本使用 annotated tag；已发布版本及其 tag 不可移动或覆盖。
+- 历史开发基线 tag 不一定是精确正式版本源码快照；证据等级与安装包/源码快照对应关系见 [`docs/历史版本索引.md`](docs/历史版本索引.md)。
+- 发布唯一入口：
 
-- 记录从最初版本 `v0.1.0` 起的所有版本变更，按版本号从新到旧排列，附**版本号与发布日期对照表**。
-- `docs/更新日志.txt` 由 `tools/md2txt.py` 从 Markdown 生成，随发布物交付。
-- 应用内「更新日志」窗口读取的是**同一份** `更新日志.md`（作为嵌入资源随程序打包），因此界面里看到的版本记录与仓库文档一致。
-- 命令行可用 `pcmig-cli.exe changelog` 直接查看。
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools/release.ps1" -Version X.Y.Z
+```
 
-> 发版纪律：**先写日志，再打包** —— 没写日志就打不出包（发版脚本会校验更新日志与使用说明，缺一项直接中止）。
-
----
-
-## 16. 版本、Tag 与发布流程
-
-### 版本与 Tag
-
-- 每个正式版本对应一个 **annotated tag** `v<主>.<次>.<修订>`，指向该版本的 release commit。
-- 当前并列保留的正式版本：
-
-  | Tag | 版本 | 主题 |
-  |-----|------|------|
-  | `v0.5.1` | 0.5.1 | 可信度紧急修正：目标盘写满不再虚报 + 旧 WPF 前端退出交付物 |
-  | `v0.5.0` | 0.5.0 | WinUI 3 全新界面 + Diagnostics 可信度体系 + 沉浸式传输进度 |
-
-- `v0.5.0` 及其更早的正式安装包**全部保留在交付区**，作为历史版本存档；新旧版本**并列保留、互不覆盖**。
-- 仓库中另有 **45 个历史基线 tag**（`v0.4.x-before-*`、`v0.5.0-before-*`、`winui-*` 等），属开发过程记录。**它们不标记其名字所指的状态**：49 个版本 / 开发历史 tag（含 `v0.5.0`、`v0.5.1`、`v0.4.5`、`v0.4.6` 与上述 45 个基线 tag）只落在 **18 个 commit** 上，其中 26 个 tag 共用同一个 v0.4.6 状态的 commit、7 个共用同一个 v0.5.0 前置基线 commit。另有 1 个**归档 tag** `legacy-installers-archive-20261006`（指向历史安装包归档说明节点，**不代表任何版本的源码快照**）⇒ 全仓库共 **50 个 tag / 19 个 commit**。**引用历史版本时请以 GitHub Releases 中的历史安装包与 [`docs/历史版本索引.md`](docs/历史版本索引.md) 为准，不要以 tag 名为准。**
-- 远端仓库为 `origin` → https://github.com/AxuanBest/PCMig.git（发布分支 `main`）。上述 tag 中只有 `v0.5.0`、`v0.5.1` 与归档 tag `legacy-installers-archive-20261006` 已推送到远端，其余历史基线 tag 仅存在于维护者本地。
-
-### Historical releases / 历史发布与安装包
-
-- **v0.5.1** —— 当前稳定版（信任修正版）。
-- **v0.5.0** —— 首个正式 WinUI 3 大版本。
-- **Legacy Installers Archive** —— 保存仍可确认的 v0.1.x – v0.4.x 历史安装包二进制；随附 `LEGACY-INSTALLERS-SHA256.txt` 指纹清单（版本 / 字节数 / SHA256 / `VersionInfo` / 快照状态 / 备注）。
-- 三件事**分别记录、互不推断**：① 历史 Release **是否存在**；② 安装包**是否存在**；③ 是否存在**精确源码快照**（有安装包 ≠ 有源码快照，有更新日志 ≠ 有源码快照）。
-- 详见 [`docs/历史版本索引.md`](docs/历史版本索引.md)（逐版本证据索引）与 [`docs/更新日志.md`](docs/更新日志.md)（逐版本说明）。
-
-> 安装包属**发布产物**：正式版本（v0.5.0 / v0.5.1）的安装包已作为 GitHub Release asset 提供，**不写入 Git 历史**；Legacy v0.1.x – v0.4.x 历史安装包待通过独立归档 Release 集中发布（尚未上传）。也不为缺源码快照的历史版本补建版本 tag。
-
-### 发布产物
-
-| 产物 | 位置 | 命名 |
-|------|------|------|
-| 安装包 | 交付区根目录 | `PCMigSetup-<版本>.exe` |
-| Portable | 交付区的 `Portable` 目录（本地构建输出，**不入 Git 仓库**） | 自包含目录（整棵 app 树） |
-| 交付清单 / 哈希 | 随包 | 逐文件 SHA256 |
-
-### 发布流程（摘要）
-
-1. 先写三处：`docs/更新日志.md`（本版条目 + 版本对照表一行）、`docs/使用说明.txt`（本版段落）、源码中的版本声明。
-2. 运行唯一发版入口：
-
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File "tools/release.ps1" -Version X.Y.Z
-   ```
-
-3. 脚本会依次执行：版本一致性自查（含反向自查）→ 口令残留扫描 → 交付树硬门禁 → 编译与打包 → 逐文件 SHA256 校验（全部 MATCH 才算通过）→ 交付与安装包并列保留。
-4. 发版后必须做**三验**（应用内版本、更新日志、安装与 CLI），详见 [`docs/发布流程.md`](docs/发布流程.md) 与 [`docs/RELEASE.md`](docs/RELEASE.md)（发布规则总纲）。
+发版规则、五道闸门、版本声明点、交付物和 SHA256 校验见 [`docs/RELEASE.md`](docs/RELEASE.md)。
 
 ---
 
-## 17. 安全边界
+## 20. 安全边界
 
-**V1 明确不迁移**：凭据 / Cookie（与源机绑定的 DPAPI 数据）、驱动、安全软件、整盘 ACL、Windows 系统目录。
-
-排除口径集中在 `matrix/migration-matrix.yaml`（含 `securityBlockedFileNames` 等），由扫描、传输、验证三方共用，避免"扫的时候排除、验证的时候又当成缺失"这类不一致。
-
-**凭据处理**：口令不作为命令行参数长期留存，日志与诊断事件中的敏感字段按 `RedactionPolicy` 脱敏。
-
-**误删保护**：修复清理逻辑对"大于分流阈值但本次不走可续传通道"的文件**跳过删除**，避免删了没人拷回来。
+- 真实口令不得进入仓库、交付物或示例；发布脚本包含口令残留扫描。
+- 诊断日志依据 `RedactionPolicy` 脱敏敏感字段。
+- 不迁移凭据、Cookie、证书、驱动、安全软件、整盘 ACL 或 Windows 系统目录；规则见 [`matrix/migration-matrix.yaml`](matrix/migration-matrix.yaml)。
+- 用户负责在有授权的网络、共享和数据范围内运行迁移。
 
 ---
 
-## 18. 已知限制与未验证事项
+## 21. 已知限制与未验证事项
 
-本节刻意把"已经验证过的"和"还没验证的"分开写，避免把未经实证的能力当成结论。
-
-### 已验证
-
-| 范围 | 证据 |
-|------|------|
-| 本机构建与测试 | `dotnet build PCMig.sln -c Release` → 0 error；Core 569 / 569、Diagnostics 382 / 382 |
-| 实验室三 VM 环境 | 域控 + 源机 + 目标机（Hyper-V + 宿主 SMB 共享），已跑通盘满、断网 / 断电、共享撤销、权限不足、路径过长、锁文件、域不可达等故障注入场景（部分场景留有正式证据包） |
-| 发版后三验 | 应用内版本与更新日志、随包文本日志、安装包与 CLI 的版本一致性 |
-
-### 尚未验证 / 已知限制
-
-1. **真实物理机端到端复验** —— v0.5.1 的结论来自本机与实验室三 VM，**尚未**在真实换机现场做完整端到端复验。
-2. **人工视觉终验** —— 界面视觉与动效的最终验收由人工完成；仓库内没有、也不主张存在自动视觉验收流程。
-3. **盘满场景的字节回冲路径** —— 实验室回归中该路径未被触发到（观测计数为 0），端到端实证仍待补。
-4. **旧版本的系统兼容性** —— Legacy WPF 版本（v0.4.x 及更早）在技术栈上可能兼容更早的 Windows 版本，但**本仓库未对这些版本做过逐版本的真实操作系统兼容性测试**，因此不给出"某版本支持某系统"的断言。逐平台的**证据等级**（VERIFIED / LIKELY / UNVERIFIED / UNSUPPORTED）见 [`docs/历史版本索引.md`](docs/历史版本索引.md) 第六节；其中 Windows 7 在任何版本上都**只能作为 SMB 数据源**出现，从未被验证为 PCMig 的运行平台。
-5. **平台限制** —— 依赖 Robocopy 与 WinUI 3，**仅支持 Windows**；不提供 Linux / macOS 支持。
-6. **诊断预留事件** —— 事件覆盖矩阵中的 `Reserved` 事件是预留位，尚未接线生效，详见 [`docs/诊断系统实施-事件覆盖矩阵.md`](docs/诊断系统实施-事件覆盖矩阵.md)。
-7. **发版基础设施** —— 发版脚本面向本机环境编写（Windows + PowerShell + Inno Setup + Windows App SDK），**未做 CI 化**，尚无自动化流水线。
-8. **分发状态** —— 源码已托管于 [github.com/AxuanBest/PCMig](https://github.com/AxuanBest/PCMig)。**v0.5.0 与 v0.5.1 已通过 GitHub Releases 正式发布，当前 Latest Release 为 v0.5.1**，对应的 `PCMigSetup-0.5.0.exe` 与 `PCMigSetup-0.5.1.exe` 已作为 Release asset 上传。仍可确认的 **Legacy v0.1.x – v0.4.x 历史安装包尚未批量上传**，计划通过独立的 Legacy Installers Archive Release 集中归档。
+1. **完整 State Plane 未实现**：Outlook/浏览器 Recipe、OneDrive KFM、应用重装编排、Pre-stage、Incremental Sync、Cutover 与完整应用状态迁移均不属于当前已实现能力。
+2. **断电边界**：任务会依据 Receipt 重建，但不承诺任意时刻断电均保留最后一次状态写入。
+3. **验证边界**：L2 是抽样哈希；抽样数为 0 会告警，不等于全量内容哈希。
+4. **0/0 边界**：数值相等不自动等于扫描与证据完整；需结合完整性状态、验证和 Diagnostics 判读。
+5. **CLI 自动化边界**：`CompletedWithErrors` 可能为兼容性返回 exit code `0`；脚本必须检查任务 phase、失败对象和 Receipt。
+6. **前端边界**：Dark Theme、部分 XAML Reduced Motion 与 PMML 历史偏差仍待收口。
+7. **实验室边界**：三 VM 框架与场景存在，但当前 HEAD 的全场景矩阵尚未完整复跑。
+8. **平台边界**：依赖 Robocopy 与 WinUI 3，仅支持 Windows；没有 Linux/macOS 支持。
+9. **发布基础设施**：发布流程面向 Windows 本机环境，尚未 CI 化。
 
 ---
 
-## 19. 路线图
+## 22. 路线图
 
-> 以下为**规划项，尚未实现**，不代表当前能力。当前能力以第 2 节版本说明与 `docs/` 文档为准。
+> 以下均为**规划中 / 未实现**，不代表当前能力。
 
-- **V1 线（当前）**：数据面直拉、双通道传输、暂停 / 恢复 / 断点续传、L1/L2 验证、报告、Diagnostics 可信度体系。
-- **后续（规划中）**：`State Plane` 用户环境与应用配置迁移（Outlook / 浏览器 Recipe、OneDrive KFM 策略）、零安装远程采集、旧系统源兼容模式、应用安装编排。
+- **当前 V1**：SMB 直拉数据迁移、多 pass Robocopy、暂停/恢复、L1/L2 验证、报告与 Diagnostics。
+- **后续探索**：State Plane、Outlook/浏览器 Recipe、OneDrive KFM、零安装远程采集、旧系统源兼容、应用安装编排。
 
 ---
 
-## 20. 许可与致谢
+## 23. 许可与致谢
 
-**许可**：本仓库当前**未附加开源许可证**，默认保留所有权利。如需在其它场景使用、分发或二次开发，请先联系作者。
+**许可**：本仓库当前未附加开源许可证，默认保留所有权利。如需在其他场景使用、分发或二次开发，请先联系作者。
 
-**作者**：郑子轩（[Axuanbest](https://github.com/Axuanbest)）个人制作。
+**作者**：[AxuanBest](https://github.com/AxuanBest)
 
 **第三方组件**：Robocopy（Windows 内置）、Serilog、Inno Setup、xUnit、Windows App SDK 等，各自遵循其原始许可。
 
