@@ -39,11 +39,8 @@
 ## 1. 项目简介
 
 PCMig 是一个建立在 Windows 原生 **Robocopy** 之上的 PC 数据迁移工具。它通过图形化交互、迁移规划、任务持久化、异常恢复、结果验证、可信进度和诊断取证，把原本需要手工掌握的 Robocopy 迁移流程封装为一套可操作、可恢复、可验证的迁移流程。
-
-<img width="1917" height="1198" alt="屏幕截图 2026-10-07 144514" src="https://github.com/user-attachments/assets/8f1f77da-be77-45d2-8510-2f732fddf6b2" />
-
 Robocopy 负责数据搬运；PCMig 负责环境预检、源数据扫描、迁移计划、参数与 pass 编排、任务状态、暂停/停止/恢复、结果验证、Progress Truth 与 Diagnostics。
-
+<img width="1917" height="1198" alt="屏幕截图 2026-10-07 144514" src="https://github.com/user-attachments/assets/8f1f77da-be77-45d2-8510-2f732fddf6b2" />
 随着实际换机场景扩大，项目重点落在三类问题：
 
 - **漏传与静默失败** —— 扫描残缺、路径引号、排除规则不一致等问题不能被包装成“成功”。
