@@ -1,4 +1,4 @@
-# PCMig 发版脚本 —— 先写日志，再打包；没写日志就打不出包。
+﻿# PCMig 发版脚本 —— 先写日志，再打包；没写日志就打不出包。
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File "E:\Project\deepseek work\PCMig\tools\release.ps1" -Version 0.4.5
 # 路径纪律（见 docs/RELEASE.md）：
 #   本机（个人电脑）：仓库 E:\Project\deepseek work\PCMig ｜ 交付 E:\Project\PCMig ｜ 工作副本 D:\PCMig ｜ 源码镜像 E:\Project\镜像备份源码\PCMig
