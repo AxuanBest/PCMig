@@ -210,8 +210,18 @@
                                             </StackPanel>
                                             <TextBlock Grid.Column="1" Style="{StaticResource PCMigTextListItemBody}"
                                                        Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Grid.Column="2" Style="{StaticResource PCMigTextListItemMeta}"
-                                                       Text="{Binding Detail}" TextTrimming="CharacterEllipsis"/>
+                                            <!-- 第三列：截断的原因 + 「查看完整原因」。
+                                                 P1-4（Preview.2）：列表里只放得下截断文案（ErrorTranslator.ShortReason
+                                                 的 100 字符版 + CharacterEllipsis），真机那次失败的真因（目录级失败，
+                                                 只写在 robocopy 汇总表里）根本读不出来 ⇒ 必须能一键看到全文与日志证据。
+                                                 Visibility 绑 VM 的真实派生布尔 CanShowDetail：没有全文就不显示按钮。 -->
+                                            <StackPanel Grid.Column="2" Spacing="2">
+                                                <TextBlock Style="{StaticResource PCMigTextListItemMeta}"
+                                                           Text="{Binding Detail}" TextTrimming="CharacterEllipsis"/>
+                                                <HyperlinkButton Content="查看完整原因" Padding="0" MinHeight="0" FontSize="12"
+                                                                 Visibility="{Binding CanShowDetail, Converter={StaticResource BoolToVisibility}, Mode=OneWay}"
+                                                                 Click="OnFailDetailClick"/>
+                                            </StackPanel>
                                         </Grid>
                                     </Border>
                                 </DataTemplate>

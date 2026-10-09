@@ -56,4 +56,17 @@
        ⚠ 禁止改回 Visual.Offset —— Offset 是布局位置属性，会把已排好版的行塌向父容器原点。 -->
   <Duration x:Key="PCMigMotionHintLineDuration">0:0:0.17</Duration>
   <x:Double x:Key="PCMigMotionHintLineOffset">6</x:Double>
+
+  <!-- ★ 2026-10-08（真机问题 4）★ 底栏「源连接」指示器"正在连接"的柔和呼吸：
+       周期与最低透明度在这里定；调用点（MotionDirector.PlaySourceBreathing）不写死数值。
+       周期取用户建议区间 900~1200 ms 的中值 —— 慢到看不出闪、快到一眼能看出"在办"。 -->
+  <Duration x:Key="PCMigMotionSourceBreathDuration">0:0:1.05</Duration>
+  <x:Double x:Key="PCMigMotionSourceBreathMinOpacity">0.35</x:Double>
+
+  <!-- ★ 2026-10-08（真机问题 3）★ ShellHintCard 自适应展开 / 缩回：
+       高度本身**一次到位**（没有逐帧 Layout 动画），视觉上的展开与收起由 Composition 完成；
+       位移 = 正文在展开方向上的极轻微 Translation，时长 = 本次展开的视觉时长（缩回用更快的一档）。 -->
+  <Duration x:Key="PCMigMotionHintRevealDuration">0:0:0.26</Duration>
+  <Duration x:Key="PCMigMotionHintCollapseDuration">0:0:0.22</Duration>
+  <x:Double x:Key="PCMigMotionHintRevealOffset">8</x:Double>
 </ResourceDictionary>

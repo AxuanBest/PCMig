@@ -16,24 +16,37 @@
         纪律：本卡**不拼业务状态**（禁止在 View 里根据 Phase/Percent 自己造句）——
               文案的唯一来源是 MigrationSessionViewModel 的通道属性。
 
-        ★ Round-2 2026-10-05（用户指令 §4）：固定尺寸 ★
-        用户视频证据：提示卡在 30 s 处因 OperationalStatus 长句"变得很高"、37.5 s 又缩回。
-        用户已明确**接受并选择固定尺寸** —— 所以本卡的高度**不再由内容决定**：
-          · 外层 Border 高度 = PCMigHintCardHeight 固定 token（176 DIP），
-            正常/宽窗口下恒定；只有物理视口真的更矮时才由
-            ShellHintCard.SetAvailableHeight 夹到可用高（"断点换档"）。
-          · 内层固定 5 行：Row0 标题 / Row1 内容视口(*) / Row2 状态 / Row3 分隔线 / Row4 署名。
-            **只有 Row1 会随内容变化**，溢出只发生在 Row1 内部（滚动条视觉隐藏，滚轮/触摸仍可用）。
-          · 每个通道都有 MaxLines + CharacterEllipsis，所以"更多内容"绝不会放大外层卡。
-          · 不再有任何 Height 动画、不再监听 SizeChanged 反向驱动高度。
+        ★ Round-2 2026-10-05（用户指令 §4）：固定尺寸 ★ → ★ 2026-10-08（真机问题 3）：自适应展开 ★
+        历史：Round-2 曾把外层高度锁死为固定 176 DIP，代价是四个通道全部用
+              MaxLines + CharacterEllipsis 丢弃真实业务信息（真机表现：一长就变成"……"）。
+        现行口径（用户 2026-10-08 指令，逐条对应）：
+          · Q1 默认态：内容少时仍是 PCMigHintCardHeight = 176 DIP 的视觉尺寸；
+                高度**只在明确的内容档位变化时**改写一次，绝不"多一行就小幅变高"。
+                XAML 里的 Height="{StaticResource PCMigHintCardHeight}" 现在表达
+                **下界（默认高）**：运行时由 ShellHintCard 按
+                Clamp(正文自然所需高, 176, 侧栏允许最大高) 一次性改写（唯一写入点）。
+          · Q2 内容变多：**一次确定目标高度** ⇒ 布局直接把 Border 设到目标高；
+                视觉上的"自下而上平滑展开"由 Composition 的 Clip 揭示完成，
+                **没有**任何逐帧 Layout Height 动画 / Timer 累加高度（详见 ShellHintCard.xaml.cs）。
+          · Q3 方向：底边不动、**顶部向上长**——揭示遮罩固定露出卡片**底部**，
+                随着高度到位，被遮住的顶部区域逐帧让位（视觉上就是顶边向上推）。
+          · Q4 上界：ShellHintCard.SetAvailableHeight 收到的是
+                「侧栏高 − StepNav(即 Step4 所在控件)高 − 标准段间距(=本卡 Margin.Top 12)」，
+                这就是 Step4 与底栏之下的安全边界；卡片高度永不越过它，
+                因此绝不覆盖 Step4 / 底栏 / 其它 Shell UI（见 MainWindow.UpdateHintCardHeight）。
+          · Q5 达到上界仍放不下：内容区 VerticalScrollBarVisibility="Auto"，
+                用户可用滚轮 / 触摸板 / 拖动滚动条查看完整内容；
+                **不再有 MaxLines / CharacterEllipsis** —— 省略号不再是信息丢弃手段。
+          · Q6：HintOperationalText / HintObjectText / HintUserText / HintErrorText
+                四个通道都完整保留文本，靠"先长高（到上界）→ 再滚动"而不是"截断"。
     -->
     <Border x:Name="HintCardSurface" Style="{StaticResource SecondarySurface}" Padding="14,16" Translation="0,0,8" Margin="0,12,0,0"
-            Height="{StaticResource PCMigHintCardHeight}">
+             Height="{StaticResource PCMigHintCardHeight}">
         <Grid RowSpacing="8">
             <Grid.RowDefinitions>
                 <!-- Row0：标题（固定行，永不因内容变化） -->
                 <RowDefinition Height="Auto"/>
-                <!-- Row1：内容视口 —— 本卡**唯一**可变区；溢出只在它内部滚动 -->
+                <!-- Row1：内容视口 —— 本卡**唯一**可变区；装不下时只在它内部滚动 -->
                 <RowDefinition Height="*"/>
                 <!-- Row2：状态行 -->
                 <RowDefinition Height="Auto"/>
@@ -51,33 +64,36 @@
                 <TextBlock Style="{StaticResource PCMigTextHintTitle}" Text="提示" VerticalAlignment="Center"/>
             </StackPanel>
 
-            <!-- Row1：四个语义通道。滚动条设为 Hidden（§4：滚轮/触摸仍可滚动，但绝不出现"突然冒出的可见滚动条"）；
-                 每行都给 MaxLines + 省略号，所以长句只在自己那一行内被截断，不会把卡撑高。 -->
-            <ScrollViewer Grid.Row="1" x:Name="HintScroll" VerticalScrollBarVisibility="Hidden" VerticalScrollMode="Auto"
+            <!-- Row1：四个语义通道（Q6：全部完整可查看）。
+                 滚动条 = Auto（Q5）：装得下时不出现任何可见滚动条，只有"长到上界仍放不下"时才出现，
+                 供鼠标滚轮 / 触摸板 / 拖动查看剩余内容。
+                 四个 TextBlock **不再有** MaxLines / TextTrimming —— 只靠 TextWrapping="Wrap" 自然换行，
+                 真实高度由 ShellHintCard 量出来并驱动外层一次到位的目标高度。
+                 内层 Grid 用 VerticalAlignment="Bottom"：内容比视口矮时贴着**底部**排，
+                 于是尺寸只在上方增加，视觉与"底边固定、顶部向上长"（Q3）一致。 -->
+            <ScrollViewer Grid.Row="1" x:Name="HintScroll" VerticalScrollBarVisibility="Auto" VerticalScrollMode="Auto"
                           HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
                           IsTabStop="False">
-                <StackPanel Spacing="8">
-                    <!-- 运行/流程状态（OperationalStatus；为空时显示"就绪"） -->
-                    <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap"
-                               MaxLines="4" TextTrimming="CharacterEllipsis"
-                               x:Name="HintOperationalText" Text="就绪"/>
+                <Grid VerticalAlignment="Bottom">
+                    <StackPanel Spacing="8" x:Name="HintContentPanel">
+                        <!-- 运行/流程状态（OperationalStatus；为空时显示"就绪"） -->
+                        <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap"
+                                   x:Name="HintOperationalText" Text="就绪"/>
 
-                    <!-- 当前对象（CurrentObjectStatus；引擎真值，为空则折叠） -->
-                    <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap" MaxLines="3"
-                               TextTrimming="CharacterEllipsis" Visibility="Collapsed"
-                               x:Name="HintObjectText"/>
+                        <!-- 当前对象（CurrentObjectStatus；引擎真值，为空则折叠） -->
+                        <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap" Visibility="Collapsed"
+                                   x:Name="HintObjectText"/>
 
-                    <!-- 用户操作引导（UserHint；为空则折叠） -->
-                    <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap" MaxLines="2"
-                               TextTrimming="CharacterEllipsis" Visibility="Collapsed"
-                               x:Name="HintUserText"/>
+                        <!-- 用户操作引导（UserHint；为空则折叠） -->
+                        <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap" Visibility="Collapsed"
+                                   x:Name="HintUserText"/>
 
-                    <!-- 错误摘要（ErrorSummary；为空则折叠） -->
-                    <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap" MaxLines="3"
-                               TextTrimming="CharacterEllipsis" Visibility="Collapsed"
-                               Foreground="{StaticResource WarningBrush}"
-                               x:Name="HintErrorText"/>
-                </StackPanel>
+                        <!-- 错误摘要（ErrorSummary；为空则折叠） -->
+                        <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap" Visibility="Collapsed"
+                                   Foreground="{StaticResource WarningBrush}"
+                                   x:Name="HintErrorText"/>
+                    </StackPanel>
+                </Grid>
             </ScrollViewer>
 
             <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="7">

@@ -413,10 +413,10 @@ public sealed partial class Step3ProgressPage : UserControl
         }
 
         // ── 四张统计卡：传输速度 / 预计剩余 / 对象进度 / 已传-计划 ──
-        SpeedValueText.Text = truth is null
-            ? session.EngineSpeedText
-            : (truth.SpeedBytesPerSecond > 0 ? Format.Speed(truth.SpeedBytesPerSecond) : "—");
-        EtaValueText.Text = truth is null ? session.EtaText : Format.Eta(truth.EtaSeconds);
+        // ★ 2026-10-08（真机问题 5）★ 与底栏同源：速度 / ETA 读**真实网卡接收吞吐**（物理观测），
+        //   进度真值只负责百分比与字节。两处必须同源，否则底栏与 Step3 会显示两个不同的速度。
+        SpeedValueText.Text = session.NetworkSpeedText;
+        EtaValueText.Text = session.NetworkEtaText;
         ObjectValueText.Text = session.ObjectText;
         BytesCardLabel.Text = session.DataLabel;
         BytesValueText.Text = $"{session.ActualBytesText} / {session.PlanBytesText}";

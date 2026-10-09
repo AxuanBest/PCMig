@@ -54,6 +54,14 @@ public static class ControlIds
     /// </summary>
     public const string Step1StatusText = "Step1.StatusText";
 
+    /// <summary>
+    /// ★ 2026-10-08（真机问题 1）★ 状态行的**第二层：操作建议**（"现在该怎么做"）。
+    /// 为什么必须单独登记：连接失败提示改为"摘要 + 建议"两层后，建议行是一个新的可见反馈面，
+    /// 外部自动化要能分别读到"发生了什么"和"该怎么做"（只读诊断锚点，不是点击契约）。
+    /// 不登记会让 D6.3 的 AutomationId 双向闭合契约判失败（稳定 ID 表不再是唯一事实源）。
+    /// </summary>
+    public const string Step1StatusAdvice = "Step1.StatusAdvice";
+
     // Step 2 选择数据与目标（D6.1 §12 补齐）
     public const string Step2Prepare = "Step2.Prepare";
     public const string Step2Start = "Step2.Start";

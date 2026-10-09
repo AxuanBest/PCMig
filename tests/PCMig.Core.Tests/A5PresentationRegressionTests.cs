@@ -1791,6 +1791,89 @@ public sealed class A5PresentationRegressionTests : IDisposable
     }
 
     /// <summary>
+    /// ★ 2026-10-08（真机问题 2）★ **根读取失败 ⇒ 必须可重试 ⇒ 恢复后第二次成功**。
+    ///
+    /// 改前：`EnsureChildrenAsync` 的两个 catch 只做 `deniedCount++`，随后**无条件**走成功块
+    /// ⇒ `ChildrenLoaded = true` ⇒ UI 侧 `HasUnrealizedChildren = !ChildrenLoaded` 落 false
+    /// ⇒ 真机 E 共享上"点一次三角就永久消失"（共享/权限修好也没有入口重试）。
+    /// 现在：根整体失败 ⇒ 不置 ChildrenLoaded、**不动 Children**（占位与箭头保留）⇒ 下次点击真的重读。
+    ///
+    /// 判据用测试缝 `ChildrenReaderForTest` 注入"读盘结果"，因此本用例**不依赖真实权限**，在 CI/任意机器上确定复现。
+    /// </summary>
+    [Fact]
+    public void A5_9e_RootReadFailureKeepsArrow_AndRetrySucceedsAfterRecovery()
+    {
+        var dir = NewDir("c-rootfail");
+        NewDir("c-rootfail", "A5Child");
+        WriteFile(Path.Combine(dir, "A5file.txt"), "x");
+
+        var tree = NewTree();
+        var root = tree.AddLocalRootForVerification(dir);
+        var notices = new List<string>();
+        tree.Notice += n => notices.Add(n);
+
+        // ① 第一次展开：这个位置**整体**读不出来（UnauthorizedAccess / IOException / SMB 瞬时中断 /
+        //    DirectoryNotFound / 网络掉线 —— 在 IO 层都被折叠成同一个"连一个子项都没枚举到"的事实）。
+        var calls = 0;
+        tree.ChildrenReaderForTest = _ =>
+        {
+            calls++;
+            return new DirectoryTreeViewModel.DirReadResult(
+                new List<string>(), new List<(string Name, long Size)>(), 0, RootFailed: true, FilesFailed: false);
+        };
+
+        AwaitNoContext(() => tree.EnsureChildrenAsync(root));
+
+        Assert.False(root.ChildrenLoaded);                    // ★ 失败绝不能被结算成"成功读到空目录"
+        Assert.Single(root.Children);                         // 占位仍在 ⇒ 箭头仍在（可重试）
+        Assert.Contains(notices, n => n.Contains("无法读取"));
+        Assert.Contains(notices, n => n.Contains("重试"));
+
+        // ② 权限/网络恢复后"再点一次展开"：必须真的重新读盘，并成功长出真实子节点。
+        tree.ChildrenReaderForTest = _ =>
+        {
+            calls++;
+            return new DirectoryTreeViewModel.DirReadResult(
+                new List<string> { Path.Combine(dir, "A5Child") }, new List<(string Name, long Size)>(), 0, false, false);
+        };
+
+        AwaitNoContext(() => tree.EnsureChildrenAsync(root));
+
+        Assert.Equal(2, calls);                               // 真的重读了（不是被 ChildrenLoaded/守卫挡住）
+        Assert.True(root.ChildrenLoaded);
+        Assert.Single(root.Children.OfType<DirNode>(), d => d.FullPath.Length > 0);
+        Assert.DoesNotContain(root.Children.OfType<DirNode>(), d => d.FullPath.Length == 0); // 占位已被真实内容替换
+    }
+
+    /// <summary>
+    /// ★ 2026-10-08（真机问题 2）★ 对照用例：`Denied`（根枚举成功、只是 N 个子项读不出来）
+    /// **仍算加载成功** —— 两种事实绝不可互相折叠成同一个结论：
+    /// 根失败 ⇒ 保持未加载可重试；部分拒绝 ⇒ 已加载 + 如实提示"这 N 项不会被迁移"。
+    /// </summary>
+    [Fact]
+    public void A5_9f_PartialDeniedStillCountsAsLoaded_AndSaysWhatWillNotBeMigrated()
+    {
+        var dir = NewDir("c-partial-denied");
+        NewDir("c-partial-denied", "A5Visible");
+        NewDir("c-partial-denied", "A5Hidden");
+
+        var tree = NewTree();
+        var root = tree.AddLocalRootForVerification(dir);
+        var notices = new List<string>();
+        tree.Notice += n => notices.Add(n);
+
+        tree.ChildrenReaderForTest = _ => new DirectoryTreeViewModel.DirReadResult(
+            new List<string> { Path.Combine(dir, "A5Visible") },
+            new List<(string Name, long Size)>(), Denied: 1, RootFailed: false, FilesFailed: false);
+
+        AwaitNoContext(() => tree.EnsureChildrenAsync(root));
+
+        Assert.True(root.ChildrenLoaded);                     // ★ 枚举到了内容 ⇒ 算加载成功（不是"失败"）
+        Assert.Single(root.Children.OfType<DirNode>(), d => d.FullPath.Length > 0);
+        Assert.Contains(notices, n => n.Contains("无法列出") && n.Contains("不会被迁移"));
+    }
+
+    /// <summary>
     /// C2 主用例（R19 / C8）：`SyncRoots` **只在真的增/删根时**才作废在途懒加载；
     /// 反复同步同一份共享集合（= 用户在 Step1/Step2 反复勾选/取消共享所走的路径）
     /// 必须**不作废**（否则"勾一个共享作废一次 ⇒ 反复展开反复白读盘"）。

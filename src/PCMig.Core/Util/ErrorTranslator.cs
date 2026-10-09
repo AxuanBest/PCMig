@@ -47,8 +47,28 @@ public static class ErrorTranslator
         7 => "部分文件被复制，但存在不匹配条目（部分条目未被复制）",
         8 => "有文件复制失败",
         16 => "严重错误：命令/路径无效，一个文件都没传",
-        _ => $"位掩码 {code}"
+        _ => DecomposeMask(code)
     };
+
+    /// <summary>
+    /// 位掩码拆解（v0.5.3 Preview.2 新增）。真机现场：object-000001 的 robocopy 退出码是 9，
+    /// 旧文案只说"位掩码 9"，用户完全看不出它其实是 <b>1 + 8</b>：有文件被复制，但另有条目复制失败。
+    /// 位含义按 robocopy 官方口径（1=复制 2=额外 4=不匹配 8=失败 16=严重），与 RobocopyRunner 的 ExitMask* 常量一致。
+    /// </summary>
+    private static string DecomposeMask(int code)
+    {
+        if (code <= 0) return $"位掩码 {code}";
+        var sb = new System.Text.StringBuilder();
+        void Add(string part) { if (sb.Length > 0) sb.Append(" + "); sb.Append(part); }
+        if ((code & 1) != 0) Add("1=有文件被复制");
+        if ((code & 2) != 0) Add("2=目标有额外条目");
+        if ((code & 4) != 0) Add("4=存在不匹配条目（未复制）");
+        if ((code & 8) != 0) Add("8=有文件或目录复制失败（已达重试上限）");
+        if ((code & 16) != 0) Add("16=严重错误（命令/路径无效）");
+        const int known = 1 | 2 | 4 | 8 | 16;
+        if ((code & ~known) != 0) Add($"未知位 {(code & ~known)}");
+        return sb.Length == 0 ? $"位掩码 {code}" : $"位掩码 {code}（{sb}）";
+    }
 
     /// <summary>失败对象一行话（对象号 + 路径 + 退出码译文 + 原因），GUI 报错区与 CLI 共用同一口径。</summary>
     public static string FailureHeadline(string objectId, string targetPath, int exitCode, int largeExitCode)

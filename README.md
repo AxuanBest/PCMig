@@ -4,7 +4,7 @@
 > 迁移流程可规划、可暂停、可恢复、可验证，并保留可追溯的任务与诊断证据。
 
 **直拉模式（Direct Pull）** —— 旧机不装代理、不落中转盘、不依赖云服务；数据仅在新旧两台机器之间流动。
-**当前稳定版本：v0.5.1**（2026-10-06）｜作者：[AxuanBest](https://github.com/AxuanBest)｜仓库：[AxuanBest/PCMig](https://github.com/AxuanBest/PCMig)
+**当前稳定版本：v0.5.3**（2026-10-09）｜作者：[AxuanBest](https://github.com/AxuanBest)｜仓库：[AxuanBest/PCMig](https://github.com/AxuanBest/PCMig)
 
 ---
 
@@ -85,13 +85,19 @@ PCMig：规划 + 状态 + 可信进度 + 呈现 + Diagnostics
 
 ## 3. 当前稳定版本
 
-**v0.5.1**（2026-10-06）是当前稳定版，也是相对 v0.5.0 的可信度紧急修正版。
+**v0.5.3**（2026-10-09）是当前稳定版，主题是**迁移可信度与界面稳定性的收口修正**：让失败看得见、让网速与剩余时间不再自相矛盾。
 
-- 修复目标盘写满时，UI 可能长期显示接近 `99.9%` 的可信度问题。
-- 正式交付物只保留 `PCMig.WinUI.exe` 与 `pcmig-cli.exe`；旧 WPF 源码保留作历史/回退参考，但不再随包发布。
-- 发版脚本纳入 WinUI 标题栏版本点的写入与反向检查。
+- **失败证据可读**：结果页与 HTML 报告不再只给一行被截断的路径——失败对象给出完整原因与原始错误行样本；退出码 `9` 按位解释为 `1+8`（有文件复制成功、另有文件失败）；**被中断的对象也进入报告的「未完成」结论**，不再整段漏掉；若日志中确实没有文件级错误行，报告如实写明「证据不足」，不推断为文件占用或权限问题。
+- **网速与剩余时间真实**：任务结束（含失败与中断）后不再残留「传输速度 / 预计剩余」——终态速度为 `0 B/s`、剩余为 `—`；恢复任务时重新建立采样窗口，不再拿旧窗口算出巨大剩余时间。
+- **口径说明**：界面标注本工具按 1024 进制显示（1 MB = 1024×1024 字节）；任务管理器的 Mbps 按 1000 进制且统计网卡总流量，两者本就不同源。
+- **提示卡修复**：连续展开 / 收起时的闪动、动画被截断、收缩后整卡弹回，以及长文案被省略号截断，均已修复（按动画代次闸门 + 动画收尾再写布局高度）。
+- **第 1 步连接状态**：连接中 / 部分可用 / 可用三态显示更明确，100% / 125% / 150% 缩放下圆环均完整；长错误信息只进入提示卡，表单字段保留短校验提示。
+- **第 2 步目录树**：根目录枚举失败时保留展开三角，可再次展开重试。
+- **测试**：新增网卡吞吐、失败证据、结果页深链、源连接状态等针对性用例与结构契约测试。
 
-**v0.5.0** 同为保留的正式版本，引入 WinUI 3 前端、Diagnostics 可信度体系与沉浸式传输进度。详细变更、根因和验证记录见[更新日志](docs/更新日志.md)；版本证据见[历史版本索引](docs/历史版本索引.md)。
+上述修复先以 `v0.5.3 Preview` / `v0.5.3 Preview.2` 两个独立预览版交付并完成人工使用验收；本版是同一修复内容接入正式源码与正式安装身份后的正式发版。
+
+**v0.5.1**（2026-10-06）与 **v0.5.0**（2026-10-06）同为保留的正式版本：v0.5.1 是目标盘写满不再虚报的可信度紧急修正版（旧 WPF 前端自此退出正式交付物），v0.5.0 引入 WinUI 3 前端、Diagnostics 可信度体系与沉浸式传输进度。详细变更、根因和验证记录见[更新日志](docs/更新日志.md)；版本证据见[历史版本索引](docs/历史版本索引.md)。
 
 ---
 
@@ -360,15 +366,15 @@ dotnet test tests/PCMig.Core.Tests/PCMig.Core.Tests.csproj -c Release
 dotnet test tests/PCMig.Diagnostics.Tests/PCMig.Diagnostics.Tests.csproj -c Release
 ```
 
-### 当前登记的 v0.5.1 发布验证基线
+### 当前登记的 v0.5.3 发布验证基线
 
 | 项目 | 结果 |
 |------|------|
-| `dotnet build PCMig.sln -c Release` | **0 error / 4 warning** |
-| `tests/PCMig.Core.Tests` | **569 / 569 通过**（失败 0、跳过 0） |
+| `dotnet build PCMig.sln -c Release` | **0 error / 3 warning** |
+| `tests/PCMig.Core.Tests` | **708 / 708 通过**（失败 0、跳过 0） |
 | `tests/PCMig.Diagnostics.Tests` | **382 / 382 通过**（失败 0、跳过 0） |
 
-4 条已知警告为 `WMC1506` ×3 与 `xUnit2031` ×1。发布或制作安装包只能通过 [`tools/release.ps1`](tools/release.ps1)，不要手工 `dotnet publish` 或直接调用 Inno Setup。
+3 条已知警告全部是 `WMC1506` ×3（`src/PCMig.WinUI/Views/PCMigSurface.xaml` 第 53 / 54 / 56 行的 OneWay 绑定提示）；测试工程另有 `xUnit2031` ×1 分析器提示。上一版登记的基线为 `0 error / 4 warning`（`WMC1506` ×3 + `xUnit2031` ×1）、Core 569 / 569、Diagnostics 382 / 382。发布或制作安装包只能通过 [`tools/release.ps1`](tools/release.ps1)，不要手工 `dotnet publish` 或直接调用 Inno Setup。
 
 ---
 
@@ -376,7 +382,7 @@ dotnet test tests/PCMig.Diagnostics.Tests/PCMig.Diagnostics.Tests.csproj -c Rele
 
 ### 安装包
 
-运行 `PCMigSetup-0.5.1.exe`，按向导安装（默认 `%ProgramFiles%\PCMig`）。
+运行 `PCMigSetup-0.5.3.exe`，按向导安装（默认 `%ProgramFiles%\PCMig`）。
 
 ### Portable
 
@@ -454,7 +460,7 @@ docs/                            # 用户、架构、QA、PMML 与发布文档
 
 ## 19. 版本、Tag 与发布流程
 
-- 当前稳定版是 `v0.5.1`；`v0.5.0` 为并列保留的正式版本。
+- 当前稳定版是 `v0.5.3`；`v0.5.1` 与 `v0.5.0` 为并列保留的正式版本。
 - 正式版本使用 annotated tag；已发布版本及其 tag 不可移动或覆盖。
 - 历史开发基线 tag 不一定是精确正式版本源码快照；证据等级与安装包/源码快照对应关系见 [`docs/历史版本索引.md`](docs/历史版本索引.md)。
 - 发布唯一入口：

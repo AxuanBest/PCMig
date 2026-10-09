@@ -370,6 +370,43 @@ public sealed partial class Step4ResultPage : UserControl
         PushState();
     }
 
+    /// <summary>
+    /// ★ P1-4（Preview.2）★ 「查看完整原因」：把该条失败/中断项的**完整原因**整段展示出来
+    /// （回执原文未截断 + 退出码位含义 + robocopy 日志证据摘要 + 日志/任务/报告路径）。
+    /// 纯只读展示：不写回执、不改判定、不产生任何业务副作用 —— 因此不开 ActionTrace 业务动作
+    /// （它记录的是"用户发起了哪个业务动作"，打开一段说明文字不属于其中之一）。
+    /// </summary>
+    private async void OnFailDetailClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: SessionFailItem item }) return;
+
+        // 没有全文就不该有按钮（可见性绑的是同一个布尔 CanShowDetail）；万一被点到，也只能如实显示已有的截断文案。
+        var text = string.IsNullOrWhiteSpace(item.FullText) ? item.Detail : item.FullText!;
+
+        var body = new ScrollViewer
+        {
+            Content = new TextBlock
+            {
+                Text = text,
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true,   // 允许选中复制（真机排障要把它贴进工单）
+                FontSize = 13,
+            },
+            MaxHeight = 460,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
+
+        var dialog = new ContentDialog
+        {
+            Title = item.Title,
+            Content = body,
+            CloseButtonText = "关闭",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+        await dialog.ShowAsync();
+    }
+
     /// <summary>Compact 时顶部操作条折为两行（验证/修复/覆盖 一行，报告/文件夹/恢复 一行）；纯视觉。</summary>
     public void ApplyLayoutMode(LayoutMode mode)
     {

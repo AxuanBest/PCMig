@@ -664,7 +664,9 @@ public void A12d_StopUiRefresh_StopsPumpAndPreventsRestart()
         Assert.Contains("public const int FailItemCapacity", vm, StringComparison.Ordinal);
         Assert.Contains("FailIndexCapacity", vm, StringComparison.Ordinal);
 
-        var body = BodyOf(vm, "private void AddFail(string title, string detail, bool objectLevel = false, bool verifyDerived = false)");
+        // ★ Preview.2（P1-4）★ 签名尾部新增可选 `string? fullText = null`（Step4「查看完整原因」的全文，
+        //   由 UI 线程上的回执投影在后台生成后一并传入）——容量闸门与线程纪律的断言逐字未变。
+        var body = BodyOf(vm, "private void AddFail(string title, string detail, bool objectLevel = false, bool verifyDerived = false, string? fullText = null)");
         Assert.Contains("FailItems.Count >= FailItemCapacity", body, StringComparison.Ordinal);
         Assert.Contains("_failDropped++", body, StringComparison.Ordinal);
 
@@ -712,7 +714,7 @@ public void A12d_StopUiRefresh_StopsPumpAndPreventsRestart()
 
         // ★ 线程纪律 ★ AddFail 可能从引擎线程调用 ⇒ 它**不得**直接刷新提示行（那会跨线程改 LogLines）。
         //   只看代码、不看注释（注释里为了说明原因会正当地提到 LogLines）。
-        var addFailCode = StripComments(BodyOf(vm, "private void AddFail(string title, string detail, bool objectLevel = false, bool verifyDerived = false)"));
+        var addFailCode = StripComments(BodyOf(vm, "private void AddFail(string title, string detail, bool objectLevel = false, bool verifyDerived = false, string? fullText = null)"));
         Assert.DoesNotContain("EnsureOmittedHints(", addFailCode);
         Assert.DoesNotContain("LogLines", addFailCode);
 

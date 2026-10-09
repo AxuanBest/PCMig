@@ -126,6 +126,13 @@ Patch 'src\PCMig.Gui\MainWindow.xaml' 'Title="PCMig 迁移工具 v[0-9.]+"' ('Ti
 Patch 'README.md' '\*\*当前稳定版本：v[0-9.]+\*\*' ('**当前稳定版本：v' + $Version + '**')
 Patch 'installer\pcmig.iss' '#define MyAppVersion "[0-9.]+"' ('#define MyAppVersion "' + $Version + '"')
 Patch 'installer\pcmig.iss' 'VersionInfoVersion=[0-9.]+\.0' ('VersionInfoVersion=' + $Version + '.0')
+# ★ v0.5.3 新增 ★ 四个 csproj 的 <InformationalVersion> 也必须是正式版本号（不带 Preview 后缀）：
+#   它决定「关于」页、文件元数据与 `pcmig --version` 里显示的版本；v0.5.3 之前脚本完全没管这个节点，
+#   于是 0.5.3 Preview 的 InformationalVersion 会跟着源码进正式包。节点不存在视为错误（Patch 会 Abort）。
+Patch 'src\PCMig.Core\PCMig.Core.csproj' '<InformationalVersion>[0-9A-Za-z.\- ]+</InformationalVersion>' ('<InformationalVersion>' + $Version + '</InformationalVersion>')
+Patch 'src\PCMig.Cli\PCMig.Cli.csproj' '<InformationalVersion>[0-9A-Za-z.\- ]+</InformationalVersion>' ('<InformationalVersion>' + $Version + '</InformationalVersion>')
+Patch 'src\PCMig.Gui\PCMig.Gui.csproj' '<InformationalVersion>[0-9A-Za-z.\- ]+</InformationalVersion>' ('<InformationalVersion>' + $Version + '</InformationalVersion>')
+Patch 'src\PCMig.WinUI\PCMig.WinUI.csproj' '<InformationalVersion>[0-9A-Za-z.\- ]+</InformationalVersion>' ('<InformationalVersion>' + $Version + '</InformationalVersion>')
 # 声明式自查：逐个文件核对“该出现的那行”是否确实是新版本。
 # 注意不能用“文件里不能出现旧版本号”来判——README/文档里出现历史版本号是正常的。
 $expect = @(
@@ -138,7 +145,11 @@ $expect = @(
   [pscustomobject]@{ F = 'src\PCMig.Gui\MainWindow.xaml'; P = ('Title="PCMig 迁移工具 v' + $Version + '"') },
   [pscustomobject]@{ F = 'README.md'; P = ('**当前稳定版本：v' + $Version + '**') },
   [pscustomobject]@{ F = 'installer\pcmig.iss'; P = ('#define MyAppVersion "' + $Version + '"') },
-  [pscustomobject]@{ F = 'installer\pcmig.iss'; P = ('VersionInfoVersion=' + $Version + '.0') }
+  [pscustomobject]@{ F = 'installer\pcmig.iss'; P = ('VersionInfoVersion=' + $Version + '.0') },
+  [pscustomobject]@{ F = 'src\PCMig.Core\PCMig.Core.csproj'; P = ('<InformationalVersion>' + $Version + '</InformationalVersion>') },
+  [pscustomobject]@{ F = 'src\PCMig.Cli\PCMig.Cli.csproj'; P = ('<InformationalVersion>' + $Version + '</InformationalVersion>') },
+  [pscustomobject]@{ F = 'src\PCMig.Gui\PCMig.Gui.csproj'; P = ('<InformationalVersion>' + $Version + '</InformationalVersion>') },
+  [pscustomobject]@{ F = 'src\PCMig.WinUI\PCMig.WinUI.csproj'; P = ('<InformationalVersion>' + $Version + '</InformationalVersion>') }
 )
 foreach ($e in $expect) {
   $txt = [IO.File]::ReadAllText((Join-Path $repo $e.F), (EncOf (Join-Path $repo $e.F)))
@@ -153,6 +164,14 @@ if ($mwBadges.Count -eq 0) { Abort '自查失败：src\PCMig.WinUI\MainWindow.xa
 $staleBadges = @($mwBadges | Where-Object { $_ -ne $Version })
 if ($staleBadges.Count -gt 0) { Abort ('自查失败：src\PCMig.WinUI\MainWindow.xaml 仍有旧版本徽章 v' + ($staleBadges -join ' / v') + '（共 ' + $mwBadges.Count + ' 处，应全部为 v' + $Version + '）') }
 Write-Output ('   WinUI 版本徽章 ' + $mwBadges.Count + ' 处全部为 v' + $Version)
+# ★ v0.5.3 新增 ★ <InformationalVersion> 必须唯一且不含 Preview / 其它版本后缀（执行令 §五）。
+foreach ($proj in @('src\PCMig.Core\PCMig.Core.csproj', 'src\PCMig.Cli\PCMig.Cli.csproj', 'src\PCMig.Gui\PCMig.Gui.csproj', 'src\PCMig.WinUI\PCMig.WinUI.csproj')) {
+  $pp = Join-Path $repo $proj
+  $vals = @([regex]::Matches([IO.File]::ReadAllText($pp, (EncOf $pp)), '<InformationalVersion>([^<]*)</InformationalVersion>') | ForEach-Object { $_.Groups[1].Value })
+  if ($vals.Count -ne 1) { Abort ('自查失败：' + $proj + ' 里 <InformationalVersion> 出现 ' + $vals.Count + ' 处，应恰好 1 处') }
+  if ($vals[0] -ne $Version) { Abort ('自查失败：' + $proj + ' 的 <InformationalVersion> 是「' + $vals[0] + '」，应为「' + $Version + '」（不得带 Preview 后缀）') }
+}
+Write-Output ('   四个 csproj 的 <InformationalVersion> 均为 v' + $Version)
 Write-Output ('   版本号 ' + $old + ' → ' + $Version + '，' + $expect.Count + ' 处声明全部自查通过')
 
 # ============ 日志 TXT + 打包 ============
@@ -282,16 +301,76 @@ foreach ($p in $pairs) {
 # 此处只列出并列版本，绝不删除。曾因自动清理删掉交付区 4 个历史包，已逐文件 SHA256 校验后恢复。
 Get-ChildItem (Join-Path $delivery 'PCMigSetup-*.exe') | Sort-Object Name | ForEach-Object { Write-Output ('   并列版本 ' + $_.Name) }
 if ($mirror) {
-  robocopy $repo $mirror /MIR /XD bin obj dist /XF *.user /NFL /NDL /NP /R:0 /W:0 | Select-Object -Last 1
+  # ★ v0.5.3（2026-10-09）★ 镜像步骤由 robocopy /MIR 改为「可证明安全的白名单同步」。
+  #   为什么改：/MIR 会**删除镜像目标里多出来的文件和目录** —— 实测镜像顶层有 `.git` 与 `.codeartsdoer`，
+  #   它们不在仓库顶层白名单里，一次 /MIR 就会把它们删掉；发版脚本不该有这种破坏力。
+  #   现在的行为：只把**仓库顶层已存在的条目**单向复制到镜像，绝不 /PURGE、绝不删除镜像里的任何内容；
+  #   复制前先跑一次 /L（dry-run）把完整影响范围落盘留证。
+  $mirrorExcludeDirs = @('bin', 'obj', 'dist', '.git', '.vs', '.codeartsdoer')
+  $mirrorItems = @(Get-ChildItem -LiteralPath $repo -Force | Where-Object { $mirrorExcludeDirs -notcontains $_.Name })
+  if ($mirrorItems.Count -eq 0) { Abort '镜像白名单为空 —— 仓库顶层读不到任何条目，停止以免破坏镜像' }
+  Write-Output ('   镜像白名单 ' + $mirrorItems.Count + ' 项：' + (($mirrorItems | ForEach-Object { $_.Name }) -join ' , '))
+  #   ★ v0.5.3 修正（2026-10-09）★ 顶层**文件**不能用 robocopy /E 同步：
+  #   `/E` 会把源当成目录遍历，实测对 README.md 这类文件报
+  #   「ERROR 267 (0x0000010B) Accessing Source Directory … The directory name is invalid」并退出 16，
+  #   于是 README.md / .gitignore / PCMig.sln 三个顶层文件被静默漏掉（镜像里 README 还停在旧版本）。
+  #   现在：目录走 robocopy /E（并检查退出码 ≥8 即中止），文件走 Copy-Item -Force。
+  $mirrorDryRun = Join-Path $env:TEMP ('pcmig-mirror-dryrun-v' + $Version + '.txt')
+  $dryLines = New-Object System.Collections.Generic.List[string]
+  $dryLines.Add('=== 源码镜像 dry-run（只列影响范围，不写入）v' + $Version + ' ===')
+  foreach ($mi in $mirrorItems) {
+    if ($mi.PSIsContainer) {
+      $dryLines.Add('--- 目录 ' + $mi.Name + ' （robocopy /E /L） ---')
+      $dryOut = @(& robocopy $mi.FullName (Join-Path $mirror $mi.Name) /E /L /XD bin obj dist .git .vs .codeartsdoer /XF *.user /NFL /NDL /NP /R:0 /W:0)
+      foreach ($ln in $dryOut) { $dryLines.Add([string]$ln) }
+    } else {
+      $dryLines.Add('--- 文件 ' + $mi.Name + ' （将直接覆盖镜像中的同名文件） ---')
+    }
+  }
+  $dryLines | Out-File -FilePath $mirrorDryRun -Encoding UTF8
+  Write-Output ('   镜像 dry-run（/L）完整影响范围已留证：' + $mirrorDryRun)
+  foreach ($mi in $mirrorItems) {
+    if ($mi.PSIsContainer) {
+      & robocopy $mi.FullName (Join-Path $mirror $mi.Name) /E /XD bin obj dist .git .vs .codeartsdoer /XF *.user /NFL /NDL /NP /R:0 /W:0 | Out-Null
+      if ($LASTEXITCODE -ge 8) { Abort ('镜像同步失败：目录 ' + $mi.Name + '（robocopy 退出码 ' + $LASTEXITCODE + '）') }
+    } else {
+      try {
+        Copy-Item -LiteralPath $mi.FullName -Destination (Join-Path $mirror $mi.Name) -Force -ErrorAction Stop
+      } catch {
+        Abort ('镜像同步失败：文件 ' + $mi.Name + ' —— ' + $_.Exception.Message)
+      }
+      Write-Output ('   镜像文件已同步 ' + $mi.Name)
+    }
+  }
+  Write-Output '   镜像同步完成：单向复制，未删除镜像中的任何文件（无 /MIR、无 /PURGE）'
 } else {
   Write-Output '   未配置源码镜像（$mirror 为空），跳过镜像步骤'
 }
 
 Log '启动 WinUI 自检'
-$pr = Start-Process (Join-Path $workCopy 'PCMig.WinUI.exe') -PassThru
+$selfExe = Join-Path $workCopy 'PCMig.WinUI.exe'
+# ★ v0.5.3 新增 ★ 除"没闪退"外，还要证明跑起来的**确实是这一版**：
+#   ① 文件元数据（FileVersion / ProductVersion）里不能出现上一版或 Preview 后缀；
+#   ② 主窗口标题必须是 MainWindow.xaml 里被改成的那串（`PCMig 迁移工具 · vX.Y.Z`）。
+$vi = (Get-Item $selfExe).VersionInfo
+Write-Output ('   文件元数据 FileVersion=' + $vi.FileVersion + ' ProductVersion=' + $vi.ProductVersion)
+if ($vi.FileVersion -notlike ($Version + '*')) { Abort ('WinUI 文件元数据 FileVersion=' + $vi.FileVersion + ' 与目标版本 ' + $Version + ' 不一致') }
+if ($vi.ProductVersion -notlike ($Version + '*')) { Abort ('WinUI 文件元数据 ProductVersion=' + $vi.ProductVersion + ' 与目标版本 ' + $Version + ' 不一致（是否残留 Preview 后缀？）') }
+if ($vi.ProductVersion -match '(?i)preview') { Abort ('WinUI 文件元数据 ProductVersion=' + $vi.ProductVersion + ' 残留 Preview 标识，不允许进入正式包') }
+$pr = Start-Process $selfExe -PassThru
 Start-Sleep -Seconds 22
 if ($pr.HasExited) { Abort ('WinUI 闪退，退出码 ' + $pr.ExitCode) }
-Write-Output ('   WinUI PID=' + $pr.Id + '，标题应为 PCMig 迁移工具 · v' + $Version)
+$expectedTitle = 'PCMig 迁移工具 · v' + $Version
+$title = ''
+for ($i = 0; $i -lt 20 -and $title -eq ''; $i++) {
+  $pr.Refresh()
+  $title = [string]$pr.MainWindowTitle
+  if ($title -eq '') { Start-Sleep -Milliseconds 500 }
+}
+Write-Output ('   WinUI PID=' + $pr.Id + '，窗口标题="' + $title + '"（期望="' + $expectedTitle + '"）')
+if ($title -eq '') { Abort 'WinUI 启动后读不到主窗口标题 —— 无法确认窗口已就绪，停止发版' }
+if ($title -ne $expectedTitle) { Abort ('WinUI 窗口标题是「' + $title + '」，期望「' + $expectedTitle + '」—— 跑起来的可能不是这一版') }
+Write-Output '   WinUI 窗口标题与目标版本一致'
 
 # ★ v0.5.1（2026-10-06）★ 经典回退界面的启动自检已删除：旧 WPF 前端退出正式交付链，
 #   交付区与工作副本里不会再出现 PCMig-classic.exe，自检只启动 PCMig.WinUI.exe 这一个主界面。

@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using PCMig.WinUI.Diagnostics;
 using PCMig.WinUI.Controls.ImmersiveProgress;
@@ -246,8 +247,13 @@ public sealed partial class MainWindow : Window
         {
             if (e.PropertyName is nameof(ConnectionViewModel.IsConnected) or nameof(ConnectionViewModel.Host))
                 UpdateSourceStatus();
+            // ★ 2026-10-08（真机问题 4）★ 底栏「源连接」指示器同样只认业务状态（不猜、不轮询）：
+            //   SourceState 由 ConnectionViewModel 单点派生，这里只做投影。
+            if (e.PropertyName is nameof(ConnectionViewModel.SourceState))
+                UpdateSourceConnectionIndicator();
         };
         UpdateSourceStatus();
+        UpdateSourceConnectionIndicator();
 
         // 【QA 探针接入点】仅在环境变量 PCMIG_STEP2_TREE_QA=<真实目录绝对路径> 时启用：
         // 把该目录挂成 Step2 目录树的根、走真实懒加载（EnsureChildrenAsync 真读盘）、
@@ -725,10 +731,13 @@ public sealed partial class MainWindow : Window
             _footerProgressPercent = double.IsNaN(percent) ? 0 : Math.Clamp(percent, 0, 100);
             UpdateFooterProgressFill();
         }
-        FooterSpeedText.Text = truth is null
-            ? Session.EngineSpeedText
-            : (truth.SpeedBytesPerSecond > 0 ? Format.Speed(truth.SpeedBytesPerSecond) : "—");
-        FooterEtaText.Text = truth is null ? Session.EtaText : Format.Eta(truth.EtaSeconds);
+        // ★ 2026-10-08（真机问题 5）★ 速度与 ETA 改读**真实网卡接收吞吐**（物理观测，见 MigrationSessionViewModel
+        //   的 NetworkSpeedText/NetworkEtaText）：进度真值（truth）继续负责百分比与字节 —— 它的速率是
+        //   "逻辑完成口径"，被 Robocopy 快速 Skip 的既存文件根本没经过网卡，真机上曾显示数百 MB/s~GB/s。
+        //   显示规则（连接中/断开/样本不足/暂停 ⇒ "—"，已连接且空闲 ⇒ "0 B/s"）由 Core 的
+        //   NetworkDisplayMetrics 统一判定，界面只投影、不自己猜。
+        FooterSpeedText.Text = Session.NetworkSpeedText;
+        FooterEtaText.Text = Session.NetworkEtaText;
 
         // 四态在底栏的呈现（可用性矩阵，全部来自会话的真实布尔量，不自行推断）：
         //   运行中（Resume 后正在传）：开始✗ 暂停✓ 停止✓ 恢复✗
@@ -747,6 +756,10 @@ public sealed partial class MainWindow : Window
         //   于是"点了没反应"和"点了正在办"在界面上完全一样。
         FooterPauseLabel.Text = Session.PauseButtonText;
         FooterPauseIcon.Glyph = Session.IsPauseFailed ? "\uE7BA" : "\uE769";
+
+        // ★ 2026-10-08（真机问题 4）★ 底栏是"真值每次推送"的汇聚点：顺手把「源连接」指示器也投影一次。
+        //   幂等：状态没变时只是重设同一画刷、停同一条动画，不产生额外布局。
+        UpdateSourceConnectionIndicator();
     }
 
     /// <summary>开始迁移（底栏）：与 Step2 的「开始迁移」同一入口（同一个会话、同一份 Core 计划）。</summary>
@@ -1181,6 +1194,54 @@ public sealed partial class MainWindow : Window
     /// <summary>源状态文案（ProductHeader）：未连接 = 参考图文案「未指定旧电脑」；已连接 = 真实主机名。</summary>
     private void UpdateSourceStatus() =>
         SourceStatusText.Text = ViewModel.IsConnected ? $"已连接 {ViewModel.Host.Trim()}" : "未指定旧电脑";
+
+    // ★ 2026-10-08（真机问题 4）★ 底栏「源连接」指示器：三态真值投影。
+    //
+    // 改前那是一颗**写死绿色**的点（Fill="{StaticResource SuccessBrush}"）：无论有没有连上旧电脑、
+    // 有没有可访问的共享，它都一样亮 —— 它唯一说得通的解释是"Windows 有没有互联网"，而那不是
+    // PCMig 该表达的事。现在它表达的唯一事实是：**PCMig 到旧电脑的 SMB 源共享是否可用**，
+    // 判据只来自 ViewModel.SourceState（ConnectionViewModel 单点派生自 IsConnecting / IsConnected，
+    // 即"预检通过或存在可访问共享"）：
+    //   · 尚未连接 / 连接失败 / 运行中失效 / 没有任何已验证可访问共享 ⇒ 红，**常亮不闪烁**；
+    //   · 正在连接（建 SMB 会话、枚举共享、验证手工共享）            ⇒ 琥珀，Composition 柔和呼吸；
+    //   · 至少一个已验证可访问的源共享                              ⇒ 绿，稳定常亮。
+    // ping 通、能上网、网卡 UP 都不得让它变绿：这个灯表示 SMB 源可用性，不是 ICMP。
+    // View 只投影、绝不自己猜 —— 旧缺陷的根因就是"View 里写死了一个颜色"。
+
+    private const string SourceStateConnectedBrushKey = "SuccessBrush";
+    private const string SourceStateConnectingBrushKey = "WarningBrush";
+    private const string SourceStateDisconnectedBrushKey = "DangerBrush";
+
+    /// <summary>
+    /// 把 <see cref="SourceConnectionState"/> 投影到底栏「源连接」指示器（颜色 + 呼吸动画）。
+    /// 幂等、可安全重复调用；画刷全部取自主题 Token，此处不写死颜色值。
+    /// </summary>
+    private void UpdateSourceConnectionIndicator()
+    {
+        if (SourceStateDot is null) return;
+        var state = ViewModel.SourceState;
+
+        var key = state switch
+        {
+            SourceConnectionState.Connected => SourceStateConnectedBrushKey,
+            SourceConnectionState.Connecting => SourceStateConnectingBrushKey,
+            _ => SourceStateDisconnectedBrushKey,
+        };
+        if (Application.Current?.Resources is { } res && res.TryGetValue(key, out var raw) && raw is Brush brush)
+            SourceStateDot.Fill = brush;
+
+        // 只有"正在连接"才呼吸；Reduced Motion 开启时 MotionDirector 会吸附成常亮（不做大幅动画）。
+        if (state == SourceConnectionState.Connecting) MotionDirector.PlaySourceBreathing(SourceStateDot);
+        else MotionDirector.ResetSourceBreathing(SourceStateDot);
+
+        // 无障碍与自动化：颜色不是唯一通道，状态名必须可读（契约测试也据此断言三态）。
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SourceStateDot, state switch
+        {
+            SourceConnectionState.Connected => "源连接：已连接",
+            SourceConnectionState.Connecting => "源连接：正在连接",
+            _ => "源连接：未连接",
+        });
+    }
 
     /// <summary>把当前有效客户区映射为集中管理的 Wide / Normal / Compact 视觉密度。</summary>
     private void ApplyResponsiveLayout(double width, double height)

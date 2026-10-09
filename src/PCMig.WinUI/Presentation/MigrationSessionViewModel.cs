@@ -1,12 +1,16 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using Microsoft.UI.Dispatching;
 using PCMig.Core.Jobs;
 using PCMig.Core.Logging;
 using PCMig.Core.Matrix;
 using PCMig.Core.Models;
 using PCMig.Core.Native;
+using PCMig.Core.Network;
 using PCMig.Core.Planning;
 using PCMig.Core.Preflight;
 using PCMig.Core.Report;
@@ -43,11 +47,12 @@ public sealed class SessionObjectRow : ObservableObject
 /// <summary>失败 / 不一致清单行（Step3 左栏「提示」面板 + Step4「报告清单」用）。</summary>
 public sealed class SessionFailItem
 {
-    public SessionFailItem(string title, string detail, bool objectLevel = false)
+    public SessionFailItem(string title, string detail, bool objectLevel = false, string? fullText = null)
     {
         Title = title;
         Detail = detail;
         ObjectLevel = objectLevel;
+        FullText = fullText;
         CreatedAt = DateTime.Now;   // ★ 真实产生时刻（Step4 报告清单「时间」列的唯一来源，不摆示例时间）
     }
 
@@ -56,6 +61,17 @@ public sealed class SessionFailItem
     /// <summary>true = 对象级失败（必须逐条红色列出：对象号 + 路径 + 退出码译文）。</summary>
     public bool ObjectLevel { get; }
     public string DisplayText => $"{Title}｜{Detail}";
+
+    /// <summary>
+    /// 该条失败的**完整原因**（未截断；含回执原文、退出码位含义、robocopy 日志证据摘要与日志/报告路径）。
+    /// 列表里显示的 <see cref="Detail"/> 是 <c>ErrorTranslator.ShortReason</c> 的 100 字符截断版，
+    /// 真机教训（v0.5.3 Preview.2）：150.7 GB 那次失败的真因（目录级失败，只在汇总表里）在列表里根本读不出来。
+    /// null = 没有更多可看的内容（提示级条目）。
+    /// </summary>
+    public string? FullText { get; }
+
+    /// <summary>Step4 报告清单是否为这一行显示「查看完整原因」（没有 <see cref="FullText"/> 就不显示，避免空按钮）。</summary>
+    public bool CanShowDetail => !string.IsNullOrWhiteSpace(FullText);
 
     /// <summary>本条失败/不一致项**真实产生**的时刻（本地时区；页面只显示，不参与任何业务判定）。</summary>
     public DateTime CreatedAt { get; }
@@ -279,6 +295,10 @@ public sealed class MigrationSessionViewModel : ObservableObject
                     Raise(nameof(IsSourceConnected));
                     Raise(nameof(SourceSummary));
                     Raise(nameof(CanStart));
+
+                    // ★ 2026-10-08（真机问题 5）★ 源一旦连上就启动网卡吞吐观测（幂等；地址解析在后台）。
+                    var conn = _connection;
+                    if (conn is not null && conn.IsConnected) EnsureNetworkThroughput();
                 }
 
                 // ★ UI Closure 2026-10-05（用户指令 UI-10：状态消息路由）★
@@ -291,6 +311,18 @@ public sealed class MigrationSessionViewModel : ObservableObject
                     var flow = _connection.FlowStatus;
                     if (!string.IsNullOrWhiteSpace(flow)) SetOperational(flow);
                 }
+
+                // ★ 2026-10-08 真机复验（返修 R1）★ 连接失败的用户引导与错误摘要也进左侧提示卡。
+                //   连接侧不再写表单（Step 1 表单只留字段级短校验），所以这两条通道必须一起投影，
+                //   否则失败说明就"哪儿都不显示"。
+                //   为什么**直接写属性**而不走 SetChannel：SetChannel 会连带覆写聚合句 StatusMessage
+                //   与执行卡短句 ExecutionStatus —— 空值投影时会把刚落位的失败结论一起擦掉。
+                //   这里只写通道本身，空值即折叠该行（ShellHintCard 按空值折叠）。
+                if (e.PropertyName is nameof(ConnectionViewModel.FlowUserHint))
+                    UserHint = _connection?.FlowUserHint ?? string.Empty;
+
+                if (e.PropertyName is nameof(ConnectionViewModel.FlowErrorSummary))
+                    ErrorSummary = _connection?.FlowErrorSummary ?? string.Empty;
             };
             _connection.Shares.CollectionChanged += (_, _) => Raise(nameof(SourceShareCount));
         }
@@ -915,6 +947,97 @@ public sealed class MigrationSessionViewModel : ObservableObject
 
     private string _etaText = "—";
     public string EtaText { get => _etaText; private set => Set(ref _etaText, value); }
+
+    // ────────────────────────── ★ 2026-10-08（真机问题 5）★ 真实网卡接收吞吐 ──────────────────────────
+    //
+    // 【为什么必须与进度真值分开】旧口径 CumulativeSpeed = "本轮新增**逻辑完成**字节 ÷ 有效运行时间"：
+    //   目标端已存在的文件被 Robocopy 快速 Skip（逻辑上瞬间完成）时**根本没经过网卡**，于是真机上
+    //   出现数百 MB/s ~ GB/s（32 MB 预检文件 2 秒读完 ⇒ 约 4 GB/s）这类物理上不可能的值。
+    //   本块是**物理观测**：读真实网卡的 InOctets 计数器增量，只服务"界面实时速度 + ETA"。
+    // 【边界（不可越界）】Progress Truth / CompletedBytes / Receipt / Verifier 一概不读本块结果，
+    //   本块也绝不回写它们 —— 两者是并行指标，不是替代关系。
+    private NetworkThroughputSampler? _networkThroughput;
+
+    /// <summary>
+    /// ★ 2026-10-08 Preview.2 ★ 上一次喂给采样器的**终态**标记。用途只有一件：识别"终态 → 运行"的恢复沿，
+    /// 在那条沿上丢掉停摆期间攒下的采样窗口（否则恢复后头几拍会把背景流量均值当传输速度）。
+    /// </summary>
+    private bool _networkTerminal;
+
+    private static readonly NetworkThroughputSnapshot NetworkThroughputPlaceholder =
+        NetworkThroughputSnapshot.Initial("网卡吞吐观测尚未启动");
+
+    /// <summary>当前网卡接收吞吐快照（唯一来源：周期采样真实网卡计数器；未启动 ⇒ 连接中且显示 "—"）。</summary>
+    public NetworkThroughputSnapshot NetworkThroughput
+        => _networkThroughput?.Snapshot ?? NetworkThroughputPlaceholder;
+
+    /// <summary>实时速度文本（"—" / "0 B/s" / 真实速率）。底栏与 Step3 统计卡共用。</summary>
+    public string NetworkSpeedText => NetworkThroughput.SpeedText;
+
+    /// <summary>平滑 ETA 文本（"—" 或剩余逻辑字节 ÷ 平滑网络吞吐）。</summary>
+    public string NetworkEtaText => NetworkThroughput.EtaText;
+
+    /// <summary>
+    /// 惰性启动网卡吞吐观测（幂等）。目标地址解析**放后台线程**（绝不阻塞 UI）；
+    /// 解析不到就保持"连接中 ⇒ —"，绝不编造数字。
+    /// </summary>
+    private void EnsureNetworkThroughput()
+    {
+        if (_networkThroughput is not null) return;
+        var host = Host;
+        if (string.IsNullOrWhiteSpace(host)) return;
+
+        var sampler = new NetworkThroughputSampler(null, log: _log);
+        _networkThroughput = sampler;
+        sampler.Start();
+        _log.Information("网卡吞吐观测已启动：目标 {Host}", host);
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var addresses = Dns.GetHostAddresses(host)
+                    .Where(a => a.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6)
+                    .ToArray();
+                sampler.UpdateDestinations(addresses);
+            }
+            catch (Exception ex)
+            {
+                _log.Debug(ex, "网卡吞吐：解析目标主机 {Host} 失败（保持不可用）", host);
+            }
+        });
+    }
+
+    /// <summary>
+    /// 把"暂停 / 剩余逻辑字节 / 是否终态"喂给采样器（ETA 的被除数**只**来自进度真值，单向输入）。
+    /// 终态（完成 / 完成但有错 / 中断 / 失败 / 取消）必须显式告知采样器：任务结束时剩余逻辑字节会冻结在
+    /// &gt;0，而采样器只看得到网卡计数器 —— 不告知就会一直算出"预计剩余若干小时"这种假 ETA（真机问题 6）。
+    /// 线程纪律：本方法只写采样器的输入字段，读快照由 UI 线程做。
+    /// </summary>
+    private void SyncNetworkThroughputInputs(bool paused, long remainingLogicalBytes, bool terminal)
+    {
+        var sampler = _networkThroughput;
+        if (sampler is null) return;
+
+        // "终态 → 运行"的恢复沿（用户点「恢复任务」/重试）：丢掉停摆期间的窗口与基线。
+        if (_networkTerminal && !terminal) sampler.ResumeObservation();
+
+        sampler.MarkPaused(paused);
+        sampler.SetRemainingLogicalBytes(remainingLogicalBytes);
+        sampler.MarkTerminal(terminal);
+        _networkTerminal = terminal;
+    }
+
+    /// <summary>
+    /// 终态判定（**唯一**口径）：这些阶段之后不存在"还要多久"，速度与 ETA 一律按终态显示。
+    /// 与 <c>ResumablePhases</c> 的口径刻意分开：AwaitingReview / Paused 都还能继续跑，不算终态。
+    /// </summary>
+    private static bool IsTerminalPhase(JobPhase phase)
+        => phase is JobPhase.Completed
+            or JobPhase.CompletedWithErrors
+            or JobPhase.Interrupted
+            or JobPhase.Failed
+            or JobPhase.Canceled;
 
     /// <summary>
     /// ★ FIX BATCH 4（§7.1）★ 引擎最后一次送来的进度真值（顶层/底栏进度条、百分比、字节、速率、ETA
@@ -3070,6 +3193,10 @@ public sealed class MigrationSessionViewModel : ObservableObject
 
         PauseUiState = next;
 
+        // ★ 2026-10-08（真机问题 5）★ 暂停真值一变就同步网卡吞吐的暂停标志：
+        //   暂停 ⇒ 界面必须**立刻**显示 0 B/s / ETA "—"，不能等下一次进度快照（引擎暂停后可能不再推送）。
+        _networkThroughput?.MarkPaused(PauseUiState is PauseUiState.Pausing or PauseUiState.Paused);
+
         // 暂停的业务结果只以引擎为准（D6.3：请求受理 = Accepted；真的停住 = Succeeded；停不住 = Failed）。
         if (engineState == PauseState.Paused)
             LastPauseOutcome = new ActionOutcomeDecision(DiagnosticOutcome.Succeeded, "pause-achieved");
@@ -3121,6 +3248,14 @@ public sealed class MigrationSessionViewModel : ObservableObject
         var truthEta = displayTruth?.EtaSeconds ?? s.EtaSeconds;
         EngineSpeedText = truthSpeed > 0 ? Format.Speed(truthSpeed) : "—";
         EtaText = double.IsNaN(truthEta) ? "—" : Format.Eta(truthEta);
+        // ★ 2026-10-08（真机问题 5）★ 界面实时速度/ETA 改由**真实网卡接收吞吐**提供
+        //   （Progress Truth 的速率仍是"逻辑完成口径"，只作诊断/回执用途，不再驱动底栏与 Step3）。
+        //   这里只喂两个单向输入：暂停标志 + 剩余逻辑字节（= max(0, 计划 − 已显示)，与 ETA 被除数同源）。
+        var remainingLogicalBytes = plannedBytes > displayedBytes ? plannedBytes - displayedBytes : 0;
+        SyncNetworkThroughputInputs(
+            PauseUiState is PauseUiState.Pausing or PauseUiState.Paused,
+            remainingLogicalBytes,
+            IsTerminalPhase(s.Phase));
         // 检查点用的"已完成对象数"镜像（只读；业务权威仍是 Completed 回执与 s.CompletedObjects）。
         _completedObjectsSeen = s.CompletedObjects;
         ObjectText = $"{s.CompletedObjects}/{s.TotalObjects}" + (s.FailedObjects > 0 ? $"（失败 {s.FailedObjects}）" : "");
@@ -3365,6 +3500,19 @@ public sealed class MigrationSessionViewModel : ObservableObject
             .GroupBy(r => r.ObjectId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.OrderBy(r => r.CompletedUtc).Last(), StringComparer.OrdinalIgnoreCase);
 
+        // ★ P1-4（Preview.2）★ 列表里的「原因」是 ErrorTranslator.ShortReason 的 100 字符截断版，
+        //   真机那次失败的真因（目录级失败，只写在 robocopy 汇总表里）在列表里读不出来。
+        //   这里为每条**未成功**回执预生成「完整原因」（回执原文 + 退出码位含义 + 日志证据摘要 + 路径指引），
+        //   由 Step4 的「查看完整原因」弹窗展示。读日志是磁盘 I/O ⇒ 必须放在后台线程做。
+        Dictionary<string, string> fullTexts;
+        try { fullTexts = await Task.Run(() => BuildFullReasonTexts(ctx, latest.Values), ct); }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "生成失败原因详情失败（列表仍会显示截断原因，不影响任何判定）");
+            fullTexts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
         Post(() =>
         {
             foreach (var row in Objects)
@@ -3403,11 +3551,97 @@ public sealed class MigrationSessionViewModel : ObservableObject
                     AddFail($"{headline}　{r.ObjectId}　{r.TargetPath}",
                         ErrorTranslator.FailureHeadline(r.ObjectId, r.TargetPath, r.RobocopyExitCodeBulk, r.RobocopyExitCodeLarge)
                         + "｜" + reason,
-                        objectLevel: true);
+                        objectLevel: true,
+                        fullText: fullTexts.TryGetValue(r.ObjectId, out var full) ? full : null);
                 }
             }
         });
     }
+
+    /// <summary>
+    /// 为每条**未成功**回执生成「完整原因」文本（Step4「查看完整原因」弹窗用）。**只读**：不参与任何判定、
+    /// 不写回执、不改 job-state。内容 = 退出码位含义 + 回执原文（未截断）+ robocopy 日志证据摘要
+    /// （汇总表原文 / 文件级错误行 / 无证据时的诚实说明）+ 日志与报告的绝对路径。
+    /// </summary>
+    private static Dictionary<string, string> BuildFullReasonTexts(JobContext ctx, IEnumerable<ObjectReceipt> receipts)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in receipts)
+        {
+            if (r.Status is not (ObjectStatus.Failed or ObjectStatus.CompletedWithErrors or ObjectStatus.Interrupted)) continue;
+
+            var sb = new StringBuilder();
+            sb.AppendLine(ErrorTranslator.FailureHeadline(r.ObjectId, r.TargetPath, r.RobocopyExitCodeBulk, r.RobocopyExitCodeLarge));
+            sb.AppendLine($"对象：{r.ObjectId}　第 {r.Attempt} 趟　状态：{StatusWord(r.Status)}　错误类别：{r.ErrorClass}");
+            sb.AppendLine($"源：{r.SourcePath}");
+            sb.AppendLine($"目标：{r.TargetPath}（本趟已落盘 {Format.Bytes(r.TargetBytes)} / {r.TargetFiles} 个文件）");
+            sb.AppendLine($"Bulk 退出码：{ExitCodePhrase(r.RobocopyExitCodeBulk)}");
+            sb.AppendLine($"Large 退出码：{ExitCodePhrase(r.RobocopyExitCodeLarge)}");
+            sb.AppendLine();
+            sb.AppendLine("── 任务记录的原因（回执原文，未截断）──");
+            // v0.5.3：与 HTML 报告共用同一脱敏口径（FailureEvidenceCollector.LooksSensitive）。
+            sb.AppendLine(string.IsNullOrWhiteSpace(r.ErrorDetail)
+                ? "（回执未记录错误明细）"
+                : FailureEvidenceCollector.LooksSensitive(r.ErrorDetail) ? "（该行疑似含凭据，已隐去）" : r.ErrorDetail);
+            sb.AppendLine();
+
+            try
+            {
+                var ev = FailureEvidenceCollector.Collect(ctx.RoboLogsDir, r.ObjectId, r.ErrorDetail);
+                sb.AppendLine("── robocopy 日志证据 ──");
+                sb.AppendLine($"日志：{ev.LogFileName}（{(ev.LogFound ? Format.Bytes(ev.LogBytes) : "缺失")}，{ev.TotalLines} 行，编码 {ev.EncodingLabel}）");
+
+                var summary = ev.Lines.Where(l => l.Kind == "summary").Select(l => l.Raw).ToList();
+                if (summary.Count > 0)
+                {
+                    sb.AppendLine("汇总表（日志原文；看「失败」那一列，非 0 就是这一趟真没复制成的条目数）：");
+                    foreach (var line in summary) sb.AppendLine("    " + line);
+                }
+
+                if (ev.ErrorLineCount > 0)
+                {
+                    sb.AppendLine($"文件级错误行（共 {ev.ErrorLineCount} 条，此处最多列 20 条；完整原文见下面的日志路径）：");
+                    foreach (var l in ev.Lines.Where(l => l.Kind != "summary").Take(20))
+                        sb.AppendLine($"    {(l.Code.Length > 0 ? "[" + l.Code + "] " : "")}{l.Path}");
+                }
+                else
+                {
+                    sb.AppendLine(ev.NoEvidenceText());
+                }
+
+                if (ev.HintAppearsInLog && ev.HintIsNotAnError)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine($"注意：回执里给的这条原因在日志里出现了 {ev.HintMentions} 次，但都是普通状态行（不是错误行）"
+                        + "——不能把它当失败原因看。");
+                }
+            }
+            catch (Exception ex)
+            {
+                // 证据读不出来也要有话说；绝不因此改动列表里已有的事实。
+                sb.AppendLine($"（日志证据读取失败：{ex.Message}）");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine($"完整日志：{Path.Combine(ctx.RoboLogsDir, r.ObjectId + ".log")}");
+            sb.AppendLine($"任务目录：{ctx.JobDir}");
+            sb.AppendLine($"报告目录：{ctx.ReportDir}");
+
+            map[r.ObjectId] = sb.ToString();
+        }
+        return map;
+    }
+
+    private static string StatusWord(ObjectStatus s) => s switch
+    {
+        ObjectStatus.Failed => "失败",
+        ObjectStatus.CompletedWithErrors => "未完整完成（有错误）",
+        ObjectStatus.Interrupted => "已中断（等待恢复）",
+        _ => s.ToString(),
+    };
+
+    private static string ExitCodePhrase(int code)
+        => code < 0 ? "未执行（该通道没跑）" : $"{code}（{ErrorTranslator.ExitCodeText(code)}）";
 
     /// <summary>把计划对象填进清单（RootFiles 给人话标签；体积未知时写"传输时实测"）。</summary>
     private void FillObjectsFromPlan(MigrationPlan? plan)
@@ -3572,7 +3806,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// 从未被容量挤掉的条目其索引仍然保留（含被丢弃的），所以"丢弃计数"始终是
     /// **不同的失败条目数**，而不是"重复出现次数"。
     /// </summary>
-    private void AddFail(string title, string detail, bool objectLevel = false, bool verifyDerived = false)
+    private void AddFail(string title, string detail, bool objectLevel = false, bool verifyDerived = false, string? fullText = null)
     {
         // ★ 线程纪律（场景 H 根因修复 / 2026-10-06）★
         //   本方法会改 FailItems（ObservableCollection）、_failIndex、_failDropped —— 三者都只能在 UI 线程动。
@@ -3589,7 +3823,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         //   本方法的引擎线程投递不会在 OnOutputLine 里产生任何 Post 文本）。
         if (_queue is not null && !_queue.HasThreadAccess)
         {
-            Post(() => AddFail(title, detail, objectLevel, verifyDerived));
+            Post(() => AddFail(title, detail, objectLevel, verifyDerived, fullText));
             return;
         }
 
@@ -3608,7 +3842,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         }
 
         if (verifyDerived) _verifyFailKeys.Add(key);
-        FailItems.Add(new SessionFailItem(title, detail, objectLevel));
+        FailItems.Add(new SessionFailItem(title, detail, objectLevel, fullText));
 
         // ★ 线程纪律 ★ 这里**故意不**直接刷新「…另有 N 条」提示行：
         //   本方法可能从**引擎线程**调用（OnOutputLine / OnTransferNotice 路径），而提示行是

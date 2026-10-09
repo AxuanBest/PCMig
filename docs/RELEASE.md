@@ -10,10 +10,11 @@
 
 | Tag | 版本 | 主题 | 状态 |
 |-----|------|------|------|
-| `v0.5.1` | 0.5.1 | 可信度紧急修正：目标盘写满不再虚报 + 旧 WPF 前端退出交付物 | **当前稳定版** |
+| `v0.5.3` | 0.5.3 | 迁移可信度与界面稳定性收口：失败证据可读、网速与剩余时间真实、提示卡与源连接状态修复 | **当前稳定版** |
+| `v0.5.1` | 0.5.1 | 可信度紧急修正：目标盘写满不再虚报 + 旧 WPF 前端退出交付物 | 并列保留的正式版本 |
 | `v0.5.0` | 0.5.0 | WinUI 3 全新界面 + Diagnostics 可信度体系 + 沉浸式传输进度 | 并列保留的正式版本 |
 
-两个版本各有独立的 release commit 与 annotated tag，**历史安装包全部保留、互不覆盖**。
+三个版本各有独立的 release commit 与 annotated tag，**历史安装包全部保留、互不覆盖**。
 
 每个正式版本对应一个 annotated tag `v<主>.<次>.<修订>`，指向该版本的 release commit。
 
@@ -81,8 +82,11 @@ dotnet test tests/PCMig.Diagnostics.Tests/PCMig.Diagnostics.Tests.csproj -c Rele
 | 8 | `src/PCMig.WinUI/MainWindow.xaml` | 标题行「更新日志」徽章内的版本 `Text="vX.Y.Z"` |
 | 9 | `README.md` | 当前稳定版本说明 |
 | 10–11 | `installer/pcmig.iss` | `MyAppVersion` 与 `VersionInfoVersion` |
+| 12 | `src/PCMig.Cli`、`src/PCMig.Core`、`src/PCMig.Gui`、`src/PCMig.WinUI` 的 `.csproj` | `<InformationalVersion>`（v0.5.3 起） |
 
 说明：
+
+- 第 12 项自 v0.5.3 起与 `<Version>` 一起由脚本写入并反向自查：它是 exe / 安装包「产品版本」描述与关于页的来源，必须等于目标版本且**不带** `Preview` 等预览后缀（预览构建在预览分支内自行改，不得回流正式仓库）。
 
 - 第 5 项（旧 WPF 前端）仍留在源码树并随源码树一起改版本号，但**不进入正式用户交付物**（见第 11 节）。
 - `src/PCMig.WinUI/MainWindow.xaml` 中的版本徽章是**运行时真值**（没有 `.cs` 给它赋值），必须由脚本按正则 `Text="v[0-9.]+"` 替换；替换后脚本会反向自查该文件里所有 `Text="v<数字>"` 是否**全部**等于目标版本。
@@ -210,7 +214,7 @@ Portable 目录内容：`PCMig.WinUI.exe` + 其原生组件、`pcmig-cli.exe`、
 
 > 有安装包 ≠ 有源码快照；有更新日志 ≠ 有源码快照。
 
-安装包属**发布产物**，通过 GitHub Releases 作为 Release asset 分发，**不写入 Git 历史**：v0.5.0 / v0.5.1 已发布（Latest = v0.5.1），Legacy v0.1.x – v0.4.x 待通过独立归档 Release 集中上传。也不为缺少源码快照的历史版本补建版本 tag。
+安装包属**发布产物**，通过 GitHub Releases 作为 Release asset 分发，**不写入 Git 历史**：v0.5.0 / v0.5.1 / v0.5.3 已发布（Latest = v0.5.3），Legacy v0.1.x – v0.4.x 待通过独立归档 Release 集中上传。也不为缺少源码快照的历史版本补建版本 tag。
 
 逐版本证据索引见 `docs/历史版本索引.md`。
 
@@ -228,7 +232,7 @@ Portable 目录内容：`PCMig.WinUI.exe` + 其原生组件、`pcmig-cli.exe`、
 ## 14. 已知基础设施限制
 
 - 发版脚本面向 Windows + PowerShell + Inno Setup + Windows App SDK 的本机环境编写，**未做 CI 化**，尚无自动化流水线。
-- 安装包**不进入普通 Git tree**，而是通过 GitHub Releases 作为 Release asset 分发：**v0.5.0 与 v0.5.1 已完成发布，当前 Latest Release 为 v0.5.1**。仍可确认的 Legacy v0.1.x – v0.4.x 历史安装包**尚未批量上传**，计划由独立的 Legacy Installers Archive Release 集中归档；该归档发布与「历史源码快照是否可用」分别记录，互不推断。
+- 安装包**不进入普通 Git tree**，而是通过 GitHub Releases 作为 Release asset 分发：**v0.5.0、v0.5.1 与 v0.5.3 已完成发布，当前 Latest Release 为 v0.5.3**。仍可确认的 Legacy v0.1.x – v0.4.x 历史安装包**尚未批量上传**，计划由独立的 Legacy Installers Archive Release 集中归档；该归档发布与「历史源码快照是否可用」分别记录，互不推断。
 - 界面视觉与动效的最终验收由人工完成；仓库内没有、也不主张存在自动视觉验收流程。
 - 回退通道 `PCMIG_CLASSIC_UI=1`（或 exe 旁 `classic-ui.flag`）属旧 WPF 源码内的能力，从 v0.5.1 起不再随交付物提供；仓库内开发调试仍可使用。
 

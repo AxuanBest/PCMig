@@ -57,7 +57,7 @@
 | [`稳定性验收标准.md`](稳定性验收标准.md) | 稳定性验收判据 |
 | [`qa/`](qa/) | QA 过程记录与验证证据（现行 + `qa/history/` 历史） |
 
-构建与测试命令、当前基线（Core 569 / Diagnostics 382）见 [`RELEASE.md`](RELEASE.md) 第 3–4 节。
+构建与测试命令、当前基线（Core 708 / Diagnostics 382）见 [`RELEASE.md`](RELEASE.md) 第 3–4 节。
 
 实验室与工具链：`lab/three-vm/`（三 VM 测试框架）、`tools/stability-test.ps1`（逐文件 SHA256 三方核对）、`tools/uishot.ps1`（界面截图）、`tools/pcmiglab-vm.ps1` 与 `tools/l3-*.ps1`（实验室编排）。
 
@@ -116,7 +116,7 @@ v0.5.0 之前一段界面改造与缺陷定位记录，作为技术参考保留�
 |---|---|
 | [`archive/`](archive/) | 已被取代或已交付的历史文档（含 `FinalPolish-*`、`阶段A-交付说明-20260929.md`、`现场验证清单-v0.3.8.txt` 等） |
 
-历史安装包与逐版本证据见 [`历史版本索引.md`](历史版本索引.md)；当前正式版本 v0.5.0 / v0.5.1 的安装包已通过 GitHub Releases 提供（Latest = v0.5.1）；Legacy v0.1.x – v0.4.x 安装包待通过独立归档 Release 集中发布。安装包**一律不写入 Git 历史**。
+历史安装包与逐版本证据见 [`历史版本索引.md`](历史版本索引.md)；当前正式版本 v0.5.3，与 v0.5.1 / v0.5.0 的安装包一同通过 GitHub Releases 提供（Latest = v0.5.3）；Legacy v0.1.x – v0.4.x 安装包待通过独立归档 Release 集中发布。安装包**一律不写入 Git 历史**。
 
 ---
 

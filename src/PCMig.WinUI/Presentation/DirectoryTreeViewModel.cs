@@ -271,47 +271,28 @@ public sealed class DirectoryTreeViewModel : ObservableObject
                 _matrixCache.ExcludedFileNames.Concat(_matrixCache.SecurityBlockedFileNames), StringComparer.OrdinalIgnoreCase);
             var path = node.FullPath;
             IsLoading = true;
-            var (dirs, files, denied) = await Task.Run(() =>
-            {
-                var dlist = new List<string>();
-                var flist = new List<(string Name, long Size)>();
-                var deniedCount = 0;
-                try
-                {
-                    foreach (var d in Directory.EnumerateDirectories(path))
-                    {
-                        try
-                        {
-                            var attr = File.GetAttributes(d);
-                            if ((attr & FileAttributes.ReparsePoint) != 0) continue;
-                            var name = Path.GetFileName(d.TrimEnd('\\'));
-                            if (name == null || exclDirs.Contains(name)) continue;
-                            dlist.Add(d);
-                        }
-                        catch { deniedCount++; /* 单目录跳过 */ }
-                    }
-                }
-                catch { deniedCount++; /* 目录整体不可访问 */ }
-                try
-                {
-                    foreach (var f in Directory.EnumerateFiles(path))
-                    {
-                        try
-                        {
-                            var fi = new FileInfo(f);
-                            if ((fi.Attributes & FileAttributes.ReparsePoint) != 0) continue;
-                            if (exclFiles.Contains(fi.Name)) continue;
-                            flist.Add((fi.Name, fi.Length));
-                        }
-                        catch { deniedCount++; /* 单文件跳过 */ }
-                    }
-                }
-                catch { deniedCount++; /* 文件枚举失败不致命 */ }
-                return (dlist.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
-                        flist.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList(),
-                        deniedCount);
-            });
+            var read = await Task.Run(() => ChildrenReaderForTest?.Invoke(path) ?? ReadChildrenCore(path, exclDirs, exclFiles));
+            var dirs = read.Dirs;
+            var files = read.Files;
+            var denied = read.Denied;
             if (v != Volatile.Read(ref _browseVersion)) return; // 已重新连接，丢弃过期结果
+
+            // ★ 2026-10-08（真机问题 2：点一次三角永久消失）★
+            //   **根目录本身枚举失败**（UnauthorizedAccess / IOException / SMB 瞬时中断 / DirectoryNotFound /
+            //   网络掉线）绝不允许被结算成"成功读取了一个空目录"。
+            //   改前：两个 catch 只做 `deniedCount++`，随后**无条件**走成功块 ⇒ `ChildrenLoaded = true`
+            //   ⇒ UI 侧 `HasUnrealizedChildren = !ChildrenLoaded` 落 false ⇒ 展开箭头永久消失，
+            //   用户修好共享/NTFS 权限也再没有入口重试（真机 E 共享实测：扫描能列出
+            //   E\PCMigLab / E\Project / E\系统ISO和Vm安装包，界面却是一个"空的已加载目录"）。
+            //   正确语义：根读不出来 ⇒ 不置 ChildrenLoaded、**不动 Children**（保留 AddDummy 占位，
+            //   箭头照旧由 HasUnrealizedChildren=true 提供）⇒ 下一次点击必然重新读盘。
+            if (read.RootFailed)
+            {
+                await OnUiAsync(() => Notice?.Invoke(
+                    $"无法读取「{node.Name}」：该位置当前不可访问（共享名 / 账户密码 / 共享权限 / 网络中断皆可能）。"
+                    + "已保留展开箭头——修复后可再次点击重试。"));
+                return;
+            }
             // ★ A.5（C1）★ 上面这条 `return` **刻意不置 ChildrenLoaded**：结果已过期，本节点
             //   并没有"成功加载出内容"这个事实 ⇒ 箭头必须还在、再点一次必须能重新读盘（与 C2 互补，R18）。
             await OnUiAsync(() =>
@@ -338,6 +319,10 @@ public sealed class DirectoryTreeViewModel : ObservableObject
                 //   提示信息改走既有的 `Notice` 通道：内容不丢，但树里只呈现真实目录 / 真实文件。
                 if (files.Count > shown.Count)
                     Notice?.Invoke($"目录「{node.Name}」共 {files.Count} 个文件，仅显示前 {shown.Count} 个；勾选该目录即包含其全部文件。");
+                // ★ 2026-10-08（真机问题 2）★ 文件列表**整体**读失败（目录枚举成功、文件枚举整体抛异常）：
+                //   这不是"这个目录里没有文件"——必须如实说清，否则用户会以为文件都没了（或以为都会被迁移）。
+                if (read.FilesFailed)
+                    Notice?.Invoke($"目录「{node.Name}」的文件列表本次读取失败——该目录下的文件不会被迁移，请确认权限/网络后重试。");
                 // 目录读不全时如实告知（不静默）：这些位置不会被迁移，与扫描残缺闸门同一口径的事实来源
                 if (denied > 0)
                     Notice?.Invoke($"目录「{node.Name}」有 {denied} 个子项因权限/网络原因无法列出——它们不会被迁移，请在此处确认后再生成计划。");
@@ -376,6 +361,74 @@ public sealed class DirectoryTreeViewModel : ObservableObject
             _loading.Remove(node);
             IsLoading = false;
         }
+    }
+
+    /// <summary>
+    /// 一次目录读取的原始结果（★ 2026-10-08 真机问题 2 ★）。
+    ///
+    /// <see cref="Denied"/> 与 <see cref="RootFailed"/> 是**两个不同的事实**，绝不可互相折叠：
+    ///   · <c>Denied</c>：根枚举成功了，只是有 N 个**子项**读不出来 ⇒ 仍算"加载成功"（ChildrenLoaded=true），
+    ///     如实提示 N 项不会被迁移；
+    ///   · <c>RootFailed</c>：**这个位置本身**读不出来（连一个子项都没枚举到）⇒ 必须保持"未加载"，
+    ///     箭头保留、下次点击重试。
+    /// </summary>
+    internal readonly record struct DirReadResult(
+        List<string> Dirs, List<(string Name, long Size)> Files, int Denied, bool RootFailed, bool FilesFailed);
+
+    /// <summary>
+    /// ★ 仅测试缝 ★：替换"读一个目录"的整个过程（默认 null = 走真实磁盘 IO）。
+    /// 用途：目录树"失败 → 重试成功"的状态机在真机上**不可控**（要先制造一次 UnauthorizedAccess /
+    /// SMB 中断再修好），只能在单测里用一个可控的 fake 把"第一次失败、第二次成功"演出来。
+    /// 生产代码从不设置它。
+    /// </summary>
+    internal Func<string, DirReadResult>? ChildrenReaderForTest { get; set; }
+
+    /// <summary>
+    /// 真实读盘：枚举一级子目录 + 一级文件（原 <c>EnsureChildrenAsync</c> 内联逻辑逐行搬运，口径未改）。
+    /// 与改前唯一的差别：把两个"整体失败"如实上报，而不是把它们混进 <c>deniedCount</c>。
+    /// </summary>
+    private DirReadResult ReadChildrenCore(string path, HashSet<string> exclDirs, HashSet<string> exclFiles)
+    {
+        var dlist = new List<string>();
+        var flist = new List<(string Name, long Size)>();
+        var deniedCount = 0;
+        var dirFailed = false;
+        var fileFailed = false;
+        try
+        {
+            foreach (var d in Directory.EnumerateDirectories(path))
+            {
+                try
+                {
+                    var attr = File.GetAttributes(d);
+                    if ((attr & FileAttributes.ReparsePoint) != 0) continue;
+                    var name = Path.GetFileName(d.TrimEnd('\\'));
+                    if (name == null || exclDirs.Contains(name)) continue;
+                    dlist.Add(d);
+                }
+                catch { deniedCount++; /* 单目录跳过 */ }
+            }
+        }
+        catch { dirFailed = true; /* ★ 根目录整体不可访问 ⇒ RootFailed（一个子项都没读到） */ }
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(path))
+            {
+                try
+                {
+                    var fi = new FileInfo(f);
+                    if ((fi.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    if (exclFiles.Contains(fi.Name)) continue;
+                    flist.Add((fi.Name, fi.Length));
+                }
+                catch { deniedCount++; /* 单文件跳过 */ }
+            }
+        }
+        catch { fileFailed = true; /* 文件列表整体失败：目录枚举已成功 ⇒ 不算 RootFailed，只如实提示 */ }
+        return new DirReadResult(
+            dlist.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+            flist.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+            deniedCount, dirFailed, fileFailed);
     }
 
     /// <summary>

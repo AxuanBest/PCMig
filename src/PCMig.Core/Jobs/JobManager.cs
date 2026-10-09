@@ -90,12 +90,26 @@ public sealed class JobContext
     public VerifyReport? LoadVerify() =>
         JsonStateStore.TryRead<VerifyReport>(VerifyPath, out var v) ? v : null;
 
-    public void SaveReceipt(ObjectReceipt receipt) =>
-        JsonStateStore.WriteAtomic(
-            Path.Combine(ReceiptsDir, $"{receipt.ObjectId}-{DateTime.UtcNow:yyyyMMddHHmmss}.json"),
-            receipt,
-            "Receipt",
-            Diagnostics.WithObject(receipt.ObjectId));
+    /// <summary>
+    /// 写一份对象回执。
+    /// v0.5.3：文件名改为**同名不覆盖**——同一对象在同一秒内写两次（重试/恢复可能触发）时，
+    /// 追加 <c>-1</c>、<c>-2</c> 后缀而不是让 <see cref="JsonStateStore.WriteAtomic"/> 静默覆盖掉上一趟。
+    /// 读取端只枚举 <c>*.json</c>、从不解析文件名 ⇒ 历史回执（含 v0.5.0/v0.5.1 与预览版）原样可读。
+    /// </summary>
+    public void SaveReceipt(ObjectReceipt receipt)
+    {
+        var name = $"{receipt.ObjectId}-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        var path = Path.Combine(ReceiptsDir, name + ".json");
+        for (var i = 1; File.Exists(path) && i <= MaxSameSecondReceiptSuffix; i++)
+        {
+            path = Path.Combine(ReceiptsDir, $"{name}-{i}.json");
+        }
+
+        JsonStateStore.WriteAtomic(path, receipt, "Receipt", Diagnostics.WithObject(receipt.ObjectId));
+    }
+
+    /// <summary>同秒同名回执的后缀上限（99 足够：同一对象在同一秒内写 100 份回执不是正常现场）。</summary>
+    private const int MaxSameSecondReceiptSuffix = 99;
 
     public List<ObjectReceipt> LoadReceipts(Serilog.ILogger? log = null) =>
         JsonStateStore.ReadAllReceipts<ObjectReceipt>(ReceiptsDir,

@@ -46,6 +46,9 @@
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\ShareItem.cs" Link="LinkedPresentation\ShareItem.cs" />
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\DirTreeModels.cs" Link="LinkedPresentation\DirTreeModels.cs" />
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\DirectoryTreeViewModel.cs" Link="LinkedPresentation\DirectoryTreeViewModel.cs" />
+    <!-- ★ 2026-10-08（真机问题 4）★ 底栏「源连接」三态枚举：纯枚举、零 WinUI 依赖 ⇒ 与 VM 一并链入
+         （ConnectionViewModel 的 SourceState / UpdateSourceState 用到它；不链入会 CS0246）。 -->
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\SourceConnectionState.cs" Link="LinkedPresentation\SourceConnectionState.cs" />
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\ConnectionViewModel.cs" Link="LinkedPresentation\ConnectionViewModel.cs" />
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\PageReadiness.cs" Link="LinkedPresentation\PageReadiness.cs" />
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\MigrationSessionViewModel.cs" Link="LinkedPresentation\MigrationSessionViewModel.cs" />

@@ -324,10 +324,20 @@ public class ProgressTruthModelTests : IDisposable
             Assert.Contains(".PresentationTruth", src);
             Assert.Contains("DisplayedTransferredBytes", src);
         }
-        Assert.Contains("SpeedBytesPerSecond", footer);
-        Assert.Contains("EtaSeconds", footer);
-        Assert.Contains("SpeedBytesPerSecond", step3);
-        Assert.Contains("EtaSeconds", step3);
+        // ★ 口径变更（2026-10-08，真机问题 5；用户当轮指令优先）★
+        //   速度与 ETA **不再**由进度真值驱动。旧断言要求两处源码都出现 SpeedBytesPerSecond / EtaSeconds
+        //   是"真值单源"时代的契约，但进度真值的速率是"本轮新增**逻辑完成**字节 ÷ 有效运行时间"——
+        //   被 Robocopy 快速 Skip 的既存文件从没经过网卡，真机上因此显示过数百 MB/s ~ GB/s 的不可能值。
+        //   现在界面速度/ETA 只读**真实网卡接收吞吐**（NetworkSpeedText / NetworkEtaText，来源
+        //   NetworkThroughputSampler 的 InOctets 采样）；进度真值继续独占百分比与字节口径。
+        foreach (var src in new[] { footer, step3 })
+        {
+            Assert.Contains("NetworkSpeedText", src);
+            Assert.Contains("NetworkEtaText", src);
+            // 反向断言（防回退）：禁止再把逻辑完成速率灌回界面速度/ETA。
+            Assert.DoesNotContain("Format.Speed(truth.SpeedBytesPerSecond)", src);
+            Assert.DoesNotContain("Format.Eta(truth.EtaSeconds)", src);
+        }
         // 禁止任何一处再自行算百分比/字节（旧实现：Percent 一处、ProgressText 另一处 ⇒ 真值分裂）
         // ★ 口径更新（2026-10-04 → Round-3 视觉纠偏 R33，非放宽）★
         //   进度填充已从 ProgressBar → 唯一写入者像素宽度 → 现在是 ImmersiveTransferProgress（Hero/Compact）。

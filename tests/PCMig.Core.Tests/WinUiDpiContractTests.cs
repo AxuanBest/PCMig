@@ -168,7 +168,14 @@ public sealed class WinUiDpiContractTests
         Assert.Contains(@"<Grid Grid.Column=""2"" MinWidth=""0""", xaml);  // 进度轨道最小宽（弹性列会拉得更宽）
         Assert.Contains(@"<ColumnDefinition Width=""0""/>", xaml);         // 中段隔离列已归零
         Assert.Contains(@"<ColumnDefinition Width=""*""/>", xaml);         // 唯一的弹性列
-        Assert.Contains(@"x:Name=""FooterNetPanel"" Grid.Column=""7"" Width=""54""", xaml); // 网络组独立保留宽
+        // ★ 2026-10-08 真机复验（返修 R3）★ 该组**不再使用固定宽度**：
+        //   真机截图证明固定宽（54/66）会把 9~10 DIP 的状态圆点裁成非圆，且 100%/125%/150% DPI 都可能复现。
+        //   现行口径：外层 Auto 宽（由底栏 Auto 列自适应）+ 12×12 定尺寸容器居中放圆点 ⇒
+        //   "独立 x:Name + 不因标签宽度挤压"这条不变量保留，但**不再把错误尺寸固化成契约**。
+        Assert.Contains(@"x:Name=""FooterNetPanel"" Grid.Column=""7""", xaml);          // 源连接组独立存在
+        Assert.DoesNotContain(@"x:Name=""FooterNetPanel"" Grid.Column=""7"" Width=", xaml); // 且不再固定宽
+        Assert.Contains(@"<Grid MinWidth=""12"" Width=""12"" Height=""12"" VerticalAlignment=""Center"">", xaml); // 圆点容器居中且不可缩
+        Assert.Contains(@"VerticalAlignment=""Center"" MinWidth=""64""", xaml);  // 整组保底宽：Auto 列不得把圆点压扁
         Assert.Equal(4, Regex.Matches(xaml, @"Width=""124""").Count);      // 四个动作按钮各自定宽
     }
 
