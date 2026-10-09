@@ -33,3 +33,10 @@ Get-FileHash .\PCMigSetup-0.1.0.exe -Algorithm SHA256
 ```
 
 当前正式稳定版永远是 **v0.5.3**；历史版本仅代表当时状态，不保证适配现在的环境。
+## 勘误（2026-10-09）
+
+- 首次清单提交（23cde6a06724d8ca6c4966a3279e31c8d1e02774，也是 49 个 legacy-binary/vX.Y.Z Tag 指向的提交）
+  里的 MANIFEST-OF-TRUTH-49.tsv 有两处不完整：单版日志的文件名少了  前缀、ChangelogSHA256 列是空的。
+- 本提交只补这两列（以及 SumsName 的  前缀）。**安装包的字节与 SHA256 一个都没变**，它们在补发前已逐包独立复算并与本地权威原件 49/49 一致。
+- 为避免移动任何已推送的 Tag，49 个 Tag 仍指向首次清单提交；Tag 注释里声明的是**安装包** SHA256，与本勘误无冲突。
+- 阅读请以本分支最新提交的清单为准（下面 [MANIFEST-OF-TRUTH-49.tsv](MANIFEST-OF-TRUTH-49.tsv) 链接即最新版）。
