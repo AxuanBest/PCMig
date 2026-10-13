@@ -37,6 +37,36 @@ internal static class D2TestSupport
     }
 
     /// <summary>
+    /// 等待管线静默（**best-effort 只等待，不断言**）。
+    ///
+    /// 为什么需要它：关闭排空的预算是有界的（见 <see cref="DiagnosticRuntimeOptions.ShutdownBudgetMs"/>），
+    /// 而「把队列里的条目搬空」要求分支泵真的被线程池调度到。测试主机在重负载下
+    /// （多个测试程序集并行、线程池被同步等待占满）线程注入速率约 1 线程/秒，
+    /// 泵可能几十秒拿不到线程——此时关闭会**诚实地**记 drain-budget-exhausted 并放弃
+    /// （产品行为正确：有界排空 + 不写 clean marker）。
+    ///
+    /// 所以在「期望关闭时管线本来就是空的」用例里，先把管线等到静默再关闭：这只是把
+    /// 「关闭」放回它本来的语义位置（空管线），**不削弱任何断言**——调用方照样断言
+    /// CleanShutdown / CleanMarkerWritten。超时返回 false 由调用方决定是否在意。
+    ///
+    /// **不要**把它塞进 <see cref="Shutdown"/>：那里有故意带积压关闭的用例
+    /// （D61BoundednessTests / D63ViewerQueueCliffTests 等）。
+    /// </summary>
+    public static bool WaitForPipelineQuiescent(DiagnosticRuntime runtime, int timeoutMs = 20000)
+        => WaitUntil(() =>
+        {
+            var h = runtime.GetHealthSnapshot();
+            return h.IngressCriticalDepth == 0
+                && h.IngressOperationalDepth == 0
+                && h.IngressVerboseDepth == 0
+                && h.QueueDepthWriter == 0
+                && h.QueueDepthAnalyzer == 0
+                && h.QueueDepthViewer == 0
+                && h.AnalyzerPending == 0
+                && h.UiPending == 0;
+        }, timeoutMs);
+
+    /// <summary>
     /// 造一条合成事件。**默认投递类是 Operational**（正常流量）：
     /// 早期版本默认用了 Verbose 事件（HealthSummary），导致 fan-out 正确地跳过
     /// analyzer/viewer 时被误读成"隔离失效"——默认值必须是"普通事件"，Verbose 要显式指定。

@@ -4,6 +4,7 @@ using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using PCMig.Core.Util;
 using PCMig.WinUI.Presentation;
 using Windows.Foundation;
 
@@ -218,32 +219,37 @@ public sealed partial class ShellHintCard : UserControl
             ? actual
             : (_targetSurfaceHeight > 0d ? _targetSurfaceHeight : actual);
 
-        // 内容变化小于阈值就完全不动作（不能每出现一行字就小幅变高）。
-        if (current > 0d && Math.Abs(target - current) < HeightChangeThreshold) return;
+        // ★ P1-09 / R10（30 次变化不闪）★
+        //   本拍到底该做什么（不动 / 合并进在途收缩 / 只落终态 / 揭示 / 缩回）**不再在 UI 层用 if 拼**，
+        //   而是交给平台无关的纯策略 <see cref="HintCardMotionPolicy"/> 决定：
+        //   它没有 WinUI 依赖，所以"同一目标连来 30 次只动一次""±1 DIP 抖动一次都不动"
+        //   "收缩在途只合并不叠动画"这些反闪动性质可以在测试里真的跑一遍（真机只负责执行）。
+        var decision = HintCardMotionPolicy.Decide(
+            target, current, _surfaceTransitionActive,
+            HeightChangeThreshold,
+            canAnimate: IsLoaded && HintCardSurface.XamlRoot is not null);
 
-        var oldHeight = current > 0d ? current : target;
-
-        // 收缩在途时的新收缩请求：就地合并到最新目标（收尾写高时读的就是它），不再叠一段动画。
-        if (_surfaceTransitionActive && target < oldHeight)
+        switch (decision.Action)
         {
-            _targetSurfaceHeight = target;
-            return;
+            case HintCardMotionAction.None:
+                return;   // 差值过小 / 目标无效：完全不动（不能每出现一行字就小幅变高）。
+
+            case HintCardMotionAction.MergeIntoInFlightCollapse:
+                // 收缩在途时的新收缩请求：就地合并到最新目标（收尾写高时读的就是它），不再叠一段动画。
+                _targetSurfaceHeight = decision.Target;
+                return;
         }
 
-        _pendingMotionOldHeight = oldHeight;
-        _targetSurfaceHeight = target;
+        _pendingMotionOldHeight = decision.OldHeight;
+        _targetSurfaceHeight = decision.Target;
 
-        // ★ 写入时机（本次返修）★
-        //   增长：先把布局写到位，动画只负责把"多出来的顶部"揭示出来（掩码能掩盖变大）。
-        //   收缩：**不在这里写**，交给动画收尾 —— 掩码不能重建已经消失的像素，先写矮会让掩码算错、
+        // ★ 写入时机（2026-10-08 二次返修）★
+        //   增长/落终态：先把布局写到位，动画只负责把"多出来的顶部"揭示出来（掩码能掩盖变大）。
+        //   收缩（Collapse）：**不在这里写**，交给动画收尾 —— 掩码不能重建已经消失的像素，先写矮会让掩码算错、
         //        动画终点只剩底部一条，收尾摘掩码时整卡弹回（这就是真机看到的"闪动"）。
-        var shrinking = target < oldHeight;
-        if (!shrinking || !IsLoaded || HintCardSurface.XamlRoot is null)
-        {
-            ApplySurfaceHeight(target);
-        }
+        if (decision.WritesHeightNow) ApplySurfaceHeight(decision.Target);
 
-        if (IsLoaded) StartPendingMotion();
+        if (decision.PlaysMotion) StartPendingMotion();
     }
 
     /// <summary>

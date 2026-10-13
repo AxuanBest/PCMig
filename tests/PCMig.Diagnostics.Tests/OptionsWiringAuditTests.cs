@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using PCMig.Diagnostics;
 using Xunit;
 
@@ -112,9 +113,40 @@ public sealed class OptionsWiringAuditTests
         sb.AppendLine();
 
         var docPath = Path.Combine(RepoRoot(), "docs", "诊断系统实施-配置项接线审计.md");
-        File.WriteAllText(docPath, sb.ToString(), new UTF8Encoding(false));
+        // ★ 并行安全性 ★ 本用例会在**仓库里生成**这份文档，而同一个测试程序集可能被多个进程
+        //   同时跑（重负载验证就是 5 路并行）——直接 File.WriteAllText 会撞上
+        //   `IOException : The process cannot access the file ... because it is being used by another process`
+        //   （实测出现过）。这里用**跨进程命名互斥**把生成动作串行化，并采用"临时文件 + 原子替换"，
+        //   读者不会看到半截文档。断言不变（文档必须存在且非空）。
+        using (var gate = new Mutex(false, @"PCMig.OptionsWiringAudit.doc"))
+        {
+            var held = false;
+            try { held = gate.WaitOne(TimeSpan.FromMinutes(2)); }
+            catch (AbandonedMutexException) { held = true; }
+            try { WriteDocAtomically(docPath, sb.ToString()); }
+            finally { if (held) gate.ReleaseMutex(); }
+        }
 
         // 该文档必须存在且非空（防止"审计只在内存里"）。
         Assert.True(new FileInfo(docPath).Length > 0, "配置项审计文档未生成");
+    }
+
+    /// <summary>临时文件 + 原子替换：并行读者不会读到半截文档。</summary>
+    private static void WriteDocAtomically(string docPath, string content)
+    {
+        var tmp = docPath + ".tmp-" + Guid.NewGuid().ToString("N")[..8];
+        File.WriteAllText(tmp, content, new UTF8Encoding(false));
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.Move(tmp, docPath, overwrite: true);
+                return;
+            }
+            catch (IOException) when (attempt < 60)
+            {
+                Thread.Sleep(50);   // 文件被杀毒/索引器短暂持有 ⇒ 退避重试（不改变要生成的内容）
+            }
+        }
     }
 }

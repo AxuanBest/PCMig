@@ -44,3 +44,5 @@ lab/*.iso
 # 刻意**不**加 *.trx 通配：归档类 .trx 证据放在 /archive/ 下（已被上一条覆盖），
 # 加通配会连显式归档的证据一起拦截，将来入库须 git add -f（隐形陷阱）。
 **/TestResults/
+# 候选版构建输出（本地验收用，不进仓库）
+dist-candidate-*/

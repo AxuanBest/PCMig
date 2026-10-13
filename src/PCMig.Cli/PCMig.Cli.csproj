@@ -26,6 +26,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- ★ D7 参数契约测试 ★ 让 PCMig.Cli.Tests 直接测 internal 的 CliArgs，
+         不必为了测试把类型改成 public（改动最小原则）。 -->
+    <InternalsVisibleTo Include="PCMig.Cli.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- 更新日志随命令行程序内置（程序目录没有 更新日志.txt 时的兜底） -->
     <EmbeddedResource Include="..\..\docs\更新日志.md">
       <LogicalName>PCMig.Cli.CHANGELOG.md</LogicalName>

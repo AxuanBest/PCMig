@@ -61,9 +61,51 @@ public sealed class Planner
             var relative = obj.Kind == ObjectKind.RootFiles || sourceRoot == null
                 ? name
                 : Path.GetRelativePath(sourceRoot, obj.SourcePath);
+
+            // ★ P1-07(3) ★ 绝对路径混入保护：相对路径若带根（跨盘/跨共享，即源根不是它的祖先），
+            //   Path.Combine 会**整体替换**目标根（例如 C:\Users\D970 直接逃出 TargetRoot）⇒ 退化为按名称映射。
+            if (Path.IsPathRooted(relative)) relative = name;
+
+            // ═══════════ ★ P1-07 ★ 目录选择的目标映射语义 ═══════════
+            //   旧行为：一律按「源根相对结构」映射，于是选中 \\host\Users\d970 会得到
+            //   C:\Users\D970\d970（多嵌一层同名目录）——现场 a632/be58 实测就是这一层 d970。
+            //   新行为：**单个**自定义目录选择默认「内容直达」——所选文件夹的内部内容直接落在 TargetRoot。
+            //   多选时不做内容直达（不同来源的同名文件会静默合并且不可辨识）。
+            var contentDirect = !string.Equals(job.Options.SelectedFolderMapping,
+                Models.MigrationOptions.SelectedFolderMappingKeepFolder, StringComparison.OrdinalIgnoreCase);
+            var singleSelection = job.CustomSelections.Count == 1;
+            var isSelectionItself = singleSelection
+                && obj.Kind != ObjectKind.RootFiles
+                && Util.PathNorm.SameDirectory(job.CustomSelections[0], obj.SourcePath);
+            if (contentDirect && isSelectionItself) relative = ".";
+
             var target = obj.Kind == ObjectKind.RootFiles || relative == "."
                 ? job.TargetRoot
                 : Path.Combine(job.TargetRoot, relative);
+
+            // ★ P1-07(3) ★ 映射保护：目标与源同一位置、或互相包含（自拷贝/路径穿越）时不得按原样执行。
+            //   回退到「保留文件夹」映射并**留审计**；若回退后仍然重叠，只记录"需人工确认"，由
+            //   P0-02 的四态结论兜底（绝不因为映射可疑就悄悄声称成功）。
+            var mappingUnsafe = false;
+            if (obj.Kind != ObjectKind.RootFiles && Util.PathNorm.Overlaps(target, obj.SourcePath))
+            {
+                var fallbackRelative = sourceRoot == null ? name : Path.GetRelativePath(sourceRoot, obj.SourcePath);
+                var fallbackTarget = fallbackRelative == "." ? job.TargetRoot : Path.Combine(job.TargetRoot, fallbackRelative);
+                if (!Util.PathNorm.Overlaps(fallbackTarget, obj.SourcePath))
+                {
+                    plan.ExcludedByPolicy.Add(
+                        $"映射保护: {obj.ObjectId} 目标与源重叠，已回退为保留文件夹映射 -> {fallbackTarget}");
+                    target = fallbackTarget;
+                }
+                else
+                {
+                    // 回退后仍重叠 ⇒ 本计划**不排这个对象**（改为人工确认），绝不排一个「自己拷自己」的执行项。
+                    plan.ExcludedByPolicy.Add(
+                        $"映射保护: {obj.ObjectId} 源与目标位置重叠，本计划不排此对象（需人工确认）: {obj.SourcePath}");
+                    mappingUnsafe = true;
+                }
+            }
+            if (mappingUnsafe) continue;
 
             plan.Objects.Add(new PlannedObject
             {
@@ -85,6 +127,10 @@ public sealed class Planner
             if (sourceRoot is null) objectsWithoutSourceRoot++;
             if (opt.SplitLargeFiles && obj.HasLargeFiles) restartableObjects++;
         }
+
+        // ★ P1-07(1) ★ 多选/多源的可辨识映射：不同的源若映射到**同一个目标目录**，绝不静默合并/覆盖，
+        //   各自加上可辨识的来源前缀（UNC ⇒ 主机_共享，本地盘 ⇒ 盘符），并在计划里留审计。
+        DisambiguateCollidingTargets(plan, job);
 
         // 记录策略排除（写进 plan 供审计；真正执行由 robocopy /XD /XF 完成）
         plan.ExcludedByPolicy.AddRange(matrix.ExcludedDirectoryNames.Select(n => $"目录: {n}"));
@@ -129,6 +175,98 @@ public sealed class Planner
         ObjectKind.RootFiles => 3,
         _ => 9
     };
+
+    /// <summary>
+    /// ★ P1-07(1) ★ 目标目录撞车保护：**不同源**（SourcePath 不同）映射到同一个目标目录时，
+    /// 直接执行会把两个来源的同名文件静默合并/覆盖，且事后无法分辨哪个文件来自哪里。
+    /// 这里为撞车组各自加上来源前缀（UNC ⇒ 主机_共享，本地盘 ⇒ 盘符）并留下审计行。
+    /// 同一个 SourcePath 的重复对象不算撞车（不改变语义）。
+    /// </summary>
+    private static void DisambiguateCollidingTargets(MigrationPlan plan, JobDefinition job)
+    {
+        // RootFiles（盘符/共享根层的散落文件）落在目标根本身是**设计如此**，不算"不同来源撞车"：
+        // 它们与"选中文件夹的内容直达目标根"本来就要合在一起（用户就是这么选的）。
+        // ★ D1-d / P1-08 ★ 但"根层散落文件"与"**另一个来源**的内容直达对象"同时落目标根时，
+        //   同名文件会在目标根这一层静默互相覆盖，且事后无法分辨哪个文件来自哪里。
+        //   ⇒ 保持**用户显式选择**的那个对象的内容直达映射不动，把**自动扫描得出**的散落文件
+        //     落到目标根下带来源前缀的子目录里，并留审计行（谁都不丢，谁也不覆盖谁）。
+        //   同一个来源根不算撞车（例如整盘对象 + 该根自己的散落文件），语义保持原样。
+        var contentDirectRoots = plan.Objects
+            .Where(o => o.Kind != ObjectKind.RootFiles && Util.PathNorm.SameDirectory(o.TargetPath, job.TargetRoot))
+            .ToList();
+
+        if (contentDirectRoots.Count > 0)
+        {
+            var rootFilesAtRoot = plan.Objects
+                .Where(o => o.Kind == ObjectKind.RootFiles && Util.PathNorm.SameDirectory(o.TargetPath, job.TargetRoot))
+                .ToList();
+
+            foreach (var rf in rootFilesAtRoot)
+            {
+                var rfSource = Util.PathNorm.ForCompare(rf.SourcePath);
+                var foreign = contentDirectRoots.FirstOrDefault(o =>
+                    !string.Equals(Util.PathNorm.ForCompare(o.SourcePath), rfSource, StringComparison.OrdinalIgnoreCase));
+
+                if (foreign is null) continue;   // 同源根 ⇒ 不是多源撞车
+
+                var prefix = SourceRootLabel(FindSourceRoot(job, rf.SourcePath));
+                var newTarget = Path.Combine(job.TargetRoot, prefix);
+                plan.ExcludedByPolicy.Add(
+                    $"映射保护: {rf.ObjectId} 根目录散落文件与另一来源的内容直达对象（{foreign.ObjectId}）" +
+                    $"同落目标根，已按来源前缀 '{prefix}' 区分 -> {newTarget}");
+                rf.TargetPath = newTarget;
+            }
+        }
+
+        var colliding = plan.Objects
+            .Where(o => o.Kind != ObjectKind.RootFiles)
+            .GroupBy(o => Util.PathNorm.ForCompare(o.TargetPath), StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Select(x => Util.PathNorm.ForCompare(x.SourcePath))
+                         .Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            .ToList();
+
+        foreach (var group in colliding)
+        {
+            foreach (var obj in group)
+            {
+                var prefix = SourceRootLabel(FindSourceRoot(job, obj.SourcePath));
+                string relative;
+                try { relative = Path.GetRelativePath(job.TargetRoot, obj.TargetPath); }
+                catch { continue; }
+                if (Path.IsPathRooted(relative))
+                    relative = Path.GetFileName(obj.SourcePath.TrimEnd('\\', '/'));
+
+                var newTarget = relative == "." || relative.Length == 0
+                    ? Path.Combine(job.TargetRoot, prefix)
+                    : Path.Combine(job.TargetRoot, prefix, relative);
+                plan.ExcludedByPolicy.Add(
+                    $"映射保护: {obj.ObjectId} 与其它来源撞到同一目标目录 {obj.TargetPath}，" +
+                    $"已按来源前缀 '{prefix}' 区分 -> {newTarget}");
+                obj.TargetPath = newTarget;
+            }
+        }
+    }
+
+    /// <summary>来源根的可辨识标签（只用于拼路径，故做非法字符净化）：UNC ⇒ 主机_共享，本地盘 ⇒ 盘符。</summary>
+    private static string SourceRootLabel(string? root)
+    {
+        if (string.IsNullOrWhiteSpace(root)) return "src";
+        var r = Util.PathNorm.ForCompare(root);
+        if (r.StartsWith("\\\\", StringComparison.Ordinal))
+        {
+            var parts = r.TrimStart('\\').Split('\\', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2) return Sanitize(parts[0] + "_" + parts[1]);
+            if (parts.Length == 1) return Sanitize(parts[0]);
+        }
+        var leaf = Path.GetFileName(r);
+        return Sanitize(leaf.Length > 0 ? leaf : r.Replace(":", ""));
+    }
+
+    private static string Sanitize(string s)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) s = s.Replace(c, '_');
+        return s.Length == 0 ? "src" : s;
+    }
 
     private static string? FindSourceRoot(JobDefinition job, string objectPath)
     {

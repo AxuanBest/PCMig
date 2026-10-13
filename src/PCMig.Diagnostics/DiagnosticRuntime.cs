@@ -63,6 +63,13 @@ public readonly record struct DiagnosticExportCutoff(
     /// <summary>缺口跟踪是否溢出（溢出即"说不清"，不得声称完整）。</summary>
     public bool TrackingOverflowed { get; init; }
 
+    /// <summary>
+    /// 导出时被**有意排除**的"截止点之后才新建的段"个数（在线系统在封段后继续落事件属正常）。
+    /// ★ 它不是丢失 ★：这些段的内容按定义在 <see cref="CoverageEndSequence"/> 之外，
+    /// 因此绝不计入 <see cref="AnyTailLoss"/>，只是在 manifest 里如实记数、便于审计。
+    /// </summary>
+    public int PostCutoffSegmentsExcluded { get; init; }
+
     /// <summary>本包依赖的证据是否真的连续完整（无未覆盖尾巴、无洞、未溢出、封段成功）。</summary>
     public bool IsEvidenceContiguous => !AnyTailLoss && GapCount == 0 && !TrackingOverflowed;
 
@@ -1092,7 +1099,23 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
         //      关窗时"还没等到"是正常的，不是缺陷）。
         _expectations.CloseAll("session-shutdown");
 
-        var perBranch = TimeSpan.FromMilliseconds(Math.Max(50, totalBudget.TotalMilliseconds / 6));
+        // ★ 负载敏感修正（本轮实测复现）★
+        //   旧实现给每个分支固定切 `totalBudget / 6` 的预算（默认 800 ms ⇒ 每支 133 ms）。
+        //   在**重负载**机器上（多个测试进程 / 现场机器同时跑别的活），线程池调度抖动会让
+        //   某个分支的 pump 晚几十到几百毫秒才被调度，于是"其实只是还没轮到"被记成
+        //   `abandoned > 0` ⇒ `drain-budget-exhausted` ⇒ **假的不干净关闭**。
+        //   现在改成「剩余预算 ÷ 剩余分支数」：提前排空的分支把没花完的时间让给慢分支。
+        //   **总时长仍被 totalBudget 封顶**；abandoned 记账语义与 clean 判据一字不改——
+        //   真的排不完时照样如实放弃（预算耗尽后剩下的分支预算为 0，立刻如实记账）。
+        var drainClock = Stopwatch.StartNew();
+        var branchesLeft = 7;   // 3 个入口 + 3 个收件箱 + writer 收件箱
+        TimeSpan NextDrainBudget()
+        {
+            var budget = NextBranchDrainBudget(totalBudget, drainClock.Elapsed, branchesLeft);
+            branchesLeft = Math.Max(1, branchesLeft) - 1;
+            return budget;
+        }
+
         var abandoned = 0;
         var drained = 0;
 
@@ -1102,18 +1125,18 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
 
         foreach (var branch in new[] { _ingressCritical, _ingressOperational, _ingressVerbose })
         {
-            var result = await StopBranchAsync(branch, perBranch).ConfigureAwait(false);
+            var result = await StopBranchAsync(branch, NextDrainBudget()).ConfigureAwait(false);
             abandoned += result.Abandoned;
             drained += result.Drained;
         }
 
         foreach (var branch in new[] { _analyzerInbox, _viewerInbox, _incidentInbox })
         {
-            var result = await StopBranchAsync(branch, perBranch).ConfigureAwait(false);
+            var result = await StopBranchAsync(branch, NextDrainBudget()).ConfigureAwait(false);
             abandoned += result.Abandoned;
         }
 
-        var writerResult = await StopBranchAsync(_writerInbox, perBranch).ConfigureAwait(false);
+        var writerResult = await StopBranchAsync(_writerInbox, NextDrainBudget()).ConfigureAwait(false);
         abandoned += writerResult.Abandoned;
         drained += writerResult.Drained;
 
@@ -1217,6 +1240,29 @@ public sealed class DiagnosticRuntime : IAsyncDisposable, IDiagnosticSink
         => branch is null
             ? new BranchDrainResult("none", 0, 0)
             : await branch.StopAsync(budget).ConfigureAwait(false);
+
+    /// <summary>
+    /// 关闭排空时"下一个分支"能拿到的预算：<c>剩余预算 ÷ 剩余分支数</c>，下限 50 ms，
+    /// 且**绝不**超过剩余预算（预算见底后返回 <see cref="TimeSpan.Zero"/>，由 BoundedBranch 如实记账放弃）。
+    ///
+    /// ★ 为什么不是固定切片（本轮负载实测复现的坑）★
+    /// 旧实现给每个分支固定切 <c>totalBudget / 6</c>（默认 800 ms ⇒ 每支 133 ms，且 7 支合计 931 ms
+    /// 本身就已经超过总预算）。重负载机器上（多个测试进程、现场机器同时跑别的活）线程池调度抖动会让
+    /// 某个分支的 pump 晚几十到几百毫秒才被调度，于是"其实只是还没轮到"被记成 <c>abandoned &gt; 0</c>
+    /// ⇒ <c>drain-budget-exhausted</c> ⇒ <b>假的不干净关闭</b>。
+    /// 改成按剩余份额分配后，提前排空的分支把没花完的时间让给慢分支；
+    /// 总时长仍被 totalBudget 封顶，abandoned 记账语义与 clean 判据一字未改。
+    /// </summary>
+    internal static TimeSpan NextBranchDrainBudget(TimeSpan totalBudget, TimeSpan elapsed, int branchesLeft)
+    {
+        var remainingBranches = Math.Max(1, branchesLeft);
+        var left = totalBudget - elapsed;
+        if (left <= TimeSpan.Zero) return TimeSpan.Zero;
+        var share = TimeSpan.FromMilliseconds(left.TotalMilliseconds / remainingBranches);
+        var floor = TimeSpan.FromMilliseconds(50);
+        var want = share < floor ? floor : share;
+        return want > left ? left : want;
+    }
 
     public async ValueTask DisposeAsync()
     {

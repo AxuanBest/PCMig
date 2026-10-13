@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using PCMig.Core.Models;
+using PCMig.Core.Verify;
 using PCMig.WinUI.Presentation;
 using PCMig.WinUI.Diagnostics;
 using PCMig.Diagnostics.Abstractions;
@@ -41,6 +42,13 @@ public sealed partial class Step4ResultPage : UserControl
     /// 空 = 无拒绝。成功进入验证时清空。
     /// </summary>
     private string _gateReason = string.Empty;
+
+    // ★ PMML 返修（2026-10-11）★ 这里曾有 `private VerifyDetailWindow? _verifyWindow;`（P1-12 的独立二级窗口）。
+    // 验证的进度/结论现在由 Shell 内的唯一面板 `VerificationProgressPanel` 承担，
+    // 本页不再持有任何窗口句柄：面板的装载/打开/收起全由 `EnsureVerifyPanel` + Shell 编排完成。
+
+    /// <summary>当前验证的取消源（只有页面层持有它 ⇒ 窗口的"取消"才真的能取消引擎）。</summary>
+    private System.Threading.CancellationTokenSource? _verifyCts;
 
     public Step4ResultPage()
     {
@@ -146,8 +154,8 @@ public sealed partial class Step4ResultPage : UserControl
         if (_gateReason.Length > 0)
             StateLineText.Text = "⛔ " + _gateReason + "　" + StateLineText.Text;
 
-        // ── 按钮可用性：全部来自 VM 的真实布尔量，页面不自行推断 ──
-        ToolbarVerify.IsEnabled = session.CanVerifyNow && !session.IsRunning;
+        // 「验证完整性」现在只是打开只读工具面板；可否开始验证由面板内的显式开始动作和 VM 真闸门决定。
+        ToolbarVerify.IsEnabled = true;
         ToolbarRepair.IsEnabled = session.CanRepair;
         ToolbarOverwrite.IsEnabled = session.CanRepair;
         // ★ A6（F2，2026-09-30 巡检修复）★ 复选框的标签是**独立 TextBlock**（XAML :94），
@@ -173,49 +181,105 @@ public sealed partial class Step4ResultPage : UserControl
 
     // ────────────────────────── 动作：验证 / 修复 / 报告 / 目标 / 恢复 / 日志目录 ──────────────────────────
 
-    /// <summary>
-    /// 「验证完整性」：**页面层先过闸门**（与 VM 的 EvaluateVerifyGateAsync 同一判定，纵深两道），
-    /// 通过后走 VM 的 VerifyAsync（L1 文件数/字节对账；结论文案由 VM 统一产出，绝不说成"完整性验证通过"）。
-    /// </summary>
-    private async void ToolbarVerify_Click(object sender, RoutedEventArgs e)
+    /// <summary>只打开既有验证浮层；打开本身绝不执行闸门、验证或任何 IO。</summary>
+    private void ToolbarVerify_Click(object sender, RoutedEventArgs e)
     {
         var session = _session;
-        // ★ D6.1 §11 ★ 观察既有页面闸门（EvaluateVerifyGateAsync）的结果，不新增判据。
-        using var trace = ActionTrace.Begin(ActionKinds.Verify, ControlIds.Step4Verify, "click", "Step4ResultPage");
+        using var trace = ActionTrace.Begin(ActionKinds.Verify, ControlIds.Step4Verify, "open-panel", "Step4ResultPage");
         trace.Eligibility(session is not null, session is not null ? "allowed" : "no-session");
         if (session is null) { trace.Reject("no-session", "Step4ResultPage"); return; }
-        ToolbarVerify.IsEnabled = false;   // 防重入；结束后由 PushState 恢复真实可用性
+        var panel = EnsureVerifyPanel(session);
+        if (panel is null) { trace.Reject("panel-unavailable", "Step4ResultPage"); return; }
+        trace.Complete(DiagnosticOutcome.Succeeded, "panel-opened");
+    }
+
+    /// <summary>唯一显式 L1 启动入口；互斥覆盖整个验证生命周期，而不仅是按钮视觉状态。</summary>
+    private async Task StartVerificationAsync(MigrationSessionViewModel session, VerificationProgressPanel panel)
+    {
+        if (_verifyCts is not null) return;
+        var cts = new System.Threading.CancellationTokenSource();
+        _verifyCts = cts;
+        using var trace = ActionTrace.Begin(ActionKinds.Verify, ControlIds.Step4Verify, "start", "Step4ResultPage");
         try
         {
-            var gate = await session.EvaluateVerifyGateAsync();
-            trace.Eligibility(gate.CanVerify, gate.CanVerify ? "allowed" : "gate-blocked");
-            if (!gate.CanVerify)
-            {
-                _gateReason = gate.Reason;
-                session.AppendLog("WARN", "拒绝验证（页面闸门）：" + gate.Reason);
-                trace.Reject("gate-blocked", "Step4ResultPage");
-                return;
-            }
-
-            _gateReason = string.Empty;
+            panel.BeginRun();
+            panel.BeginPreflight();
+            var progress = new Progress<string>(panel.ApplyLine);
+            var detail = new Progress<VerifyProgressSnapshot>(panel.ApplySnapshot);
+            panel.SetCancelHandler(() => { try { cts.Cancel(); } catch { } });
             trace.Started();
             trace.Expect("verify.v1", "verify.external");
-            await session.VerifyAsync(VerifyLevel.L1_CountSize);
+            await session.VerifyAsync(VerifyLevel.L1_CountSize, progress, cts.Token, detail);
             trace.Confirm("verify.v1", "verify.external");
-            // D6.3 §11：终点结果 = VM 记录的**实际验证业务结论**（报告 OverallPass / 取消 / 故障），
-            // 不是"VerifyAsync 返回了"（审计 P1-4）。
             trace.Finish(session.LastVerifyOutcome, "Step4ResultPage");
+            if (session.LastVerifyOutcome.ReasonCode == "verify-gate-blocked")
+                panel.FinishBlocked(session.LastVerifyResultText);
+            else
+                panel.FinishWith(session.LastVerifyReport, session.LastVerifyResultText,
+                    session.LastVerifyOutcome.Outcome == DiagnosticOutcome.Canceled, SourcePathMap(session));
         }
         catch (Exception ex)
         {
-            // 观察只记录现有异常路径（不改吞/抛语义）。
-            trace.Fault(ex, "ToolbarVerify");
+            trace.Fault(ex, "StartVerificationAsync");
             session.AppendLog("ERROR", "验证异常：" + ex.Message);
+            panel.FinishWith(null, "验证异常：" + ex.Message, canceled: false);
         }
         finally
         {
+            if (ReferenceEquals(_verifyCts, cts)) _verifyCts = null;
+            cts.Dispose();
             PushState();
         }
+    }
+
+    /// <summary>
+    /// ★ PMML 返修（2026-10-11）★ 取得并打开验证完整性面板（Shell 内的唯一实例）。
+    ///
+    /// 与旧独立二级窗口的差别：
+    ///   · 面板属于**应用内工具浮层**（与诊断中心同一 PMML 家族），锚点 = 本页真实的「验证完整性」按钮，
+    ///     开合与定位由 Shell 的 FluidZoom + TAOP 负责 —— 本页只负责"装载作业文案 + 打开 + 喂数据"；
+    ///   · 不存在"面板被用户关掉"的生命周期问题：打开是幂等的，收起后再点入口仍然是同一个面板。
+    ///
+    /// 面板取不到（极端环境：Shell 还没构造 / 类型不符）返回 null ⇒ 调用方必须仍然正常跑验证
+    /// （真实计数只是**附加视图**，绝不因为面板开不出来就阻断验证）。
+    /// </summary>
+    private VerificationProgressPanel? EnsureVerifyPanel(MigrationSessionViewModel session)
+    {
+        try
+        {
+            if (App.MainWindowInstance is not MainWindow shell) return null;
+            var panel = shell.VerificationPanel;
+            panel.Attach(session.JobIdText, "L1 文件数与字节对账");
+            // ★ m03985 §UI-C/§UI-D ★ 「打开验证报告」的处理器由页面层提供：面板自己不做文件操作，
+            //   只显示结果（成功 / 已生成本机路径但浏览器打不开 / 还没有结论）。
+            panel.SetOpenReportHandler(() => session.OpenVerifyReportAsync());
+            panel.SetStartHandler(() => StartVerificationAsync(session, panel));
+            panel.SetCancelHandler(() => { try { _verifyCts?.Cancel(); } catch { } });
+            if (_verifyCts is null)
+            {
+                if (session.LastVerifyReport is not null)
+                    panel.ShowPreviousResult(session.LastVerifyReport, session.LastVerifyResultText, SourcePathMap(session));
+                else
+                    panel.ShowIdle();
+            }
+            shell.ShowVerificationPanel(ToolbarVerify);
+            session.AppendLog("INFO", $"验证面板已打开（{DateTime.Now:HH:mm:ss}）。");
+            return panel;
+        }
+        catch (Exception ex)
+        {
+            session.AppendLog("WARN", "验证面板打开失败（验证照常进行）：" + ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>ObjectId → 源路径（来自计划；窗口只用来显示"在核对谁"，取不到就空着，不臆造）。</summary>
+    private static IReadOnlyDictionary<string, string> SourcePathMap(MigrationSessionViewModel session)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in session.Objects)
+            if (!string.IsNullOrWhiteSpace(row.ObjectId)) map[row.ObjectId] = row.SourcePath;
+        return map;
     }
 
     /// <summary>
@@ -378,6 +442,10 @@ public sealed partial class Step4ResultPage : UserControl
     /// </summary>
     private async void OnFailDetailClick(object sender, RoutedEventArgs e)
     {
+        // ★ P0-06(4) ★ ContentDialog 的既有硬限制：同一时刻只允许一个对话框。
+        //   本处理器是 `async void` ⇒ ShowAsync 抛出来没有调用者能接住，直接崩进程。
+        try
+        {
         if (sender is not FrameworkElement { DataContext: SessionFailItem item }) return;
 
         // 没有全文就不该有按钮（可见性绑的是同一个布尔 CanShowDetail）；万一被点到，也只能如实显示已有的截断文案。
@@ -405,6 +473,8 @@ public sealed partial class Step4ResultPage : UserControl
             XamlRoot = XamlRoot,
         };
         await dialog.ShowAsync();
+        }
+        catch (Exception ex) { UiFaultGuard.Report("Step4ResultPage.OnFailDetailClick", ex, m => _session?.AppendLog("ERROR", m)); }
     }
 
     /// <summary>Compact 时顶部操作条折为两行（验证/修复/覆盖 一行，报告/文件夹/恢复 一行）；纯视觉。</summary>

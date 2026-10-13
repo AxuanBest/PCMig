@@ -1,4 +1,4 @@
-﻿using Serilog;
+using Serilog;
 using Serilog.Core;
 using Serilog.Events;
 using Serilog.Formatting.Compact;
@@ -16,10 +16,38 @@ public static class LogBootstrap
 {
     public const string AppName = "PCMig";
 
-    public static string AppLogDir =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), AppName, "Logs");
+    /// <summary>
+    /// 应用级日志目录：默认 <c>%ProgramData%\PCMig\Logs</c>。
+    ///
+    /// ★ P1-10 ★ 环境变量 <c>PCMIG_LOG_DIR</c> 可覆盖它，**仅供测量/隔离复验**：
+    /// 不设置时生产路径逐位不变（仍是 ProgramData）；设置后应用级日志全部落到指定目录，
+    /// 这样"启动计时/安装计时"这类复验不会往真实用户的日志目录里写东西。
+    /// </summary>
+    public static string AppLogDir
+    {
+        get
+        {
+            var overridden = Environment.GetEnvironmentVariable("PCMIG_LOG_DIR");
+            return string.IsNullOrWhiteSpace(overridden)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), AppName, "Logs")
+                : overridden!;
+        }
+    }
 
     public static string JobLogDir(string jobDir) => Path.Combine(jobDir, "logs");
+
+    /// <summary>
+    /// ★ P1-11 ★ 单个日志文件的体积上限（8 MB）。配合 <c>rollOnFileSizeLimit: true</c> 使用：
+    /// 达到上限就滚动出新文件（<c>app-YYYYMMDD_001.log</c>），而不是继续把同一个文件写大。
+    ///
+    /// 为什么必须有：Serilog File sink 的默认上限是 **1 GB**，且默认 <c>rollOnFileSizeLimit = false</c> ——
+    /// 达到上限后**静默停止写入**。现场实测单任务 <c>job-*.log</c> 23 MB、<c>job-*.jsonl</c> 42 MB
+    /// 都是**单个文件**（逐文件 robocopy 输出被逐行复制进日志），排障时打开/检索都慢，
+    /// 日志目录也会被日志自身撑爆。上限 + 滚动 + 保留份数三者合起来给出硬边界：
+    /// 应用级 31 份、任务级 10 份 ⇒ 单目录最多约 31×8 MB / 10×8 MB。
+    /// （逐行采样另见 <see cref="RobocopyOutputLogPolicy"/> —— 减少写入量，与本上限互补。）
+    /// </summary>
+    public const long LogFileSizeLimitBytes = 8L * 1024 * 1024;
 
     /// <summary>创建应用级根 Logger（控制台开关由调用方决定）。</summary>
     public static Serilog.ILogger CreateAppLogger(bool console, MemorySink? memorySink = null, LogEventLevel level = LogEventLevel.Debug)
@@ -34,6 +62,8 @@ public static class LogBootstrap
                 Path.Combine(AppLogDir, "app-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 31,
+                fileSizeLimitBytes: LogFileSizeLimitBytes,
+                rollOnFileSizeLimit: true,
                 shared: true, // 多实例/前进程残留句柄时不至于整会话静默丢日志
                 encoding: new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true), // 带 BOM，记事本/PS5.1 读中文不乱码
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] [{MachineName}/{ProcessId}] {Message:lj}{NewLine}{Exception}"))
@@ -42,6 +72,8 @@ public static class LogBootstrap
                 Path.Combine(AppLogDir, "app-.jsonl"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 31,
+                fileSizeLimitBytes: LogFileSizeLimitBytes,
+                rollOnFileSizeLimit: true,
                 shared: true));
 
         if (console)
@@ -65,6 +97,8 @@ public static class LogBootstrap
                 Path.Combine(dir, "job-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 10,
+                fileSizeLimitBytes: LogFileSizeLimitBytes,
+                rollOnFileSizeLimit: true,
                 shared: true,
                 encoding: new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}"))
@@ -73,6 +107,8 @@ public static class LogBootstrap
                 Path.Combine(dir, "job-.jsonl"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 10,
+                fileSizeLimitBytes: LogFileSizeLimitBytes,
+                rollOnFileSizeLimit: true,
                 shared: true));
         if (memorySink != null) cfg = cfg.WriteTo.Sink(memorySink, LogEventLevel.Information);
         return cfg.CreateLogger();

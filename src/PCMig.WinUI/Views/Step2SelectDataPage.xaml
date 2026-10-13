@@ -459,6 +459,27 @@
                                     </Button>
                                 </StackPanel>
                             </Grid>
+                            <!-- ★ P1-07(1) ★ 目录映射语义（写进 job.json 的 Options.SelectedFolderMapping）：
+                                 默认「复制所选文件夹的内容」——选 \\host\Users\d970 就让内容直接落到 C:\Users\D970 根，
+                                 不再额外套一层同名目录 d970（现场 a632/be58 的错层来源）。
+                                 选「保留所选文件夹本身」= 旧行为（内容落在 …\d970）。恢复既有任务时以旧 job.json 为准。 -->
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="目录映射" VerticalAlignment="Center"/>
+                                <ComboBox x:Name="FolderMappingCombo" Grid.Column="1" MinWidth="212"
+                                          Style="{StaticResource PcmigComboBoxRollStyle}"
+                                          SelectedIndex="0" SelectionChanged="FolderMappingCombo_SelectionChanged">
+                                    <ComboBoxItem Content="复制所选文件夹的内容（推荐）"/>
+                                    <ComboBoxItem Content="保留所选文件夹本身"/>
+                                </ComboBox>
+                                <TextBlock x:Name="FolderMappingHint" Grid.Column="2" TextWrapping="NoWrap"
+                                           Style="{StaticResource PCMigTextHintBody}" TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
                         </StackPanel>
                     </Border>
 

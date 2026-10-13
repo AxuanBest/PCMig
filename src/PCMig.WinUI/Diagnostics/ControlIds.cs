@@ -118,6 +118,42 @@ public static class ControlIds
     public const string DiagnosticsWarnOnly = "Diagnostics.WarnOnly";
     public const string DiagnosticsExport = "Diagnostics.Export";
 
+    // 验证浮层（PMML 返修：原独立二级窗口 VerifyDetailWindow 已并入应用内 Utility/Tool Surface 家族）。
+    // ★ 契约（D63AutomationIdBindingTests）★：这份登记表与 XAML 里的 AutomationId 字面量必须双向相等；
+    // 且每条 ID 必须以 Step1./Step2./Step3./Step4./Shell./Diagnostics. 之一开头 ⇒ 这里统一用 Shell.Panel.Verification.*
+    /// <summary>验证浮层自身（★与触发入口 `Step4.Verify`、底栏 `Shell.Transfer.*` 区分开★）。</summary>
+    public const string ShellVerificationPanel = "Shell.Panel.Verification";
+    public const string VerificationPanelTitle = "Shell.Panel.Verification.TitleText";
+    public const string VerificationPanelSubtitle = "Shell.Panel.Verification.SubtitleText";
+    public const string VerificationPanelSemantics = "Shell.Panel.Verification.SemanticsText";
+    public const string VerificationPanelStart = "Shell.Panel.Verification.StartButton";
+    public const string VerificationPanelClose = "Shell.Panel.Verification.CloseButton";
+    public const string VerificationPanelOutcome = "Shell.Panel.Verification.OutcomeText";
+    public const string VerificationPanelProgressBar = "Shell.Panel.Verification.ObjectProgressBar";
+    public const string VerificationPanelPercent = "Shell.Panel.Verification.PercentText";
+    public const string VerificationPanelOkCount = "Shell.Panel.Verification.OkCountText";
+    public const string VerificationPanelMismatchCount = "Shell.Panel.Verification.MismatchCountText";
+    public const string VerificationPanelUnknownCount = "Shell.Panel.Verification.UnknownCountText";
+    public const string VerificationPanelEmptyCount = "Shell.Panel.Verification.EmptyCountText";
+    public const string VerificationPanelObjectCount = "Shell.Panel.Verification.ObjectCountText";
+    public const string VerificationPanelFilesChecked = "Shell.Panel.Verification.FilesCheckedText";
+    public const string VerificationPanelBytesChecked = "Shell.Panel.Verification.BytesCheckedText";
+    public const string VerificationPanelElapsed = "Shell.Panel.Verification.ElapsedText";
+    public const string VerificationPanelStatusLine = "Shell.Panel.Verification.StatusLineText";
+    public const string VerificationPanelStageDetail = "Shell.Panel.Verification.StageDetailText";
+    public const string VerificationPanelObjectScroll = "Shell.Panel.Verification.ObjectScroll";
+    public const string VerificationPanelObjectsEmpty = "Shell.Panel.Verification.ObjectsEmptyText";
+    public const string VerificationPanelObjectsHost = "Shell.Panel.Verification.ObjectsHost";
+    public const string VerificationPanelFooterHint = "Shell.Panel.Verification.FooterHintText";
+    public const string VerificationPanelCopySummary = "Shell.Panel.Verification.CopySummaryButton";
+    /// <summary>
+    /// ★ m03985 执行令 §UI-C ★ 「打开验证报告」：与「关闭」并排，用系统默认浏览器打开本地自包含 HTML。
+    /// 它打开的是**验证报告**（核对事实），与 Step4 既有的「打开报告」（迁移报告）语义严格区分，不得互相冒充。
+    /// </summary>
+    public const string VerificationPanelOpenReport = "Shell.Panel.Verification.OpenReportButton";
+    public const string VerificationPanelCancel = "Shell.Panel.Verification.CancelButton";
+    public const string VerificationPanelClosePanel = "Shell.Panel.Verification.ClosePanelButton";
+
     /// <summary>
     /// D6.1 §12 关键业务控件清单（契约测试按这份清单校验"XAML 里真的有这个 ID"）。
     /// ★ D6.3 §11（缺口②）★ `Step4.Resume` 与 Step2 的「恢复」/底栏的「恢复」是**同一个业务动作**
@@ -126,7 +162,7 @@ public static class ControlIds
     public static readonly IReadOnlyList<string> BusinessCritical = new[]
     {
         Step1Connect, Step1AddShare, Step2Prepare, Step2Start, Step2Pause, Step2Stop, Step2Resume,
-        Step2ExistingJobs, Step4Verify, Step4Repair, Step4Resume, ShellTransferStart, ShellTransferPause,
+        Step2ExistingJobs, Step4Verify, Step4Repair, Step4Resume, VerificationPanelStart, ShellTransferStart, ShellTransferPause,
         ShellTransferStop, ShellTransferResume, ShellMaterialTuning, ShellDiagnostics, ShellDiagnosticsPanel,
         DiagnosticsRefresh, DiagnosticsDeepToggle, DiagnosticsWarnOnly, DiagnosticsExport,
     };

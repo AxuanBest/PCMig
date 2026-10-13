@@ -808,7 +808,11 @@ public sealed class MainViewModel : ViewModelBase
             {
                 var warnText = "";
                 if (observed.LockRiskFiles > 0)
-                    warnText += $"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件（.pst/.ost）。\n如果旧电脑上 Outlook 正在运行，这些文件会被锁定导致迁移失败。\n建议：先让旧电脑用户关闭 Outlook。\n\n";
+                    // ★ P1-08 / R8 ★ 只有实测被独占（Win32 32/33）才说"会被锁定导致失败"；
+                    //   未锁定的（含归档 PST）明确说可以正常迁移，不再制造假警报。
+                    warnText += observed.LockedRiskFiles > 0
+                        ? $"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件（.pst/.ost），其中 {observed.LockedRiskFiles} 个实测当前打不开（被其他程序独占）。\n这些文件会被跳过或迁移失败。\n建议：先让旧电脑用户关闭占用程序（如 Outlook）。\n\n"
+                        : $"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件（.pst/.ost）：实测当前都能正常读取，可以正常迁移。\n（只有迁移进行时旧电脑上正打开它们才会失败；届时关闭占用程序后点「恢复任务」即可。）\n\n";
                 if (observed.EncryptedFiles > 0)
                     warnText += $"检测到 {observed.EncryptedFiles} 个 EFS 加密文件。\n内容可以正常复制，但在新机上将失去加密保护（明文可读）。\n\n";
                 var r = AppDialog.Show(Application.Current?.MainWindow, warnText.TrimEnd() + "\n\n仍要继续吗？",
@@ -1636,9 +1640,28 @@ public sealed class MainViewModel : ViewModelBase
                 new Progress<string>(m => StatusMessage = m));
             StatusMessage = report.OverallPass
                 ? "✔ 验证通过：源与目标文件数/字节数全部一致。"
-                : $"✘ 存在不一致对象：{string.Join("、", report.Objects.Where(o => o.Status != "OK").Select(o => o.ObjectId))}。详见报告。";
+                // ★ P0-02 ★ 非通过项分两类陈述：真差异（MISMATCH）与没核对成（UNKNOWN/EMPTY）。
+                //   旧文案把两者合称"不一致"，用户无法据此判断该修复还是该先恢复共享连通。
+                : $"✘ 未通过：差异 {MismatchIds(report)}；无法确认 {UnknownIds(report)}。详见报告。";
         }
         catch (Exception ex) { StatusMessage = $"验证失败：{ex.Message}"; }
+    }
+
+    /// <summary>★ P0-02 ★ 真差异对象（只有这类才允许进入定向修复）。</summary>
+    private static string MismatchIds(VerifyReport r)
+    {
+        var ids = r.Objects.Where(o => o.Status == "MISMATCH").Select(o => o.ObjectId).ToList();
+        return ids.Count == 0 ? "无" : string.Join("、", ids);
+    }
+
+    /// <summary>
+    /// ★ P0-02 ★ 无法确认（源不可达/枚举被跳过/两侧都空但计划预期有数据）与无可核对数据（两侧都空）
+    /// 的对象：**不得**按差异去删目标文件重拷——先恢复源连通、再重新验证。
+    /// </summary>
+    private static string UnknownIds(VerifyReport r)
+    {
+        var ids = r.Objects.Where(o => o.Status is "UNKNOWN" or "EMPTY").Select(o => o.ObjectId).ToList();
+        return ids.Count == 0 ? "无" : string.Join("、", ids);
     }
 
     // ═════════════════ 尝试修复（验证不一致 → 定向重拷 → 自动复验） ══════════════════

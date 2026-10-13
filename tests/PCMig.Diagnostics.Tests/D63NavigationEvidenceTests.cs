@@ -79,6 +79,20 @@ public sealed class D63NavigationEvidenceTests : IDisposable
         return lines;
     }
 
+    /// <summary>
+    /// 有界等待：导航事件必须**先落进证据段**再关闭。
+    ///
+    /// 为什么需要：关闭排空预算是**有界**的（本夹具 5000 ms），而重负载下分支泵可能长时间拿不到
+    /// 线程池线程 ⇒ 事件还在队列里就被如实放弃（运行时记 drain-budget-exhausted，产品行为正确）。
+    /// 那时"证据为空"测的是**宿主忙不忙**，不是导航有没有落盘。这里只补**等待条件**，
+    /// 断言强度不变：下面照样用 Assert.Single / Assert.Equal(2) 校验条数与逐字字段。
+    /// </summary>
+    private static void WaitForNavigationPayload(DiagnosticRuntime runtime, int expected)
+        => Assert.True(
+            D2TestSupport.WaitUntil(
+                () => ReadPayloads(runtime).OfType<UiNavigationPayload>().Count() >= expected, 15_000),
+            $"导航事件应当先落进证据段（期望至少 {expected} 条）");
+
     // ─────────────────────────── ① 行为（真实管道 + 真实往返） ───────────────────────────
 
     [Fact]
@@ -89,6 +103,7 @@ public sealed class D63NavigationEvidenceTests : IDisposable
         {
             NavigationEvidence.Publish("Connect", "SelectData", NavigationReasons.RailClick);
         }
+        WaitForNavigationPayload(runtime, 1);
         D2TestSupport.Shutdown(runtime);
 
         var payload = Assert.Single(ReadPayloads(runtime).OfType<UiNavigationPayload>());
@@ -121,6 +136,7 @@ public sealed class D63NavigationEvidenceTests : IDisposable
             NavigationEvidence.Publish("Connect", "SelectData", NavigationReasons.RailClick, operationId: null);
             NavigationEvidence.Publish("SelectData", "Progress", NavigationReasons.FooterNext, operationId: "OPR-D63-NAV");
         }
+        WaitForNavigationPayload(runtime, 2);
         D2TestSupport.Shutdown(runtime);
 
         var payloads = ReadPayloads(runtime).OfType<UiNavigationPayload>().ToList();
@@ -144,6 +160,7 @@ public sealed class D63NavigationEvidenceTests : IDisposable
             NavigationEvidence.Publish(
                 NavigationEvidence.NoPreviousStep, "Connect", NavigationReasons.Initial);
         }
+        WaitForNavigationPayload(runtime, 1);
         D2TestSupport.Shutdown(runtime);
 
         var payload = Assert.Single(ReadPayloads(runtime).OfType<UiNavigationPayload>());
@@ -167,6 +184,7 @@ public sealed class D63NavigationEvidenceTests : IDisposable
             Assert.False(NavigationEvidence.Publish("Connect", "   ", NavigationReasons.RailClick));
             Assert.True(NavigationEvidence.Publish("", "SelectData", NavigationReasons.RailClick));      // 空 from ⇒ (none)
         }
+        WaitForNavigationPayload(runtime, 1);
         D2TestSupport.Shutdown(runtime);
 
         var payload = Assert.Single(ReadPayloads(runtime).OfType<UiNavigationPayload>());
@@ -204,6 +222,7 @@ public sealed class D63NavigationEvidenceTests : IDisposable
         {
             NavigationEvidence.Publish("Connect", "Progress", "我看心情跳的");
         }
+        WaitForNavigationPayload(runtime, 1);
         D2TestSupport.Shutdown(runtime);
 
         var payload = Assert.Single(ReadPayloads(runtime).OfType<UiNavigationPayload>());

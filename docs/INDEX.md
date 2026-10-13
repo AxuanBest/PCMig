@@ -26,6 +26,7 @@
 | [`方案-诊断中心与自诊断架构.md`](方案-诊断中心与自诊断架构.md) | Diagnostics 子系统的整体架构方案 |
 | [`方案-20260928-业务接线与可信度修复.md`](方案-20260928-业务接线与可信度修复.md) | 业务接线与可信度修复方案 |
 | [`A5-节流与竞态修复设计.md`](A5-节流与竞态修复设计.md) | UI 节流与竞态条件的修复设计 |
+| [`验证报告与结果页返修.md`](验证报告与结果页返修.md) | 验证语义收口：结论与证据分层、四态状态、L1/L2 口径、验证报告 HTML 章节与本地打开方式（v0.5.3 之后的候选改动） |
 
 核心引擎结构见仓库根 [`README.md`](../README.md) 第 6–9 节：前端形态、双通道 Robocopy、暂停 / 恢复 / 断点续传、Diagnostics 可信度体系。
 
@@ -57,7 +58,9 @@
 | [`稳定性验收标准.md`](稳定性验收标准.md) | 稳定性验收判据 |
 | [`qa/`](qa/) | QA 过程记录与验证证据（现行 + `qa/history/` 历史） |
 
-构建与测试命令、当前基线（Core 708 / Diagnostics 382）见 [`RELEASE.md`](RELEASE.md) 第 3–4 节。
+测试工程：`tests/PCMig.Core.Tests`（核心 + 计划/修复/验证契约）、`tests/PCMig.Diagnostics.Tests`（诊断系统）、`tests/PCMig.Cli.Tests`（命令行参数契约：子命令 `--help` 不得触发业务、未知参数必须非零退出、`--jobs=<dir>` 与空格写法等价）。
+
+构建与测试命令见 [`RELEASE.md`](RELEASE.md) 第 3–4 节。当前基线（2026-10-13 实测）：**Core 979 / 979、Diagnostics 392 / 392、CLI 契约 50 / 50 全通过，WinUI Release 构建 0 错误**。
 
 实验室与工具链：`lab/three-vm/`（三 VM 测试框架）、`tools/stability-test.ps1`（逐文件 SHA256 三方核对）、`tools/uishot.ps1`（界面截图）、`tools/pcmiglab-vm.ps1` 与 `tools/l3-*.ps1`（实验室编排）。
 

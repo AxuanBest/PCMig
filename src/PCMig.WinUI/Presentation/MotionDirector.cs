@@ -50,31 +50,29 @@ internal static class MotionDirector
     /// <summary>退场动画真正结束后的收尾回调（折叠可见性 / 归还焦点由调用方决定语义）。</summary>
     public delegate void MotionCompleted();
 
-    private static bool _systemAnimationsChecked;
-    private static bool _systemAnimationsEnabled = true;
+    private const string ForceMotionEnvironmentVariable = "PCMIG_FORCE_MOTION";
 
     /// <summary>
-    /// §32：系统是否允许播放动画。取不到该偏好时保守地**按允许**处理 ——
-    /// 宁可播放一次克制的过渡，也不要因为 API 不可用而整体失去动效。
+    /// §32：系统是否允许播放动画。每次读取系统偏好，避免进程启动时的远程会话瞬态值把整段会话永久锁为静态。
+    /// <c>PCMIG_FORCE_MOTION=1</c> 仅供本机视觉验收显式覆写，默认仍遵从系统无障碍偏好。
+    /// 取不到偏好时保守地按允许处理：宁可播放一次克制的过渡，也不要因为 API 不可用而整体失去动效。
     /// </summary>
     public static bool SystemAnimationsEnabled
     {
         get
         {
-            if (!_systemAnimationsChecked)
+            if (string.Equals(Environment.GetEnvironmentVariable(ForceMotionEnvironmentVariable), "1", StringComparison.Ordinal))
+                return true;
+
+            try
             {
-                _systemAnimationsChecked = true;
-                try
-                {
-                    _systemAnimationsEnabled = new Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[Motion] UISettings unavailable, assuming animations on: {ex.Message}");
-                    _systemAnimationsEnabled = true;
-                }
+                return new Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
             }
-            return _systemAnimationsEnabled;
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Motion] UISettings unavailable, assuming animations on: {ex.Message}");
+                return true;
+            }
         }
     }
 

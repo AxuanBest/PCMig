@@ -1,5 +1,8 @@
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
 using Serilog;
 
@@ -72,10 +75,36 @@ public static class SourceIdentity
     public static string? Capture(string? path, ILogger? log = null)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
+
+        // ★ P0-06 ★ 指纹探测必须有界：CreateFileW 与 srvsvc RPC 都是**不可取消的阻塞调用**，
+        //   指向已撤销的共享/离线主机时每个对象实测阻塞约 16s（15 个对象 = 4 分钟界面卡死、
+        //   停止按钮点不动的直接成因）。这里做两件事：
+        //   ① UNC 先花 ≤1.2s 探一次 445 是否有人应答（结果按主机短缓存，同主机多对象不再重探）；
+        //   ② 两项指纹整体加 3s 预算，超预算就**如实"本次不判定"**（绝不拿旧值/猜测冒充身份）。
+        //   语义不软化：不判定在调用方仍按"无法判定更改"处理，只把"卡死"换成"快速说不判定"。
+        if (!HostAnswering(path!, log)) return null;
+
+        Task<string?> probe;
+        try { probe = Task.Run(() => CaptureCore(path!, log)); }
+        catch (Exception ex) { log?.Debug(ex, "源身份指纹：{Path} 探测调度异常", path); return null; }
+
+        if (!probe.Wait(ProbeBudgetMs))
+        {
+            log?.Warning("源身份指纹：{Path} 探测超过 {Budget}ms 预算（网络卡顿 / 数据面饱和），本次不判定",
+                path, ProbeBudgetMs);
+            return null;
+        }
+        try { return probe.Result; }
+        catch (Exception ex) { log?.Debug(ex, "源身份指纹：{Path} 探测异常", path); return null; }
+    }
+
+    /// <summary>两项指纹的实际取值（无超时保护，只在 <see cref="Capture"/> 的预算内被调用）。</summary>
+    private static string? CaptureCore(string path, ILogger? log)
+    {
         var parts = new List<string>(2);
         var fid = TryFileId(path, log);
         if (fid is not null) parts.Add(fid);
-        var sp = TrySharePath(path!, log);
+        var sp = TrySharePath(path, log);
         if (sp is not null) parts.Add(sp);
         if (parts.Count == 0)
         {
@@ -83,6 +112,60 @@ public static class SourceIdentity
             return null;
         }
         return string.Join(";", parts);
+    }
+
+    /// <summary>指纹探测的整体预算（毫秒）。超过即"本次不判定"，不再让界面等着阻塞调用返回。</summary>
+    private const int ProbeBudgetMs = 3000;
+
+    /// <summary>UNC 主机"445 有没有人应答"的探测预算（毫秒）。</summary>
+    private const int HostProbeMs = 1200;
+
+    /// <summary>可达结论缓存时长：可达 3s（足够覆盖同一次的多个对象），不可达 5s（避免反复等同一个死主机）。</summary>
+    private static readonly ConcurrentDictionary<string, DateTime> HostReachableUntil = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, DateTime> HostUnreachableUntil = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// ★ P0-06 ★ UNC 源主机的"是否有人应答 SMB"快速探测（不替代真正的指纹，只用来**避免无谓地**
+    /// 掉进 16s 的阻塞调用）。本地路径（含盘符根）直接放行 —— 本地调用不会走网络超时。
+    /// 结论只缓存很短时间且**只用于省掉重复探测**，从不作为"共享可用"的对外结论。
+    /// </summary>
+    private static bool HostAnswering(string path, ILogger? log)
+    {
+        if (!path.StartsWith(@"\\", StringComparison.Ordinal)) return true;
+        var segs = path.TrimStart('\\').Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        if (segs.Length < 2) return true;
+        var host = segs[0];
+        var now = DateTime.UtcNow;
+        if (HostReachableUntil.TryGetValue(host, out var r) && r > now) return true;
+        if (HostUnreachableUntil.TryGetValue(host, out var u) && u > now)
+        {
+            log?.Debug("源身份指纹：{Host} 刚刚（{Sec}s 内）已探明不可达，本次不判定（省掉重复阻塞）",
+                host, HostProbeMs / 1000);
+            return false;
+        }
+
+        var answered = false;
+        try
+        {
+            using var client = new TcpClient();
+            var connect = client.ConnectAsync(host, 445);
+            answered = connect.Wait(HostProbeMs) && client.Connected;
+        }
+        catch (Exception ex) { log?.Debug(ex, "源身份指纹：{Host}:445 探测异常", host); answered = false; }
+
+        if (answered)
+        {
+            HostReachableUntil[host] = now.AddSeconds(3);
+            HostUnreachableUntil.TryRemove(host, out _);
+        }
+        else
+        {
+            HostUnreachableUntil[host] = now.AddSeconds(5);
+            HostReachableUntil.TryRemove(host, out _);
+            log?.Warning("源身份指纹：{Host}:445 在 {Ms}ms 内无人应答（共享已撤销 / 主机离线），本次不判定",
+                host, HostProbeMs);
+        }
+        return answered;
     }
 
     /// <summary>目录/卷级身份（FILE_ID_INFO：服务端真实卷序列号 + 128 位文件 ID）。</summary>

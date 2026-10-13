@@ -16,7 +16,9 @@ namespace PCMig.Core.Tests;
 ///
 /// 本文件锁死三件事：
 ///   ① 状态源单点：`SourceConnectionState` 由 `ConnectionViewModel` 拥有并派生，View 只投影、不猜；
-///   ② 三态语义：未连接=红常亮 / 正在连接=琥珀呼吸 / 已连接=绿常亮；ping 通、能上网、网卡 UP 都不得变绿；
+///   ② 语义：未连接=红常亮 / 正在连接与恢复中=琥珀呼吸 / **部分可用与未知=琥珀常亮** / 已连接（实测可读）=绿常亮；
+///      ping 通、能上网、网卡 UP 都不得变绿；
+///      ★ P0-05 ★ 绿灯只能由"可读探测证据"推出：`IsConnected` 这个"上次连上过"的布尔值不再单独点绿。
 ///   ③ 呼吸走 Composition（不是 DispatcherTimer 改颜色）：不写死毫秒，token 在 Motion.xaml。
 ///
 /// 为什么测试能直接 `new ConnectionViewModel()`：它在 `PCMig.Core.Tests.csproj` 的
@@ -79,6 +81,58 @@ public class SourceConnectionStateTests
         Assert.Contains(nameof(ConnectionViewModel.SourceState), raised);
     }
 
+    // ── P0-05：灯必须由"实测证据"驱动，而不是"上次连上过"的布尔值 ────────────────
+
+    [Fact]
+    public void P05_ConnectedBooleanWithoutEvidence_IsUnknownNotGreen()
+    {
+        using var vm = new ConnectionViewModel();
+        vm.ForceConnectedForTest(true);                        // 预检通过 ⇒ 有可达证据 ⇒ 绿
+        Assert.Equal(SourceConnectionState.Connected, vm.SourceState);
+
+        vm.NotifyProbeInconclusive("重探超时，未得出结论");      // 探测没结论 ⇒ 可达证据作废
+
+        Assert.True(vm.IsConnected, "IsConnected 这个布尔值仍在（它代表'会话可能还在'）");
+        Assert.Equal(SourceConnectionState.SuspectOrUnknown, vm.SourceState);   // ★ 未知绝不呈现为绿
+        Assert.Contains("不能当作可用", vm.SourceStateDetail);
+    }
+
+    [Fact]
+    public void P05_OneShareFailsAmongMany_IsPartialAndLocatable()
+    {
+        using var vm = new ConnectionViewModel();
+        vm.ForceConnectedForTest(true);
+        vm.NotifyShareReachability(@"\\SRC-PC\share-b", false, "Win32 67：网络名不再可用");
+
+        Assert.Equal(SourceConnectionState.Partial, vm.SourceState);
+        var failing = Assert.Single(vm.UnreachableShares);
+        Assert.Contains(@"\\SRC-PC\share-b", failing);          // 多共享里能定位是哪一条
+        Assert.Contains("67", failing);                        // 且带着证据文字
+        Assert.NotEmpty(vm.VerifiedReachableTargets);           // 另一条仍可达
+    }
+
+    [Fact]
+    public void P05_FileLockMustNotReachTheLamp_AndRecoveringIsNotGreen()
+    {
+        // ★ P0-05 ★ 需求明令：Win32 32/33（文件被占用/锁定）**不能当作整个共享断开**。
+        //   灯的唯一入口是 NotifyShareReachability —— 契约就写在它身上，这里锁住这句话，
+        //   防止后来有人把"某个文件被锁"当成"共享挂了"顺手送进来。
+        var code = ReadRepoFile("src", "PCMig.WinUI", "Presentation", "ConnectionViewModel.cs");
+        var sig = code.IndexOf("internal void NotifyShareReachability(string target, bool reachable, string evidence)", StringComparison.Ordinal);
+        Assert.True(sig > 0, "找不到 NotifyShareReachability（灯的唯一入口被改名了？）");
+        var funnel = code.Substring(Math.Max(0, sig - 420), Math.Min(1100, code.Length - Math.Max(0, sig - 420)));
+        Assert.Contains("32", funnel);
+        Assert.Contains("33", funnel);
+        Assert.Contains("不得", funnel);
+
+        using var vm = new ConnectionViewModel();
+        vm.ForceConnectedForTest(true);
+        vm.NotifyRecovering();
+        Assert.Equal(SourceConnectionState.Recovering, vm.SourceState);   // 重试中：琥珀，既不是绿也不是红
+        vm.NotifyRecoveryFinished();
+        Assert.Equal(SourceConnectionState.Connected, vm.SourceState);    // 结束后仍按最后一份证据分档
+    }
+
     // ── 契约：状态源纪律（View 不猜） ───────────────────────────────────────────
 
     [Fact]
@@ -90,10 +144,33 @@ public class SourceConnectionStateTests
         Assert.Contains("private set { if (Set(ref _isConnecting, value)) { Raise(nameof(CanConnect)); UpdateSourceState(); } }", code);
         Assert.Contains("private set { if (Set(ref _isConnected, value)) UpdateSourceState(); }", code);
 
-        // 三分支语义：正在连接 ⇒ Connecting；已连接（预检通过 / 至少一个共享可访问）⇒ Connected；否则 Disconnected。
-        Assert.Contains("SourceState = IsConnecting ? SourceConnectionState.Connecting", code);
-        Assert.Contains(": IsConnected ? SourceConnectionState.Connected", code);
-        Assert.Contains(": SourceConnectionState.Disconnected;", code);
+        // ★ P0-05（2026-10-13 定点修复）★ 六态分档语义**改由证据账本判**（顺序即优先级不变）：
+        //   正在连接 ⇒ Connecting；已确认失效正在重探 ⇒ Recovering；
+        //   既有新鲜可达又有确认失效 ⇒ Partial；有新鲜可达证据 ⇒ Connected；
+        //   只有确认失效证据 ⇒ Disconnected；只有过期证据/只知"曾连接过" ⇒ SuspectOrUnknown（★未知绝不进绿灯★）。
+        //   为什么改成账本：旧写法只数"有没有可达事实"、**从不比对时间**，于是撤销共享 600 秒后灯还绿
+        //   （真机实测）。判据必须带时间维度，所以这一层搬进了 Core 的 SourceEvidenceLedger（可被单测推进时间）。
+        Assert.Contains("SourceEvidenceLedger", code);
+        Assert.Contains("ledger.Derive(now, IsConnecting, _recovering, IsConnected)", code);
+        Assert.Contains("PCMig.Core.Util.SourceEvidenceState.Connecting => SourceConnectionState.Connecting", code);
+        Assert.Contains("PCMig.Core.Util.SourceEvidenceState.Recovering => SourceConnectionState.Recovering", code);
+        Assert.Contains("PCMig.Core.Util.SourceEvidenceState.Partial => SourceConnectionState.Partial", code);
+        Assert.Contains("PCMig.Core.Util.SourceEvidenceState.Connected => SourceConnectionState.Connected", code);
+        Assert.Contains("PCMig.Core.Util.SourceEvidenceState.SuspectOrUnknown => SourceConnectionState.SuspectOrUnknown", code);
+        Assert.Contains("_ => SourceConnectionState.Disconnected,", code);
+
+        // ★ P0-05 缺陷本体 ★ 绿灯必须由**新鲜的可达实测证据**推出，
+        //   不得再出现 `IsConnected ⇒ Connected` 这种"上次连上过就是绿的"派生 —— 它一旦回来，本测试立刻红。
+        Assert.DoesNotContain(": IsConnected ? SourceConnectionState.Connected", code);
+        //   旧缺陷写法（只数数量、不看时间）也不得复活。
+        Assert.DoesNotContain("var reachable = _shareFacts.Values.Count(f => f.Reachable);", code);
+
+        // 有效期规则本身锁在账本里：可达证据过了 TTL 就不再算数。
+        var ledger = ReadRepoFile("src", "PCMig.Core", "Util", "SourceEvidenceLedger.cs");
+        Assert.Contains("var age = nowUtc - fact.AtUtc;", ledger);
+        Assert.Contains("return age <= Ttl;", ledger);
+        Assert.Contains("ExpiredReachable", ledger);
+        Assert.Contains("TimeSpan.FromSeconds(60)", ledger);
 
         // 判据不得来自 ICMP / 网卡 / 互联网：这个文件里根本没有这些概念
         // （绿 = SMB 源共享可用，不是"能 ping 通"、不是"网卡 UP"、不是"能上网"）。
@@ -103,7 +180,7 @@ public class SourceConnectionStateTests
     }
 
     [Fact]
-    public void C2_IndicatorProjectsThreeStatesFromThemeTokens_NotHardcodedColors()
+    public void C2_IndicatorProjectsSixStatesFromThemeTokens_NotHardcodedColors()
     {
         var code = ReadRepoFile("src", "PCMig.WinUI", "MainWindow.xaml.cs");
 
@@ -111,23 +188,37 @@ public class SourceConnectionStateTests
         Assert.Contains("private const string SourceStateConnectingBrushKey = \"WarningBrush\";", code);
         Assert.Contains("private const string SourceStateDisconnectedBrushKey = \"DangerBrush\";", code);
 
-        var body = MethodWindow(code, "private void UpdateSourceConnectionIndicator()", 1800);
+        var body = MethodWindow(code, "private void UpdateSourceConnectionIndicator()", 3200);
 
         // 颜色取自主题 Token（此处不写死 #RRGGBB），且颜色不是唯一通道：状态名必须可读。
         Assert.Contains("SourceStateDot.Fill = brush;", body);
         Assert.Contains("源连接：已连接", body);
         Assert.Contains("源连接：正在连接", body);
         Assert.Contains("源连接：未连接", body);
+        // ★ P0-05 ★ 三态之外还必须有可读的"未知 / 部分可用 / 正在重试"，否则琥珀色的三种含义
+        //   对屏幕阅读器完全无法区分（颜色不是唯一通道）。
+        Assert.Contains("源连接：部分共享不可用", body);
+        Assert.Contains("源连接：状态未知", body);
+        Assert.Contains("源连接：已失效，正在重试", body);
+        // ★ P0-05 ★ 未知/部分可用/重试必须走琥珀，不得进绿灯分支（未知绝不当绿）。
+        Assert.Contains("SourceConnectionState.Partial => SourceStateConnectingBrushKey", body);
+        Assert.Contains("SourceConnectionState.SuspectOrUnknown => SourceStateConnectingBrushKey", body);
+        Assert.Contains("SourceConnectionState.Recovering => SourceStateConnectingBrushKey", body);
+        // ★ P0-05 ★ 一个点说不清"哪条共享坏了"：状态详情必须可读（屏幕阅读器 HelpText + 悬停 ToolTip）。
+        Assert.Contains("AutomationProperties.SetHelpText(SourceStateDot, ViewModel.SourceStateDetail)", body);
+        Assert.Contains("ToolTipService.SetToolTip(SourceStateDot, ViewModel.SourceStateDetail)", body);
         Assert.DoesNotContain("#", body.Replace("#x", string.Empty));
     }
 
     [Fact]
-    public void C3_OnlyConnectingBreathes_AndItIsComposition_NotDispatcherTimer()
+    public void C3_LampBreathesOnlyWhileWorking_AndItIsComposition_NotDispatcherTimer()
     {
         var window = ReadRepoFile("src", "PCMig.WinUI", "MainWindow.xaml.cs");
-        var body = MethodWindow(window, "private void UpdateSourceConnectionIndicator()", 1800);
+        var body = MethodWindow(window, "private void UpdateSourceConnectionIndicator()", 2600);
 
-        Assert.Contains("if (state == SourceConnectionState.Connecting) MotionDirector.PlaySourceBreathing(SourceStateDot);", body);
+        // 只有"正在连接"与"已确认失效、正在重探"呼吸；Partial / SuspectOrUnknown 是静止结论，常亮。
+        Assert.Contains("if (state is SourceConnectionState.Connecting or SourceConnectionState.Recovering)", body);
+        Assert.Contains("MotionDirector.PlaySourceBreathing(SourceStateDot);", body);
         Assert.Contains("else MotionDirector.ResetSourceBreathing(SourceStateDot);", body);
         // 用户明令：呼吸不得用 DispatcherTimer 改颜色（那会变成生硬的开/关闪烁）。
         Assert.DoesNotContain("DispatcherTimer", body);

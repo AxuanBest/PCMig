@@ -479,11 +479,26 @@ public sealed class D63ExportTruthTests : IDisposable
         Assert.True(D2TestSupport.WaitUntil(() => runtime.Health.EventsWritten >= count));
     }
 
+    /// <summary>
+    /// 最新**已封段**（有同名 <c>.manifest.json</c> 的那一段）。
+    ///
+    /// ★ 负载敏感坑（本轮实测）★ 旧实现取"最新的 .jsonl"：在线系统在截止点之后落一条事件
+    /// （维护循环的丢失/存储/滞后事件就是这样来的）就会新建 <c>events-0002.jsonl</c>，
+    /// 它此时仍被 writer 持有——writer 用 <c>FileShare.Read</c> 打开（见 JsonlSegmentWriter.EnsureOpen），
+    /// 拒绝他人写入 ⇒ 往它追加损坏行会 <see cref="IOException"/>：
+    /// "The process cannot access the file … because it is being used by another process"；
+    /// 而且它没有 manifest，下面读 <c>segment + ".manifest.json"</c> 同样会失败。
+    ///
+    /// 这里只改"挑哪一段"，**断言强度不变**：要的就是**已封段**——封段时句柄已 Dispose、
+    /// 且该序号段永不重新打开（<see cref="JsonlSegmentWriter"/> 的段序号只增）。
+    /// 拿不到已封段就返回 null，由调用方的 Assert.NotNull 如实报错。
+    /// </summary>
     private static string? LatestSegment(string sessionDir, string family)
     {
         var dir = Path.Combine(sessionDir, family);
         if (!Directory.Exists(dir)) return null;
         return Directory.EnumerateFiles(dir, "*.jsonl")
+            .Where(f => File.Exists(f + ".manifest.json"))
             .OrderBy(f => f, StringComparer.Ordinal)
             .LastOrDefault();
     }

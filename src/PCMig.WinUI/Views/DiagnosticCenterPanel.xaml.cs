@@ -190,6 +190,15 @@ public sealed partial class DiagnosticCenterPanel : UserControl
                 trace.Complete(DiagnosticOutcome.Failed, "export-failed");
             }
         }
+        catch (Exception ex)
+        {
+            // ★ P0-06(4) ★ 旧写法只有 finally、没有 catch ⇒ ExportAsync 抛出来就飞出 `async void`，
+            //   没有任何调用者能接住 ⇒ 进程结束。"导出失败"必须是**明确结果**而不是崩溃或没反应：
+            //   记录（日志 + 诊断事实）+ 写进本面板状态行，证据全留。
+            UiFaultGuard.Report("DiagnosticCenterPanel.Export_Click", ex);
+            trace.Complete(DiagnosticOutcome.Failed, "export-threw");
+            try { StatusText.Text = "导出诊断包失败：" + ex.Message + "（失败证据已写入日志）"; } catch { /* 呈现失败不得外溢 */ }
+        }
         finally
         {
             _exportCts = null;

@@ -1,0 +1,273 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using PCMig.Core.Util;
+using PCMig.WinUI.Presentation;
+using Xunit;
+
+namespace PCMig.Core.Tests;
+
+/// <summary>
+/// ★ P0-05（2026-10-13 定点修复）★ 源共享**可达性证据的新鲜度**契约。
+///
+/// 缺陷回顾（真机实测）：共享被公司策略撤销后，底栏源灯 **600 秒全程绿色**，
+/// 迁移 6 个对象全部永久失败后仍然绿。根因 = `ConnectionViewModel.UpdateSourceState`
+/// 只数"有没有可达事实"、**从不比对事实时间**，且空闲期没有任何探测或过期机制。
+///
+/// 本文件锁死修复后的规则：
+///   ① 绿灯只能由**新鲜**的可读探测证据推出（有效期默认 60 秒，到期即降级为"待确认"琥珀）；
+///   ② 只有"重新读到"才能恢复绿色——历史连接事实、ping 通、网卡在线都不行；
+///   ③ 探测本身没得出结论 ⇒ 待确认（琥珀），既不冒充可达也不冒充已断开；
+///   ④ 巡检真的挂在底栏呈现节拍上（不是只写了个没人调用的方法）。
+/// </summary>
+public class P0SourceEvidenceFreshnessTests
+{
+    private static readonly DateTime T0 = new(2026, 10, 13, 12, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>把两个测试缝（时钟 / 读探测）换上替身并保证用完还原，避免污染其它测试类。</summary>
+    private static async Task WithSeamsAsync(DateTime start, Func<string, int> probe, Func<ConnectionViewModel, Task> body)
+    {
+        var savedClock = ConnectionViewModel.Clock;
+        var savedProbe = ConnectionViewModel.ShareCountProbe;
+        ConnectionViewModel.Clock = () => start;
+        ConnectionViewModel.ShareCountProbe = probe;
+        try
+        {
+            using var vm = new ConnectionViewModel();
+            await body(vm).ConfigureAwait(false);
+        }
+        finally
+        {
+            ConnectionViewModel.Clock = savedClock;
+            ConnectionViewModel.ShareCountProbe = savedProbe;
+        }
+    }
+
+    // ── ① 有效期：绿灯到期必须熄灭 ──────────────────────────────────────────────
+
+    [Fact]
+    public void Ttl_IsSixtySeconds_AsRequiredByOrder()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(60), ConnectionViewModel.EvidenceTtl);
+        Assert.Equal(TimeSpan.FromSeconds(60), SourceEvidenceLedger.DefaultTtl);
+    }
+
+    [Fact]
+    public async Task FreshEvidence_ShowsConnected()
+    {
+        await WithSeamsAsync(T0, _ => throw new InvalidOperationException("本用例不应触发探测"), async vm =>
+        {
+            vm.Host = "TEST-HOST";
+            vm.ForceConnectedForTest(true);
+
+            Assert.Equal(SourceConnectionState.Connected, vm.SourceState);
+            await Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task EvidenceExpired_AfterSixtySeconds_NoLongerShowsConnected()
+    {
+        // 用户指定的隔离测试目标：60 秒内不再错误显示"已连接"。
+        await WithSeamsAsync(T0, _ => throw new InvalidOperationException("没得出结论"), async vm =>
+        {
+            vm.Host = "TEST-HOST";
+            vm.ForceConnectedForTest(true);
+            Assert.Equal(SourceConnectionState.Connected, vm.SourceState);
+
+            ConnectionViewModel.Clock = () => T0.AddSeconds(61);
+            await vm.SweepEvidenceFreshnessAsync();
+
+            Assert.NotEqual(SourceConnectionState.Connected, vm.SourceState);
+            Assert.Equal(SourceConnectionState.SuspectOrUnknown, vm.SourceState);
+        });
+    }
+
+    [Fact]
+    public void TtlBoundary_SixtySecondsStillFresh_OneMillisecondMoreIsNot()
+    {
+        var ledger = new SourceEvidenceLedger();
+        ledger.Record(@"\\h\share", true, "读到过", T0);
+
+        Assert.Equal(SourceEvidenceState.Connected, ledger.Derive(T0.AddSeconds(60), false, false, false));
+        Assert.Equal(SourceEvidenceState.SuspectOrUnknown, ledger.Derive(T0.AddSeconds(60).AddMilliseconds(1), false, false, false));
+    }
+
+    [Fact]
+    public async Task ExpiredEvidenceWithoutProbeTarget_IsSuspectNotConnected()
+    {
+        // Host 为空（没有可探测对象）时也不得继续显示已连接。
+        await WithSeamsAsync(T0, _ => 7, async vm =>
+        {
+            vm.ForceConnectedForTest(true);
+            Assert.Equal(SourceConnectionState.Connected, vm.SourceState);
+
+            ConnectionViewModel.Clock = () => T0.AddMinutes(30);
+            await vm.SweepEvidenceFreshnessAsync();
+
+            Assert.Equal(SourceConnectionState.SuspectOrUnknown, vm.SourceState);
+        });
+    }
+
+    // ── ② 只有新的有效读探测证据才能恢复绿色 ────────────────────────────────────
+
+    [Fact]
+    public async Task ProbeFindsShares_RestoresGreen()
+    {
+        await WithSeamsAsync(T0, _ => 3, async vm =>
+        {
+            vm.Host = "TEST-HOST";
+            vm.ForceConnectedForTest(true);
+
+            ConnectionViewModel.Clock = () => T0.AddMinutes(10);   // 证据早已过期
+            await vm.SweepEvidenceFreshnessAsync();
+
+            Assert.Equal(SourceConnectionState.Connected, vm.SourceState);
+            // 绿灯文案必须仍然强调"由可读探测确认"（不是"上次连上过"）
+            Assert.Contains("可读探测", vm.SourceStateDetail);
+        });
+    }
+
+    [Fact]
+    public async Task ProbeFindsNothing_ShowsDisconnected()
+    {
+        await WithSeamsAsync(T0, _ => 0, async vm =>
+        {
+            vm.Host = "TEST-HOST";
+            vm.ForceConnectedForTest(true);
+
+            ConnectionViewModel.Clock = () => T0.AddMinutes(10);
+            await vm.SweepEvidenceFreshnessAsync();
+
+            Assert.Equal(SourceConnectionState.Disconnected, vm.SourceState);
+        });
+    }
+
+    [Fact]
+    public async Task ProbeInconclusive_IsSuspect_NeitherGreenNorRed()
+    {
+        await WithSeamsAsync(T0, _ => throw new IOException("探测超时"), async vm =>
+        {
+            vm.Host = "TEST-HOST";
+            vm.ForceConnectedForTest(true);
+
+            ConnectionViewModel.Clock = () => T0.AddMinutes(10);
+            await vm.SweepEvidenceFreshnessAsync();
+
+            Assert.Equal(SourceConnectionState.SuspectOrUnknown, vm.SourceState);
+            Assert.NotEqual(SourceConnectionState.Connected, vm.SourceState);
+            Assert.NotEqual(SourceConnectionState.Disconnected, vm.SourceState);
+        });
+    }
+
+    // ── ③ 账本（纯逻辑）分档 ────────────────────────────────────────────────────
+
+    [Fact]
+    public void UnreachableFact_DoesNotExpire_AndKeepsLampRed()
+    {
+        var ledger = new SourceEvidenceLedger();
+        ledger.Record(@"\\h\share", false, "确认失效", T0);
+
+        Assert.Equal(SourceEvidenceState.Disconnected, ledger.Derive(T0.AddDays(1), false, false, false));
+    }
+
+    [Fact]
+    public void FreshPlusDead_IsPartial()
+    {
+        var ledger = new SourceEvidenceLedger();
+        ledger.Record(@"\\h\a", true, "刚刚读到", T0);
+        ledger.Record(@"\\h\b", false, "确认失效", T0);
+
+        Assert.Equal(SourceEvidenceState.Partial, ledger.Derive(T0.AddSeconds(5), false, false, false));
+    }
+
+    [Fact]
+    public void HistoricalConnectionOnly_IsSuspectNeverGreen()
+    {
+        var ledger = new SourceEvidenceLedger();
+        Assert.Equal(SourceEvidenceState.SuspectOrUnknown, ledger.Derive(T0, false, false, historicalConnected: true));
+        Assert.Equal(SourceEvidenceState.Disconnected, ledger.Derive(T0, false, false, historicalConnected: false));
+    }
+
+    [Fact]
+    public void TargetsNeedingProbe_IsBoundedAndOldestFirst()
+    {
+        var ledger = new SourceEvidenceLedger();
+        ledger.Record(@"\\h\a", true, "旧", T0.AddMinutes(-30));
+        ledger.Record(@"\\h\b", true, "较新", T0.AddMinutes(-10));
+        ledger.Record(@"\\h\c", false, "确认失效", T0.AddMinutes(-20));
+        ledger.Record(@"\\h\d", true, "刚刚读到", T0);            // 新鲜 ⇒ 不需要探测
+
+        var picked = ledger.TargetsNeedingProbe(T0, maxTargets: 2);
+
+        Assert.Equal(2, picked.Count);
+        Assert.Equal(@"\\h\a", picked[0].Target);                 // 最旧优先
+        Assert.DoesNotContain(picked, f => f.Target == @"\\h\d"); // 新鲜的不探测
+    }
+
+    // ── ④ 接线契约：不能被悄悄改回"只数数量"的旧逻辑 ────────────────────────────
+
+    [Fact]
+    public void ConnectionViewModel_UsesLedgerAndSweep_NotTheOldCountOnlyRule()
+    {
+        var code = ReadRepoFile("src", "PCMig.WinUI", "Presentation", "ConnectionViewModel.cs");
+
+        Assert.Contains("SourceEvidenceLedger", code);
+        Assert.Contains("Derive(", code);
+        Assert.Contains("SweepEvidenceFreshness", code);
+        Assert.Contains("EvidenceTtl", code);
+        // 旧缺陷写法：只按"有没有可达事实"分档，从不看时间
+        Assert.DoesNotContain("var reachable = _shareFacts.Values.Count(f => f.Reachable);", code);
+        // 纪律：不得用 ping / 网卡在线 / 历史连接成功当"共享可读"的证据
+        Assert.DoesNotContain("Ping", code);
+        Assert.DoesNotContain("NetworkInterface", code);
+    }
+
+    [Fact]
+    public void FooterPresentationTick_DrivesTheFreshnessSweep()
+    {
+        var main = ReadRepoFile("src", "PCMig.WinUI", "MainWindow.xaml.cs");
+        var window = MethodWindow(main, "private void RefreshFooterPresentation()", 600);
+
+        Assert.Contains("ViewModel.SweepEvidenceFreshness()", window);
+        // 探测结论要能回到 UI 线程（否则跨线程改属性）
+        Assert.Contains("AttachUiQueue", main);
+    }
+
+    [Fact]
+    public void ProbeIsBounded_SingleFlightAndIntervalGuarded()
+    {
+        var code = ReadRepoFile("src", "PCMig.WinUI", "Presentation", "ConnectionViewModel.cs");
+        var probe = MethodWindow(code, "private async Task ProbeIfDueAsync", 1200);
+
+        Assert.Contains("_probeGate.WaitAsync(0)", probe);        // 单飞：不叠加 SMB 请求
+        Assert.Contains("ProbeInterval", probe);                  // 有界间隔
+        Assert.Contains("Task.Run", probe);                       // 不阻塞 UI 线程
+        Assert.Contains("ShareCountProbe", probe);                // 只认"真的读到了"
+    }
+
+    // ── helpers ────────────────────────────────────────────────────────────────
+
+    private static string MethodWindow(string text, string signature, int length)
+    {
+        var i = text.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(i >= 0, $"找不到方法签名：{signature}");
+        return text.Substring(i, Math.Min(length, text.Length - i));
+    }
+
+    private static string ReadRepoFile(params string[] parts)
+        => File.ReadAllText(Path.Combine(new[] { FindRepoRoot() }.Concat(parts).ToArray()));
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "PCMig.sln"))) return dir.FullName;
+            dir = dir.Parent;
+        }
+        throw new InvalidOperationException("找不到仓库根（PCMig.sln）。");
+    }
+}

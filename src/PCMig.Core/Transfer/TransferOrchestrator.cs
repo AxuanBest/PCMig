@@ -63,6 +63,23 @@ public sealed record ProgressSnapshot(
 /// </summary>
 public sealed class TransferOrchestrator
 {
+    /// <summary>
+    /// ★ P0-01(4) / P0-03 ★ 破坏性修复闸门判据：读本 Job 最近一次验证结论，**只有"确认差异"才放行动目标文件**。
+    /// 无验证记录 ⇒ 同样视为"无法确认"（老 Job 没有 verify-report.json，也必须挡住）。
+    /// ★ D1-c（2026-10-12）★ 先过**报告级**证据闸门 <see cref="RepairEvidenceGate"/>：
+    /// 报告必须存在、属于本 Job、那一轮验证跑完了、且不早于当前计划、来自同一构建版本；
+    /// 再过**对象级**判据 <see cref="RepairGate"/>（独立可测、单一真值），这里只负责把两者接起来。
+    /// </summary>
+    private bool PurgeGateAllows(PlannedObject obj, out string code, out string status)
+    {
+        var report = _ctx.LoadVerify();
+        if (!RepairEvidenceGate.Allows(report, _ctx, out code, out status)) return false;
+
+        return RepairGate.AllowsDestructiveRepair(
+            report?.Objects.FirstOrDefault(o => o.ObjectId == obj.ObjectId),
+            out code, out status);
+    }
+
     private readonly JobContext _ctx;
     private readonly MigrationMatrix _matrix;
     private readonly ILogger _log;
@@ -691,6 +708,24 @@ public sealed class TransferOrchestrator
             state.Phase = state.FailedObjects > 0 ? JobPhase.CompletedWithErrors : JobPhase.Completed;
         }
         TargetRootGuard.EnsureVisible(job.TargetRoot, _log);   // 收尾再兜一次，杜绝"数据在但看不见"
+
+        // ★ P0-03 ★ 强制覆盖旧副本收尾：**只有**"新副本被确认可信"（目标重新出现且长度等于源长度，
+        //   小文件再比内容哈希）才丢弃旧副本；判定不了就保留并如实报告。放在收尾而不是每个对象之后：
+        //   一次运行可能隔离同一对象的多个文件，统一判定更省 IO；且崩溃/断电时账本仍在 Job 目录里，
+        //   下次运行或恢复通道（RepairQuarantine.RestoreHeld）仍可处理。
+        try
+        {
+            var settle = RepairQuarantine.Settle(RepairQuarantine.LedgerPath(_ctx.JobDir), _log);
+            if (settle.Dropped > 0 || settle.Held > 0 || settle.Missing > 0)
+                _log.Information("强制覆盖旧副本收尾: 丢弃 {Dropped} 个（新副本可信）、保留 {Held} 个（{Bytes}）、账本中已找不到 {Missing}",
+                    settle.Dropped, settle.Held, Format.Bytes(settle.HeldBytes), settle.Missing);
+        }
+        catch (Exception ex)
+        {
+            // 收尾失败绝不影响传输结论：旧副本仍留在磁盘上（更安全的一侧）。
+            _log.Warning(ex, "强制覆盖旧副本收尾失败：旧副本原样保留在目标目录，未被丢弃");
+        }
+
         state.Percent = Percent(state);
         state.BytesPerSecond = CumulativeSpeed(state.CompletedBytes);  // 收尾速率 = 本次运行的平均值（status 显示同源）
         _ctx.SaveState(state);
@@ -810,33 +845,71 @@ public sealed class TransferOrchestrator
         _lastFileEventAt = DateTime.MinValue; _lastEnumAt = DateTime.MinValue;
         _enumSkipLogged = false;
 
-        // ---- 强制覆盖（修复专用）：先删目标侧同名文件，逼 robocopy 从共享重新拉取 ----
-        // 不删的话，robocopy 对"大小+时间相同"的文件一律跳过（实测 /IS /IT 也无效）。
-        if (ForceOverwriteFromSource)
+        // ---- 强制覆盖（修复专用）：让目标侧同名文件"消失"，逼 robocopy 从共享重新拉取 ----
+        // 不处理的话，robocopy 对"大小+时间相同"的文件一律跳过（实测 /IS /IT 也无效）。
+        // ★ P0-01(4) / P0-03 ★ 破坏性修复闸门：**只有"确认差异"的验证结论才允许改动目标文件**。
+        //   现场证据：Preview object-000018 的 14 个根层文件（27.44 GB）与 Stable a632
+        //   object-000004 的目标文件，都是被"假缺失"结论触发的强制覆盖删掉的。
+        //   UNKNOWN（源/目标不可达、枚举被跳过、与计划矛盾的 0/0）与 EMPTY 一律只报告、不动目标。
+        // ★ P0-03（2026-10-12 数据安全复核）★ 通过闸门后也**不再删除**：改为同目录改名隔离
+        //   （<原名>.pcmig-old-<时间戳>，见 RepairQuarantine）。触发 robocopy 重拷的效果与删除等价，
+        //   但旧副本在"新副本被确认可信"之前始终留在磁盘上，并可经账本一键恢复。
+        if (ForceOverwriteFromSource && !PurgeGateAllows(obj, out var gateCode, out var gateStatus))
         {
-            var purge = RepairPurge.PurgeTargetCopies(obj, job.Options, _matrix, _log);
-            if (purge.Files > 0 || purge.SkippedLarge > 0)
-                _log.Information("强制覆盖: 对象 {Id} 已删除目标侧 {Files} 个同名文件（{Bytes}），将从共享重新拉取{Skip}",
-                    obj.ObjectId, purge.Files, Format.Bytes(purge.Bytes),
-                    purge.SkippedLarge > 0 ? $"；{purge.SkippedLarge} 个大于分流阈值且本次不走 /Z 通道的文件已跳过不删" : "");
-
-            // ★ D6.1 §16 观察点 ★ 净化聚合（含**失败数**）：只陈述事实，不改任何删除决策。
+            _log.Warning("强制覆盖：对象 {Id} 跳过隔离阶段 —— 验证结论 {Status}（{Code}），未确认差异不得改动目标文件",
+                obj.ObjectId, gateStatus, gateCode);
             Diagnostics.CoreDiagnostics.PublishCore(
-                RepairEvents.PurgeAttempted,
-                new RprPurgePayload(purge.Files, purge.Bytes, purge.SkippedLarge, purge.Failed, "force-overwrite"),
+                VerifyEvents.Mismatch,
+                new VrfMismatchPayload("repair-blocked:" + gateCode, 1, null),
                 _ctx.Diagnostics.WithObject(obj.ObjectId),
-                DiagnosticLevel.Information,
-                purge.Failed > 0 ? DiagnosticOutcome.Unknown : DiagnosticOutcome.Succeeded,
+                DiagnosticLevel.Warning,
+                DiagnosticOutcome.Unknown,
                 "TransferOrchestrator");
+        }
+        else if (ForceOverwriteFromSource)
+        {
+            var purge = RepairPurge.PurgeTargetCopies(
+                obj, job.Options, _matrix, _log, RepairQuarantine.LedgerPath(_ctx.JobDir));
 
-            if (purge.Failed > 0)
+            if (purge.BlockedNoSpace)
+            {
+                // ★ P0-03 ★ 空间不足时不隔离：隔离期间旧副本不释放空间，宁可不修，也不让旧数据先消失。
+                _log.Warning("强制覆盖：对象 {Id} 放弃隔离 —— 目标卷可用空间不足以同时保留旧副本与新副本，旧数据原样未动",
+                    obj.ObjectId);
                 Diagnostics.CoreDiagnostics.PublishCore(
-                    RepairEvents.PurgeFailed,
-                    new RprPurgePayload(purge.Files, purge.Bytes, purge.SkippedLarge, purge.Failed, "delete-failed"),
+                    RepairEvents.PurgeAttempted,
+                    new RprPurgePayload(purge.Files, purge.Bytes, purge.SkippedLarge, purge.Failed,
+                        "quarantine-blocked-no-space"),
                     _ctx.Diagnostics.WithObject(obj.ObjectId),
                     DiagnosticLevel.Warning,
-                    DiagnosticOutcome.Failed,
+                    DiagnosticOutcome.Unknown,
                     "TransferOrchestrator");
+            }
+            else
+            {
+                if (purge.Files > 0 || purge.SkippedLarge > 0)
+                    _log.Information("强制覆盖: 对象 {Id} 已隔离目标侧 {Files} 个同名文件（{Bytes}）为 .pcmig-old-* 旧副本（未删除），将从共享重新拉取{Skip}",
+                        obj.ObjectId, purge.Files, Format.Bytes(purge.Bytes),
+                        purge.SkippedLarge > 0 ? $"；{purge.SkippedLarge} 个大于分流阈值且本次不走 /Z 通道的文件已跳过不隔离" : "");
+
+                // ★ D6.1 §16 观察点 ★ 净化聚合（含**失败数**）：只陈述事实，不改任何隔离决策。
+                Diagnostics.CoreDiagnostics.PublishCore(
+                    RepairEvents.PurgeAttempted,
+                    new RprPurgePayload(purge.Files, purge.Bytes, purge.SkippedLarge, purge.Failed, "force-overwrite"),
+                    _ctx.Diagnostics.WithObject(obj.ObjectId),
+                    DiagnosticLevel.Information,
+                    purge.Failed > 0 ? DiagnosticOutcome.Unknown : DiagnosticOutcome.Succeeded,
+                    "TransferOrchestrator");
+
+                if (purge.Failed > 0)
+                    Diagnostics.CoreDiagnostics.PublishCore(
+                        RepairEvents.PurgeFailed,
+                        new RprPurgePayload(purge.Files, purge.Bytes, purge.SkippedLarge, purge.Failed, "quarantine-failed"),
+                        _ctx.Diagnostics.WithObject(obj.ObjectId),
+                        DiagnosticLevel.Warning,
+                        DiagnosticOutcome.Failed,
+                        "TransferOrchestrator");
+            }
         }
 
         // 进度轮询任务：周期性实测目标目录字节增长 → 更新 CompletedBytes/速度/ETA

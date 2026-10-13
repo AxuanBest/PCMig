@@ -16,7 +16,7 @@ using Serilog;
 namespace PCMig.Cli;
 
 /// <summary>
-/// PCMig 命令行入口。子命令：preflight / new / run / pause / resume / status / verify / report / list / quick
+/// PCMig 命令行入口。子命令：preflight / new / run / pause / resume / status / verify / report / list / quick / repair-restore
 /// </summary>
 internal static class Program
 {
@@ -34,7 +34,46 @@ internal static class Program
         }
 
         var cmd = args[0].ToLowerInvariant();
-        var opt = ParseOptions(args.Skip(1).ToArray());
+
+        // ★ D7 危险行为修复 ★ 解析 → 校验 → help，全部发生在**任何有副作用的动作之前**。
+        //   旧行为：--help 被静默丢弃后照样执行 resume/run；未知参数被吞掉后照样跑；--jobs=<dir>
+        //   不被识别而静默回落到默认 Job 根。三者都以"意外的真实业务动作"为后果。
+        var parsed = CliArgs.Parse(args.Skip(1).ToArray());
+
+        // 1) 语法级错误（如 --jobs 缺值）先阻断
+        if (parsed.SyntaxError != null)
+        {
+            Console.WriteLine($"✘ {parsed.SyntaxError}");
+            PrintCommandUsage(cmd);
+            return FailCode;
+        }
+
+        // 2) 未知选项一律拒绝——绝不允许"没认出来就照跑"
+        if (parsed.UnknownOptions.Count > 0)
+        {
+            Console.WriteLine($"✘ 未知参数: {string.Join(" ", parsed.UnknownOptions.Distinct(StringComparer.OrdinalIgnoreCase))}");
+            Console.WriteLine("  参数名不在本版本支持的选项里。请核对拼写；下方是该子命令的用法。");
+            PrintCommandUsage(cmd);
+            return FailCode;
+        }
+
+        // 3) 位置参数策略（只对从不读位置参数的命令报错）
+        var positionalError = CliArgs.ValidatePositionals(cmd, parsed.Positionals);
+        if (positionalError != null)
+        {
+            Console.WriteLine($"✘ {positionalError}");
+            PrintCommandUsage(cmd);
+            return FailCode;
+        }
+
+        // 4) 子命令级帮助：打印该子命令用法后立即返回，**不执行任何业务逻辑**
+        if (parsed.HelpRequested)
+        {
+            PrintCommandUsage(cmd);
+            return 0;
+        }
+
+        var opt = parsed.Options;
 
         if (opt.TryGetValue("jobs", out var jobsDir))
             Environment.SetEnvironmentVariable("PCMIG_JOBS", jobsDir);
@@ -65,6 +104,11 @@ internal static class Program
                 "status" => await CmdStatus(opt),
                 "verify" => await CmdVerify(opt),
                 "report" => CmdReport(opt),
+                // ★ m03985 ★ 验证报告（与迁移报告分开的两份业务事实）：
+                //   迁移报告讲「传了什么」；验证报告讲「核对到了什么、没核对成什么」。
+                "verify-report" or "vreport" => CmdVerifyReport(opt),
+                // ★ P0-03 ★ 强制覆盖旧副本的恢复通道（不依赖任何内存状态，只读 Job 目录账本）
+                "repair-restore" or "restore-quarantine" => CmdRestoreQuarantine(opt),
                 "list" => CmdList(),
                 "changelog" or "log" or "history" => CmdChangelog(),
                 "quick" => await CmdQuick(opt),
@@ -683,10 +727,26 @@ internal static class Program
         Console.WriteLine();
         foreach (var o in report.Objects)
         {
-            var mark = o.Status == "OK" ? "✔" : "✘";
-            Console.WriteLine($" {mark} {o.ObjectId}: 文件 {o.TargetFiles}/{o.SourceFiles}, 字节 {Format.Bytes(o.TargetBytes)}/{Format.Bytes(o.SourceBytes)}" +
-                    (o.HashSampled > 0 ? $", 哈希 {o.HashSampled} 项/不一致 {o.HashMismatched}" : ""));
-            foreach (var m in o.MissingSamples.Take(5)) Console.WriteLine($"     缺失: {m}");
+            // ★ P0-02 ★ 四态：只有 OK 是核对过的通过；UNKNOWN（源不可达/枚举被跳过/两侧都空但计划预期有数据）
+            //   与 EMPTY（两边都空且计划也空）都不得显示成"通过"。旧版只有 ✔/✘ 两态，把
+            //   "目标 0/14 的统计缺陷"与"真的一个都没到"显示成同一个符号。
+            var mark = o.Status switch { "OK" => "✔", "EMPTY" => "○", "UNKNOWN" => "？", "CANCELED" => "…", _ => "✘" };
+            var statusWord = o.Status switch
+            {
+                "OK" => "通过", "MISMATCH" => "存在差异", "UNKNOWN" => "无法确认",
+                "EMPTY" => "无可核对数据", "CANCELED" => "已取消", _ => o.Status,
+            };
+            Console.WriteLine($" {mark} {o.ObjectId}: 文件 {o.TargetFiles}/{o.SourceFiles}, 字节 {Format.Bytes(o.TargetBytes)}/{Format.Bytes(o.SourceBytes)}, {statusWord}" +
+                    (o.HashSampled > 0 ? $", 哈希 {o.HashSampled} 项/不一致 {o.HashMismatched}" : "") +
+                    (string.IsNullOrEmpty(o.UnknownReason) ? "" : $"（{o.UnknownReason}）"));
+            // ★ F-1（2026-10-13 定点修复）★ 只有**确证缺失**才写"缺失"。
+            //   UNKNOWN 对象（源/目标不可达、枚举不全）里那些路径只是"读不到那一侧"的副产物，
+            //   必须说成"无法确认"——旧实现把它们逐条打成「缺失: x」，与报告卡片上
+            //   「无法确认不是缺失」直接矛盾，是现场"假缺失"话术的来源。
+            foreach (var m in o.MissingSamples.Take(5))
+                Console.WriteLine(o.MissingConfirmed ? $"     缺失: {m}" : $"     无法确认（未核实，不得当作缺失）: {m}");
+            // 目标多出的文件**不是缺失**，也不自动清理：分开陈述，避免用户照"缺失"去删自己的文件。
+            foreach (var e in o.ExtraOnTarget.Take(5)) Console.WriteLine($"     目标多出（非缺失，不自动清理）: {e}");
         }
         // ---- 抽样 0 项必须说清楚（T01）：L2 是抽样校验，一项都没抽到时"全部通过"只等于
         //      "文件数/字节数对账通过"，绝不能让人误以为做过内容级核对（脚本也会把 0 失败读成已全量校验）。
@@ -723,6 +783,52 @@ internal static class Program
         if (opt.ContainsKey("open")) System.Diagnostics.Process.Start(
             new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
         return 0;
+    }
+
+    /// <summary>
+    /// ★ m03985 执行令 §HTML 00–10 ★ 生成**验证报告**（本地自包含 HTML）。
+    /// 没有验证结果时如实说"还没有验证报告"，**不生成空报告**（返回码 3，便于脚本区分"没有结论"与"生成失败"）。
+    /// 与 <see cref="CmdReport"/> 严格区分：本命令读 verify-report.json，写 verify-report-*.html。
+    /// </summary>
+    private static int CmdVerifyReport(Dictionary<string, string> opt)
+    {
+        var jm = new JobManager(_log);
+        var ctx = jm.Open(Required(opt, "job"));
+        var jobLog = LogBootstrap.CreateJobLogger(ctx.JobDir, ctx.JobId);
+        var path = new VerifyReportGenerator(ctx, jobLog).Generate();
+        if (path is null)
+        {
+            Console.WriteLine("还没有验证报告：请先执行 pcmig verify --job <ID>（本命令不生成空报告）。");
+            return 3;
+        }
+        Console.WriteLine($"验证报告: {path}");
+        if (opt.ContainsKey("open")) System.Diagnostics.Process.Start(
+            new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+        return 0;
+    }
+
+    /// <summary>
+    /// ★ P0-03 ★ 恢复强制覆盖保留的旧副本：读 Job 目录的 quarantine.jsonl，把仍未被"可信新副本"取代的
+    /// <c>&lt;原名&gt;.pcmig-old-*</c> 改名回原路径。**目标侧已存在时一律跳过**——恢复动作绝不制造覆盖风险。
+    /// 这是独立于 UI 的恢复通道：断网/停止/崩溃后，即使进程早已退出，也能凭账本把旧数据放回原位。
+    /// 返回码：0 已全部处理；1 有恢复失败；3 没有账本（没有需要恢复的记录，与"恢复失败"区分）。
+    /// </summary>
+    private static int CmdRestoreQuarantine(Dictionary<string, string> opt)
+    {
+        var jm = new JobManager(_log);
+        var ctx = jm.Open(Required(opt, "job"));
+        var ledger = RepairQuarantine.LedgerPath(ctx.JobDir);
+        if (!File.Exists(ledger))
+        {
+            Console.WriteLine($"没有旧副本账本：{ledger}（该任务没有保留过旧副本）");
+            return 3;
+        }
+
+        var r = RepairQuarantine.RestoreHeld(ledger, _log);
+        Console.WriteLine($"旧副本恢复：已恢复 {r.Restored}，目标已存在跳过 {r.SkippedExisting}，" +
+                          $"旧副本已不在 {r.Missing}，失败 {r.Failed}");
+        Console.WriteLine($"账本: {ledger}");
+        return r.Failed > 0 ? 1 : 0;
     }
 
     private static int CmdList()
@@ -817,21 +923,8 @@ internal static class Program
         => opt.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v)
             ? v : throw new ArgumentException($"缺少必需参数 --{key}");
 
-    private static Dictionary<string, string> ParseOptions(string[] args)
-    {
-        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        for (var i = 0; i < args.Length; i++)
-        {
-            var a = args[i];
-            if (!a.StartsWith("--")) continue;
-            var key = a[2..];
-            if (i + 1 < args.Length && !args[i + 1].StartsWith("--"))
-                dict[key] = args[++i];
-            else
-                dict[key] = "true"; // 开关型参数
-        }
-        return dict;
-    }
+    // ★ D7 ★ 旧的 ParseOptions 已移除：它把未知参数、等号写法、`--help` 全部静默丢弃。
+    //   现在统一走 CliArgs.Parse（切分 + 白名单 + help 识别），校验在业务调用之前。
 
     /// <summary>
     /// 更新日志：优先读程序目录（或当前目录）下的 更新日志.txt —— 这样用户改了文本也能立刻看到；
@@ -856,7 +949,29 @@ internal static class Program
         return 0;
     }
 
-    private static int Fail(string msg) { Console.WriteLine(msg); PrintUsage(); return 1; }
+    /// <summary>失败退出码（与 <see cref="Fail"/> 一致，集中一处便于核对）。</summary>
+    private const int FailCode = 1;
+
+    private static int Fail(string msg) { Console.WriteLine(msg); PrintUsage(); return FailCode; }
+
+    /// <summary>
+    /// 打印某个子命令的用法（帮助路径专用，**无任何副作用**）。
+    /// 未知命令时退回全局用法，保持旧的导流行为。
+    /// </summary>
+    private static void PrintCommandUsage(string command)
+    {
+        var text = CliArgs.CommandUsage(command);
+        if (string.IsNullOrEmpty(text))
+        {
+            PrintUsage();
+            return;
+        }
+        Console.WriteLine();
+        Console.WriteLine("PCMig 命令行 —— 子命令用法:");
+        Console.WriteLine(text.TrimEnd('\r', '\n'));
+        Console.WriteLine($"  {CliArgs.GlobalUsageHint}");
+        Console.WriteLine();
+    }
 
     private static void PrintUsage()
     {
@@ -872,7 +987,9 @@ PCMig —— 企业内网 Windows 数据/环境迁移（直拉模式：在新电
   pcmig resume    [--job <JOB-ID>]          恢复任务（不带 --job 自动选最近的未完成任务）
   pcmig status    --job <JOB-ID> [--watch]
   pcmig verify    --job <JOB-ID> [--level 2]
-  pcmig report    --job <JOB-ID> [--open]
+  pcmig report    --job <JOB-ID> [--open]                           迁移报告（传了什么）
+  pcmig verify-report --job <JOB-ID> [--open]                       验证报告（核对到了什么，本地 HTML）
+  pcmig repair-restore --job <JOB-ID>                               恢复强制覆盖期间保留的旧副本（.pcmig-old-*）
   pcmig list
   pcmig changelog                           查看从 v0.1.0 起的所有版本更新内容（同安装目录的 更新日志.txt）
 

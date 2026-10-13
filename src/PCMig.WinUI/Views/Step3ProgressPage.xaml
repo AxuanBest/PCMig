@@ -205,13 +205,22 @@
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Style="{StaticResource PCMigTextListItemTitle}" Text="{Binding ObjectId}" VerticalAlignment="Center"/>
                                             <TextBlock Grid.Column="1" Style="{StaticResource PCMigTextListItemBody}" Text="{Binding SourcePath}"
                                                        TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                                            <TextBlock Grid.Column="2" Style="{StaticResource PCMigTextListItemMeta}" Text="{Binding SizeText}" VerticalAlignment="Center"/>
-                                            <TextBlock Grid.Column="3" Style="{StaticResource PCMigTextListItemMeta}" Text="{Binding StatusText}" VerticalAlignment="Center"/>
+                                            <!-- ★ P1-07(2) ★ 计划里的最终目标绝对路径：开跑之前就把「源 → 目标」摆出来，
+                                                 多嵌一层同名目录或内容直达在这里一眼可辨（旧版到目标盘长出多余目录才发现）。 -->
+                                            <TextBlock Grid.Column="2" Style="{StaticResource PCMigTextListItemMeta}" Text="&#x2192;"
+                                                       VerticalAlignment="Center" ToolTipService.ToolTip="最终目标路径（取自计划的映射快照）"/>
+                                            <TextBlock Grid.Column="3" Style="{StaticResource PCMigTextListItemBody}" Text="{Binding TargetPath}"
+                                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                                       ToolTipService.ToolTip="{Binding TargetPath}"/>
+                                            <TextBlock Grid.Column="4" Style="{StaticResource PCMigTextListItemMeta}" Text="{Binding SizeText}" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="5" Style="{StaticResource PCMigTextListItemMeta}" Text="{Binding StatusText}" VerticalAlignment="Center"/>
                                         </Grid>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>

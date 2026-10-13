@@ -302,4 +302,171 @@ public sealed class D61ExportClosureTests : IDisposable
 
         D2TestSupport.Shutdown(runtime);
     }
+
+    // ────────── ★ D61 偶发失败收口 ★ 截止点之后的新段 ≠ 包尾丢失 ──────────
+
+    private static void PublishOne(DiagnosticRuntime runtime, string? message = null)
+        => runtime.Publisher.TryPublish(new DiagnosticEventDraft(
+            PersistenceEvents.WriteFailed,
+            DiagnosticContext.Root(runtime.SessionId, "D61").WithControl("Step1.Connect"),
+            new PstWritePayload("Receipt", "Move", true, "IOException"),
+            Outcome: DiagnosticOutcome.Failed,
+            ErrorDomain: ErrorDomain.Managed,
+            ExceptionType: "IOException",
+            Message: message));
+
+    /// <summary>等某族真的多出一个"未封段"（有界）：在线系统在封段之后继续落事件就是这个形状。</summary>
+    private static void WaitForUnsealedSegment(string sessionDir, string family)
+    {
+        var dir = Path.Combine(sessionDir, family);
+        Assert.True(D2TestSupport.WaitUntil(
+                () => Directory.Exists(dir) && Directory.EnumerateFiles(dir, "*.jsonl").Any(f => !File.Exists(f + ".manifest.json")),
+                10_000),
+            $"{family} 目录里始终没出现未封段");
+    }
+
+    private static long[] SequencesInPackage(Dictionary<string, string> package, string folder)
+    {
+        var sequences = new List<long>();
+        foreach (var entry in package.Where(kv => kv.Key.Contains(folder) && kv.Key.EndsWith(".jsonl", StringComparison.Ordinal)))
+            foreach (var line in entry.Value.Split('\n'))
+            {
+                if (line.Trim().Length == 0) continue;
+                using var doc = JsonDocument.Parse(line);
+                if (doc.RootElement.TryGetProperty("sequence", out var seq)) sequences.Add(seq.GetInt64());
+            }
+        return sequences.ToArray();
+    }
+
+    /// <summary>
+    /// ★ 回归本轮偶发失败 ★ 截止点**干净**（acknowledged / 无尾巴）之后又落了一条事件（在线系统的常态），
+    /// 导出必须：① 不因此自称"包尾丢失"；② 如实登记"截止点之后的段被排除"；
+    /// ③ 截止点自身的覆盖一条不少地进包；④ **不**把截止点之后的内容混进包里冒充覆盖。
+    /// </summary>
+    [Fact]
+    public void OneEventPublishedAfterTheCutoffIsExcludedWithoutClaimingTailLoss()
+    {
+        const int published = 25;
+        var runtime = StartRuntime("post-cutoff", events: published);
+        WaitForWritten(runtime, published);
+        WaitForViewer(runtime, published);
+
+        Assert.True(runtime.TryGetViewerSnapshot(out var all), "viewer 快照不可得");
+        var lastSequence = all.Where(e => e.Descriptor.Name == PersistenceEvents.WriteFailed.Name).Max(e => e.Sequence);
+
+        var sessionDir = runtime.Store!.SessionDir;
+        var cutoff = runtime.PrepareExportCutoff(TimeSpan.FromSeconds(3));
+        Assert.Equal("acknowledged", cutoff.FlushStatus);
+        Assert.False(cutoff.AnyTailLoss, "截止点本身不该有尾巴丢失");
+
+        // 截止点之后照样会发生事（维护循环的丢失/存储/滞后事件就是这样来的）。
+        var writtenBefore = runtime.Health.EventsWritten;
+        PublishOne(runtime, "post-cutoff");
+        Assert.True(D2TestSupport.WaitUntil(() => runtime.Health.EventsWritten > writtenBefore, 10_000),
+            "截止点之后的新事件没落盘");
+        WaitForUnsealedSegment(sessionDir, "events");
+
+        var outcome = new DiagnosticPackageExporter().Export(new DiagnosticExportRequest
+        {
+            SessionDir = sessionDir,
+            OutputDirectory = Path.Combine(_root, "out-post-cutoff"),
+            Health = runtime.GetHealthSnapshot(),
+            Cutoff = cutoff,
+        });
+        Assert.True(outcome.Succeeded, outcome.FailureReason);
+
+        var package = ReadPackage(outcome.ZipPath!);
+        var manifestText = package["manifest.json"];
+
+        using var manifest = JsonDocument.Parse(manifestText);
+        var cutoffNode = manifest.RootElement.GetProperty("cutoff");
+        Assert.Equal("acknowledged", cutoffNode.GetProperty("flushStatus").GetString());
+        Assert.Equal(0, cutoffNode.GetProperty("pendingAtCutoff").GetInt64());
+        Assert.False(cutoffNode.GetProperty("anyTailLoss").GetBoolean(),
+            "截止点之后又落了一条事件，不等于包尾丢了东西");
+        Assert.True(cutoffNode.GetProperty("postCutoffSegmentsExcluded").GetInt32() >= 1,
+            "至少那条截止点之后落盘的新段要被登记为「排除」");
+        Assert.Contains("post-cutoff-segment-excluded:", manifestText, StringComparison.Ordinal);
+        Assert.DoesNotContain("active-segment-skipped:events/", manifestText, StringComparison.Ordinal);
+
+        // ③ 截止点的覆盖一条不少（最新那条仍在包里）；④ 截止点之后的内容不许混进包冒充覆盖。
+        var sequences = SequencesInPackage(package, "/events/");
+        Assert.NotEmpty(sequences);
+        Assert.Contains(lastSequence, sequences);
+        Assert.True(sequences.Max() <= cutoff.CutoffSequence,
+            $"包内出现了截止点（{cutoff.CutoffSequence}）之后的事件：max={sequences.Max()}");
+
+        D2TestSupport.Shutdown(runtime);
+    }
+
+    /// <summary>
+    /// ★ 反掩盖守卫 ★ 截止点处**封段失败**时，目录里那个没封成的活动段仍然必须算作包尾丢失 ——
+    /// 不能因为"它没 manifest"和"新段的形状一样"就把它当成"截止点之后的段"放过。
+    /// </summary>
+    [Fact]
+    public void AFailedSealAtTheCutoffIsStillReportedAsTailLoss()
+    {
+        const int published = 25;
+        var runtime = StartRuntime("seal-failed", events: published);
+        WaitForWritten(runtime, published);
+
+        var sessionDir = runtime.Store!.SessionDir;
+        var cutoff = runtime.PrepareExportCutoff(TimeSpan.FromSeconds(3));
+        Assert.Equal("acknowledged", cutoff.FlushStatus);
+
+        var writtenBefore = runtime.Health.EventsWritten;
+        PublishOne(runtime, "post-cutoff");
+        Assert.True(D2TestSupport.WaitUntil(() => runtime.Health.EventsWritten > writtenBefore, 10_000), "新事件没落盘");
+        WaitForUnsealedSegment(sessionDir, "events");
+
+        // 复现"截止点处封段没成功"：此时那个未封段就是**截止点自己的尾巴**，不是后来的新段。
+        var failedSeal = cutoff with { FlushStatus = "seal-failed", AnyTailLoss = true };
+        var outcome = new DiagnosticPackageExporter().Export(new DiagnosticExportRequest
+        {
+            SessionDir = sessionDir,
+            OutputDirectory = Path.Combine(_root, "out-seal-failed"),
+            Health = runtime.GetHealthSnapshot(),
+            Cutoff = failedSeal,
+        });
+        Assert.True(outcome.Succeeded, outcome.FailureReason);
+
+        var manifestText = ReadPackage(outcome.ZipPath!)["manifest.json"];
+        using var manifest = JsonDocument.Parse(manifestText);
+        var cutoffNode = manifest.RootElement.GetProperty("cutoff");
+        Assert.True(cutoffNode.GetProperty("anyTailLoss").GetBoolean(), "封段失败必须是包尾丢失");
+        // ★ 按族断言 ★ 别的族（如 incidents）在负载下同样可能出现"截止点之后的新段"，那是正常的；
+        //   这里只咬死一点：**events 族封段失败**时，那个未封段绝不许被当成"截止点之后的段"放过。
+        Assert.Contains("active-segment-skipped:events/", manifestText, StringComparison.Ordinal);
+        Assert.DoesNotContain("post-cutoff-segment-excluded:events/", manifestText, StringComparison.Ordinal);
+
+        D2TestSupport.Shutdown(runtime);
+    }
+
+    /// <summary>没有截止点（调用方没给）时不许猜：未封段照旧算跳过、包照旧自称不完整。</summary>
+    [Fact]
+    public void WithoutACutoffAnUnsealedSegmentIsStillNotClaimedComplete()
+    {
+        const int published = 25;
+        var runtime = StartRuntime("no-cutoff", events: published);
+        WaitForWritten(runtime, published);
+        WaitForUnsealedSegment(runtime.Store!.SessionDir, "events");
+
+        var outcome = new DiagnosticPackageExporter().Export(new DiagnosticExportRequest
+        {
+            SessionDir = runtime.Store!.SessionDir,
+            OutputDirectory = Path.Combine(_root, "out-no-cutoff"),
+            Health = runtime.GetHealthSnapshot(),
+        });
+        Assert.True(outcome.Succeeded, outcome.FailureReason);
+
+        var manifestText = ReadPackage(outcome.ZipPath!)["manifest.json"];
+        using var manifest = JsonDocument.Parse(manifestText);
+        var cutoffNode = manifest.RootElement.GetProperty("cutoff");
+        Assert.Equal("not-provided", cutoffNode.GetProperty("flushStatus").GetString());
+        Assert.True(cutoffNode.GetProperty("anyTailLoss").GetBoolean());
+        Assert.Contains("active-segment-skipped", manifestText, StringComparison.Ordinal);
+        Assert.DoesNotContain("post-cutoff-segment-excluded", manifestText, StringComparison.Ordinal);
+
+        D2TestSupport.Shutdown(runtime);
+    }
 }

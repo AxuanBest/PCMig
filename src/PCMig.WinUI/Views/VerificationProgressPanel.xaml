@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ★ PMML 返修（2026-10-11）★ 验证完整性进度面板。
+
+  这是**应用内工具浮层**（Utility / Tool Surface），不是独立窗口：
+    · 复用诊断中心同一套材质 token（PCMigUtilityPanelMaterial80 + PCMigDAELBrushQuiet）；
+    · 开合与定位全部交给 Shell 既有机制（FluidZoomTransitionCoordinator + TryPlacePanel/TAOP），
+      面板自己**不做**动画、不做定位、不改 MaxHeight；
+    · 关闭面板 ≠ 取消验证：关闭只是收起观察窗，取消要真的向引擎发取消请求。
+
+  布局纪律（照抄诊断中心）：标题固定 / 进度概览固定 / 主体唯一 ScrollViewer / 底部动作固定。
+-->
+<UserControl
+    x:Class="PCMig.WinUI.Views.VerificationProgressPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:PCMig.WinUI.Views">
+
+    <UserControl.Resources>
+        <DataTemplate x:Key="VerificationObjectRowTemplate" x:DataType="views:VerificationProgressRow">
+            <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,0,0,6">
+                <Expander.Header>
+                    <Grid ColumnSpacing="10" Padding="0,2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="{x:Bind StatusBackground}" CornerRadius="8"
+                                Padding="8,2" VerticalAlignment="Center">
+                            <TextBlock Text="{x:Bind StatusText}" Style="{StaticResource PCMigTextListItemMeta}" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{x:Bind StatusForeground}" />
+                        </Border>
+                        <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="{x:Bind ObjectId}" Style="{StaticResource PCMigTextListItemTitle}"
+                                       TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                            <TextBlock Text="{x:Bind PathShort}" Style="{StaticResource PCMigTextListItemMeta}"
+                                       TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="2" Text="{x:Bind CountsText}" TextAlignment="Right"
+                                   Style="{StaticResource PCMigTextListItemMeta}" VerticalAlignment="Center" />
+                    </Grid>
+                </Expander.Header>
+                <StackPanel Spacing="6" Padding="0,0,0,6">
+                    <TextBlock Text="{x:Bind PathFull}" Style="{StaticResource PCMigTextListItemBody}"
+                               TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                    <TextBlock Text="{x:Bind CountsDetailText}" Style="{StaticResource PCMigTextListItemBody}"
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="{x:Bind DiffText}" Style="{StaticResource PCMigTextListItemBody}"
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="{x:Bind ReasonText}" Style="{StaticResource PCMigTextListItemBody}"
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="{x:Bind EvidenceText}" Style="{StaticResource PCMigTextListItemMeta}" FontFamily="Consolas" FontSize="11"
+                               Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"
+                               IsTextSelectionEnabled="True" />
+                    <Button Content="复制本对象证据" Click="CopyRowButton_Click" Tag="{x:Bind}"
+                            HorizontalAlignment="Left" />
+                </StackPanel>
+            </Expander>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Border x:Name="PanelSurface" Width="820" MaxHeight="720"
+            HorizontalAlignment="Right" VerticalAlignment="Top"
+            Background="{StaticResource PCMigUtilityPanelMaterial80}"
+            BorderBrush="{StaticResource PCMigDAELBrushQuiet}" BorderThickness="1"
+            CornerRadius="18" Padding="16" Translation="0,0,24"
+            AutomationProperties.AutomationId="Shell.Panel.Verification">
+        <Grid RowSpacing="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- ─────────── 0：标题区（固定，永不被滚动带走） ─────────── -->
+            <Grid Grid.Row="0" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock x:Name="TitleText" Text="验证完整性" Style="{StaticResource PCMigTextListItemTitle}"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               AutomationProperties.AutomationId="Shell.Panel.Verification.TitleText" />
+                    <TextBlock x:Name="SubtitleText" Style="{StaticResource PCMigTextListItemMeta}"
+                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                               AutomationProperties.AutomationId="Shell.Panel.Verification.SubtitleText" />
+                    <TextBlock x:Name="SemanticsText" Style="{StaticResource PCMigTextListItemMeta}"
+                               TextWrapping="Wrap"
+                               Text="L1 只核对文件数量与总字节（不是逐文件 SHA256 全量一致）；进度与计数全部来自引擎实测累计值。"
+                               AutomationProperties.AutomationId="Shell.Panel.Verification.SemanticsText" />
+                </StackPanel>
+                <Button x:Name="StartVerifyButton" Grid.Column="1" VerticalAlignment="Top"
+                        Content="开始验证" Click="StartVerifyButton_Click"
+                        AutomationProperties.AutomationId="Shell.Panel.Verification.StartButton" />
+                <Button x:Name="CloseButton" Grid.Column="2" VerticalAlignment="Top"
+                        Background="Transparent" BorderThickness="0" Padding="6"
+                        Click="CloseButton_Click" ToolTipService.ToolTip="关闭面板（验证仍在后台继续）"
+                        AutomationProperties.AutomationId="Shell.Panel.Verification.CloseButton">
+                    <FontIcon Glyph="&#xE711;" FontSize="14" />
+                </Button>
+            </Grid>
+
+            <!-- ─────────── 1：进度概览（固定） ─────────── -->
+            <Border Grid.Row="1" Style="{StaticResource SecondarySurface}" Padding="14">
+                <StackPanel Spacing="10">
+                    <TextBlock x:Name="OutcomeText" Text="等待引擎回报…" Style="{StaticResource PCMigTextListItemTitle}"
+                               Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="Shell.Panel.Verification.OutcomeText" />
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ProgressBar x:Name="ObjectProgressBar" Grid.Column="0" Height="6" Minimum="0"
+                                     Maximum="100" Value="0" VerticalAlignment="Center"
+                                     AutomationProperties.AutomationId="Shell.Panel.Verification.ObjectProgressBar" />
+                        <TextBlock x:Name="PercentText" Grid.Column="1" Text="—" Style="{StaticResource PCMigTextStatValue}"
+                                   FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}"
+                                   AutomationProperties.AutomationId="Shell.Panel.Verification.PercentText" />
+                    </Grid>
+
+                    <!-- 四态结论：独立摘要（两列两行），不与总体结论挤在同一行 -->
+                    <Grid ColumnSpacing="18" RowSpacing="4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="通过" Style="{StaticResource PCMigTextListItemMeta}" />
+                            <TextBlock x:Name="OkCountText" Text="0" Style="{StaticResource PCMigTextListItemTitle}"
+                                       Foreground="{StaticResource SuccessBrush}"
+                                       AutomationProperties.AutomationId="Shell.Panel.Verification.OkCountText" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="存在差异" Style="{StaticResource PCMigTextListItemMeta}" />
+                            <TextBlock x:Name="MismatchCountText" Text="0" Style="{StaticResource PCMigTextListItemTitle}"
+                                       Foreground="{StaticResource DangerBrush}"
+                                       AutomationProperties.AutomationId="Shell.Panel.Verification.MismatchCountText" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="无法确认" Style="{StaticResource PCMigTextListItemMeta}" />
+                            <TextBlock x:Name="UnknownCountText" Text="0" Style="{StaticResource PCMigTextListItemTitle}"
+                                       Foreground="{StaticResource WarningBrush}"
+                                       AutomationProperties.AutomationId="Shell.Panel.Verification.UnknownCountText" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="无可核对数据" Style="{StaticResource PCMigTextListItemMeta}" />
+                            <TextBlock x:Name="EmptyCountText" Text="0" Style="{StaticResource PCMigTextListItemTitle}"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       AutomationProperties.AutomationId="Shell.Panel.Verification.EmptyCountText" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- 指标：四列，大数字不省略（换行而不是截断） -->
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Spacing="2">
+                            <TextBlock Text="对象进度" Style="{StaticResource PCMigTextListItemMeta}" />
+                            <TextBlock x:Name="ObjectCountText" Text="无" Style="{StaticResource PCMigTextListItemTitle}"
+                                       Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap"
+                                       TextTrimming="None"
+                                       AutomationProperties.AutomationId="Shell.Panel.Verification.ObjectCountText" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="已核对文件" Style="{StaticResource PCMigTextListItemMeta}" />
+                            <TextBlock x:Name="FilesCheckedText" Text="无" Style="{StaticResource PCMigTextListItemTitle}"
+                                       Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap"
+                                       TextTrimming="None"
+                                       AutomationProperties.AutomationId="Shell.Panel.Verification.FilesCheckedText" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="2">
+                            <TextBlock Text="已核对字节" Style="{StaticResource PCMigTextListItemMeta}" />
+                            <TextBlock x:Name="BytesCheckedText" Text="无" Style="{StaticResource PCMigTextListItemTitle}"
+                                       Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap"
+                                       TextTrimming="None"
+                                       AutomationProperties.AutomationId="Shell.Panel.Verification.BytesCheckedText" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="3" Spacing="2">
+                            <TextBlock Text="已用时间" Style="{StaticResource PCMigTextListItemMeta}" />
+                            <TextBlock x:Name="ElapsedText" Text="无" Style="{StaticResource PCMigTextListItemTitle}"
+                                       Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap"
+                                       TextTrimming="None"
+                                       AutomationProperties.AutomationId="Shell.Panel.Verification.ElapsedText" />
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock x:Name="StatusLineText" Style="{StaticResource PCMigTextListItemBody}"
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="Shell.Panel.Verification.StatusLineText" />
+                    <TextBlock x:Name="StageDetailText" Style="{StaticResource PCMigTextListItemMeta}"
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="Shell.Panel.Verification.StageDetailText" />
+                </StackPanel>
+            </Border>
+
+            <!-- ─────────── 2：主体（唯一滚动区） ─────────── -->
+            <Grid Grid.Row="2" RowSpacing="6" MinHeight="120">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Style="{StaticResource PCMigTextListItemMeta}" TextWrapping="Wrap"
+                           Text="对象结论（每行可展开：完整路径、两侧对账、差异样例、结论原因与证据，均可复制）" />
+                <ScrollViewer x:Name="ObjectScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                              VerticalScrollMode="Auto" Padding="0,0,4,0"
+                              AutomationProperties.AutomationId="Shell.Panel.Verification.ObjectScroll">
+                    <StackPanel Spacing="4">
+                        <TextBlock x:Name="ObjectsEmptyText" Text="尚无对象结论：引擎出结论后会逐条列出。"
+                                   Style="{StaticResource PCMigTextListItemMeta}" TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="Shell.Panel.Verification.ObjectsEmptyText" />
+                        <ItemsControl x:Name="ObjectList"
+                                      ItemTemplate="{StaticResource VerificationObjectRowTemplate}"
+                                      AutomationProperties.AutomationId="Shell.Panel.Verification.ObjectsHost" />
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+
+            <!-- ─────────── 3：底部动作（固定） ─────────── -->
+            <Grid Grid.Row="3" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="FooterHintText" Grid.Column="0" VerticalAlignment="Center"
+                           Style="{StaticResource PCMigTextListItemMeta}" TextWrapping="Wrap"
+                           IsTextSelectionEnabled="True"
+                           AutomationProperties.AutomationId="Shell.Panel.Verification.FooterHintText" />
+                <Button x:Name="CopySummaryButton" Grid.Column="1" Content="复制摘要"
+                        Click="CopySummaryButton_Click"
+                        AutomationProperties.AutomationId="Shell.Panel.Verification.CopySummaryButton" />
+                <Button x:Name="CancelButton" Grid.Column="2" Content="取消验证" Click="CancelButton_Click"
+                        AutomationProperties.AutomationId="Shell.Panel.Verification.CancelButton" />
+                <Button x:Name="ClosePanelButton" Grid.Column="3" Content="关闭" Click="ClosePanelButton_Click"
+                        ToolTipService.ToolTip="收起面板（验证仍在后台继续；再打开可看到真实状态）"
+                        AutomationProperties.AutomationId="Shell.Panel.Verification.ClosePanelButton" />
+                <!-- ★ m03985 执行令 §UI-C/§UI-D ★ 与「关闭」并排的「打开验证报告」：
+                     用系统默认浏览器打开**本地、自包含、可离线**的验证报告 HTML（不是迁移报告，也不是在本面板里再塞一张大表）。
+                     没有结论（未跑 / 取消 / 失败）时禁用，并在底栏如实解释；浏览器打不开时底栏给出本机路径供复制。 -->
+                <Button x:Name="OpenReportButton" Grid.Column="4" Content="打开验证报告"
+                        Click="OpenReportButton_Click" IsEnabled="False"
+                        ToolTipService.ToolTip="用系统默认浏览器打开本地验证报告 HTML（完成一次验证后才可打开）"
+                        AutomationProperties.AutomationId="Shell.Panel.Verification.OpenReportButton" />
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

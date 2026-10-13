@@ -180,6 +180,19 @@ public sealed class DiagnosticPackageExporter
 
                         if (!File.Exists(file + ".manifest.json"))
                         {
+                            // ★ 尾巴丢失 vs 截止点之后的新段（两者必须分开判）★
+                            //   在线系统在封段之后继续落新事件是**正常**的（维护循环的丢失/存储/滞后
+                            //   事件就是这么来的），它的内容按定义在 coverageEndSequence 之外 ⇒
+                            //   跳过它不等于"包尾丢了东西"。旧实现把"目录里任何没有 manifest 的 .jsonl"
+                            //   一律算 tail loss ⇒ 只要截止点之后恰好落了一条事件，包就自称不完整
+                            //   （实测：D61 负载敏感偶发失败的真因，见 D61ExportClosureTests 的收口测试）。
+                            //   真正的尾巴丢失（截止点处封段失败）仍然照旧计入，绝不放过。
+                            if (IsPostCutoffSegment(dirName, file, request.Cutoff))
+                            {
+                                warnings.Add($"post-cutoff-segment-excluded:{dirName}/{name}");
+                                continue;
+                            }
+
                             // 仍未封的段：跳过并如实标注（不假装完整）。正常情况下不会发生 ——
                             // 导出前 runtime 已 PrepareExportCutoff() 封存活动段。
                             warnings.Add($"active-segment-skipped:{dirName}/{name}");
@@ -212,9 +225,10 @@ public sealed class DiagnosticPackageExporter
                 var corruptLines = CountWarningNumbers(warnings, "unparsable-lines-skipped:")
                                  + CountWarningNumbers(warnings, "unparsable-incident-lines-skipped:");
                 var unsealedSkipped = warnings.Count(w => w.StartsWith("active-segment-skipped:", StringComparison.Ordinal));
-                var exportRequest = corruptLines == 0 && unsealedSkipped == 0
+                var postCutoffExcluded = warnings.Count(w => w.StartsWith("post-cutoff-segment-excluded:", StringComparison.Ordinal));
+                var exportRequest = corruptLines == 0 && unsealedSkipped == 0 && postCutoffExcluded == 0
                     ? request
-                    : request with { Cutoff = MergeExportFacts(request.Cutoff, corruptLines, unsealedSkipped) };
+                    : request with { Cutoff = MergeExportFacts(request.Cutoff, corruptLines, unsealedSkipped, postCutoffExcluded) };
 
                 // ★ D6.3 §6.1 ★ 「包含」一律以**实际进包的条目**为准：
                 //   请求了飞行窗口但一条都没进包，就必须留下可见的告警，让 summary 的完整性判据
@@ -526,7 +540,7 @@ public sealed class DiagnosticPackageExporter
     /// ★ D6.3 §3 ★ 把"导出过程中实测到的证据缺口"并进同一个截止点，使 manifest 与 summary
     /// 对同一份包给出**一致**的完整性结论（不允许一个说完整、另一个说 Partial）。
     /// </summary>
-    private static DiagnosticExportCutoff? MergeExportFacts(DiagnosticExportCutoff? cutoff, int corruptLines, int unsealedSkipped)
+    private static DiagnosticExportCutoff? MergeExportFacts(DiagnosticExportCutoff? cutoff, int corruptLines, int unsealedSkipped, int postCutoffExcluded = 0)
     {
         if (cutoff is not { } c) return cutoff;
         var reasons = new List<string>(3);
@@ -538,8 +552,44 @@ public sealed class DiagnosticPackageExporter
             CorruptLinesSkipped = c.CorruptLinesSkipped + corruptLines,
             // 跳过未封段 = 包内缺了最新证据 ⇒ 包尾不完整（不是"顺序问题"，是"东西不在包里"）。
             AnyTailLoss = c.AnyTailLoss || unsealedSkipped > 0,
+            // ★ 截止点之后的新段**不**并进 AnyTailLoss ★：它不是"包尾丢了东西"，而是"那之后又发生了事"。
+            //   如实记数即可，绝不用它给包扣分（否则在线系统的包永远自称不完整）。
+            PostCutoffSegmentsExcluded = c.PostCutoffSegmentsExcluded + postCutoffExcluded,
             EvidenceBlockReason = reasons.Count == 0 ? null : string.Join(",", reasons),
         };
+    }
+
+    /// <summary>
+    /// ★ D61 偶发失败收口 ★ 判断"这个没有 manifest 的 .jsonl"到底是**截止点之后才新建的段**
+    /// （正常、且不在覆盖范围内），还是**截止点处没封成的活动段**（真实的包尾丢失）。
+    ///
+    /// 判据（先看族、兜底看时间；两条都要求该族在截止点处封段没出问题）：
+    ///   · events：<see cref="DiagnosticExportCutoff.FlushStatus"/> 不是 `seal-failed`/`no-writer`
+    ///     就说明截止点处的活动段**已经封好**（含 `no-active-segment`）⇒ 目录里仍未封的段只能是
+    ///     封段之后按更高序号新建的段（段序号只增不减，已封段不会被重新打开）；
+    ///   · incidents：同一个道理，用 <see cref="DiagnosticExportCutoff.IncidentSealOk"/> 判定；
+    ///   · 其他族（如 flight）：没有封段结果可用，只能按"最后写入时间晚于截止点时刻"兜底；
+    ///   · 没有截止点（调用方没给）⇒ 一律按旧的"未封段"处理，不猜。
+    ///
+    /// 绝不掩盖真实丢失：封段失败（`seal-failed` / `IncidentSealOk=false`）时一律返回 false。
+    /// </summary>
+    private static bool IsPostCutoffSegment(string dirName, string file, DiagnosticExportCutoff? cutoff)
+    {
+        if (cutoff is not { } c) return false;
+
+        var familySealFailed = dirName switch
+        {
+            "events" => c.FlushStatus is "seal-failed" or "no-writer",
+            "incidents" => !c.IncidentSealOk,
+            _ => false,
+        };
+        if (familySealFailed) return false;
+
+        var familySealProven = dirName is "events" or "incidents";
+        if (familySealProven) return true;
+
+        try { return File.GetLastWriteTimeUtc(file) > c.CutoffUtc.UtcDateTime; }
+        catch (Exception) { return false; }
     }
 
     private static DiagnosticPackageEntry Record(string entryPath, string sourceFile)

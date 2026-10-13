@@ -423,6 +423,9 @@ public sealed partial class Step2SelectDataPage : UserControl
         //      任务原值（含旧任务的 32/64/128）会动态追加并只读显示 ----
         SyncThreadsCombo(session);
 
+        // ---- ★ P1-07(1) ★ 目录映射下拉：轻量同步（只在值与模型不一致时改，避免打断用户操作）----
+        SyncFolderMappingCombo(session);
+
         // ---- 已有任务 Task Picker：收起态显示（DisplayedItem ≠ 已载入任务）+ 展开列表绑定真实 JobSummary ----
         UpdateExistingJobsPicker(session);
         QaShowJobsPickerIfRequested();   // ★ A7.1 取证（环境变量门控；生产路径不执行）
@@ -568,6 +571,35 @@ public sealed partial class Step2SelectDataPage : UserControl
         if (_suppressSync || _session is null) return;
         if (ThreadsCombo.SelectedItem is not ComboBoxItem item) return;
         _session.SelectedMt = _session.MtFromText(item.Content as string);
+    }
+
+    // ────────────────────────── ★ P1-07(1) ★ 目录映射 ──────────────────────────
+
+    /// <summary>
+    /// 目录映射下拉的同步：只在界面选中项与模型**真的不一致**时改，且改的时候挂 <c>_suppressSync</c>
+    /// （否则程序化选中会回调回来、把用户刚选的值再"同步"一遍）。同时刷新右侧说明，
+    /// 让用户在**预检之前**就知道这一项会怎样影响目标路径（现场错层就是没人提前看见映射）。
+    /// </summary>
+    private void SyncFolderMappingCombo(MigrationSessionViewModel session)
+    {
+        if (FolderMappingCombo.SelectedIndex != session.FolderMappingUiIndex)
+        {
+            _suppressSync = true;
+            FolderMappingCombo.SelectedIndex = session.FolderMappingUiIndex;
+            _suppressSync = false;
+        }
+        FolderMappingHint.Text = session.FolderMappingUiIndex == 1
+            ? "保留所选文件夹本身：内容落在目标根下与源同名的目录里（旧行为）。"
+            : "所选文件夹的「内部内容」直接落到目标根；勾整个共享时按各来源名称分开，避免同名文件静默合并。";
+    }
+
+    private void FolderMappingCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSync || _session is null) return;
+        _session.FolderMappingUiIndex = FolderMappingCombo.SelectedIndex;
+        FolderMappingHint.Text = _session.FolderMappingUiIndex == 1
+            ? "保留所选文件夹本身：内容落在目标根下与源同名的目录里（旧行为）。"
+            : "所选文件夹的「内部内容」直接落到目标根；勾整个共享时按各来源名称分开，避免同名文件静默合并。";
     }
 
     // ────────────────────────── 已有任务 Task Picker（A7.1）──────────────────────────
@@ -880,6 +912,10 @@ public sealed partial class Step2SelectDataPage : UserControl
 
     private async void Prepare_Click(object sender, RoutedEventArgs e)
     {
+    // ★ P0-06(4) ★ 预检链上有多处 await（查未完成任务 / 询问续传 / 载入旧任务 / 预检本身），
+    //   任何一处漏出来的异常在 `async void` 里都会终止进程。记录 + 写状态行，绝不静默。
+    try
+    {
         var session = _session;
         // ★ D6.1 §11 观察点 ★ 只记录**原有判断的结果**，不改任何业务分支。
         using var trace = ActionTrace.Begin(ActionKinds.Prepare, ControlIds.Step2Prepare, "click", "Step2SelectDataPage");
@@ -954,6 +990,8 @@ public sealed partial class Step2SelectDataPage : UserControl
         }
         trace.Complete(DiagnosticOutcome.Succeeded, "prepare-completed");
         PushState();
+    }
+    catch (Exception ex) { UiFaultGuard.Report("Step2SelectDataPage.Prepare_Click", ex, m => StateMessageText.Text = m); }
     }
 
     /// <summary>Step1 已勾选的共享（整盘迁移口径；唯一来源是注入的 ConnectionViewModel）。</summary>
@@ -1080,8 +1118,14 @@ public sealed partial class Step2SelectDataPage : UserControl
     }
 
     // ────────────────────────── 开始 / 暂停 / 停止 / 恢复 ──────────────────────────
+    //
+    // ★ P0-06(4) ★ 这四个处理器是 `async void`：异常没有调用者能接住，直接落到 XAML
+    //   UnhandledException ⇒ 进程结束。现场"点停止时偶发崩溃"正好走这条链，因此每个处理器
+    //   都拿 UiFaultGuard 兜住：**记录（日志 + 诊断事实）+ 写进本页状态行**，绝不静默吞掉。
 
     private async void Start_Click(object sender, RoutedEventArgs e)
+    {
+    try
     {
         if (_session is null) return;
         // ★ D6.1 §11 ★ 观察既有 guard（CanStart）的结果，不新增判据、不改分支。
@@ -1104,8 +1148,12 @@ public sealed partial class Step2SelectDataPage : UserControl
         trace.Finish(_session.LastRunOutcome, "Step2SelectDataPage");
         PushState();
     }
+    catch (Exception ex) { UiFaultGuard.Report("Step2SelectDataPage.Start_Click", ex, m => StateMessageText.Text = m); }
+    }
 
     private async void Pause_Click(object sender, RoutedEventArgs e)
+    {
+    try
     {
         if (_session is null) return;
         using var trace = ActionTrace.Begin(ActionKinds.Pause, ControlIds.Step2Pause, "click", "Step2SelectDataPage");
@@ -1133,8 +1181,12 @@ public sealed partial class Step2SelectDataPage : UserControl
         }
         PushState();
     }
+    catch (Exception ex) { UiFaultGuard.Report("Step2SelectDataPage.Pause_Click", ex, m => StateMessageText.Text = m); }
+    }
 
     private async void Stop_Click(object sender, RoutedEventArgs e)
+    {
+    try
     {
         if (_session is null) return;
         using var trace = ActionTrace.Begin(ActionKinds.Stop, ControlIds.Step2Stop, "click", "Step2SelectDataPage");
@@ -1154,8 +1206,12 @@ public sealed partial class Step2SelectDataPage : UserControl
         }
         PushState();
     }
+    catch (Exception ex) { UiFaultGuard.Report("Step2SelectDataPage.Stop_Click", ex, m => StateMessageText.Text = m); }
+    }
 
     private async void Resume_Click(object sender, RoutedEventArgs e)
+    {
+    try
     {
         if (_session is null) return;
         using var trace = ActionTrace.Begin(ActionKinds.Resume, ControlIds.Step2Resume, "click", "Step2SelectDataPage");
@@ -1174,6 +1230,8 @@ public sealed partial class Step2SelectDataPage : UserControl
             trace.Complete(DiagnosticOutcome.Unknown, "resume-unsettled");
         }
         PushState();
+    }
+    catch (Exception ex) { UiFaultGuard.Report("Step2SelectDataPage.Resume_Click", ex, m => StateMessageText.Text = m); }
     }
 
     /// <summary>

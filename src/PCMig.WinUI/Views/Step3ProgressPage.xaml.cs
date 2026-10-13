@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using PCMig.Core.Models;
 using PCMig.Core.Util;
 using PCMig.WinUI.Controls.ImmersiveProgress;
@@ -33,6 +34,12 @@ public sealed partial class Step3ProgressPage : UserControl
 
     /// <summary>★ FIX BATCH 5 ★ 顶栏进度填充的唯一真值来源（由 PushState 从 ProgressTruthSnapshot 写入）。</summary>
     private double _totalProgressPercent;
+
+    /// <summary>
+    /// ★ P0-04 ★ 上一次已应用的"需要用户注意"（修复复验未通过）视觉状态。
+    /// 只用于**避免每拍重复写控件**（写属性会触发渲染失效），不参与任何业务判定。
+    /// </summary>
+    private bool _attentionApplied;
 
     /// <summary>
     /// ★ Round-3 PHASE E（§7/§23）★ 旧「补间驱动」与"真值像素宽"字段已从生产路径移除：
@@ -307,6 +314,55 @@ public sealed partial class Step3ProgressPage : UserControl
             immersive.Value = percent;
             immersive.ProgressState = MapProgressState(_session?.Phase ?? JobPhase.Created);
         }
+
+        ApplyAttentionVisual();
+    }
+
+    /// <summary>
+    /// ★ P0-04 ★ 醒目位：本次修复的**复验未通过**时，把大号百分比与进度条从"完成/绿"改成警示态——
+    /// 现场症状就是"进度跑到 100%，可最后验证还是失败"，如果这里仍显示完成态的绿条与绿字，
+    /// 用户只会记住那个 100%。
+    ///
+    /// 这是一条**纯投影**：真值只有 <see cref="MigrationSessionViewModel.ProgressNeedsAttention"/> 一个来源，
+    /// 本方法不参与任何业务判定；复验转通过或新一次运行（ResetRunProjection 清标志）时会自动复位
+    /// （复位用 ClearValue 让样式里的原色回来，页面不自己记一套颜色）。
+    /// </summary>
+    private void ApplyAttentionVisual()
+    {
+        var attention = _session?.ProgressNeedsAttention == true;
+        if (_attentionApplied == attention) return;
+        _attentionApplied = attention;
+
+        var brush = attention ? TryFindWarningBrush() : null;
+        if (brush is not null)
+        {
+            TotalPercentText.Foreground = brush;
+            BytesCardLabel.Foreground = brush;
+        }
+        else
+        {
+            TotalPercentText.ClearValue(TextBlock.ForegroundProperty);
+            BytesCardLabel.ClearValue(TextBlock.ForegroundProperty);
+        }
+
+        if (attention && TotalImmersiveProgress is not null)
+        {
+            // 复验未通过 ⇒ 进度条不得收成"完成"态：Head 停在真值位置，但状态是警示。
+            TotalImmersiveProgress.ProgressState = ImmersiveProgressState.Warning;
+        }
+    }
+
+    private static Brush? TryFindWarningBrush()
+    {
+        try
+        {
+            return Application.Current?.Resources is { } res && res["WarningBrush"] is Brush b ? b : null;
+        }
+        catch (Exception)
+        {
+            // 资源键缺失（主题被替换）时只退化为"不加色"：配色问题绝不允许影响到业务界面。
+            return null;
+        }
     }
 
     /// <summary>
@@ -420,6 +476,11 @@ public sealed partial class Step3ProgressPage : UserControl
         ObjectValueText.Text = session.ObjectText;
         BytesCardLabel.Text = session.DataLabel;
         BytesValueText.Text = $"{session.ActualBytesText} / {session.PlanBytesText}";
+
+        // ★ P0-04 ★ 复验未通过 ⇒ 大号百分比与本卡标签转警示色（进度条状态在 UpdateTotalProgressFill 里改）。
+        //   这里**无条件**调用（内部有"值没变就不写"的门），因为呈现节拍在收尾后可能已经停下，
+        //   只靠节拍驱动会让"最后一个 100%"永远停在完成态的绿字上。
+        ApplyAttentionVisual();
 
         // ── 对象明细提示行：运行中给“正在做什么”，非运行态给**阶段**（四态在此彼此可区分）──
         ObjectPaneHintText.Text = DescribePhaseOrActivity(session);

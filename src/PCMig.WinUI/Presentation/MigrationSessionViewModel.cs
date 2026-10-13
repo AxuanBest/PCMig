@@ -29,16 +29,24 @@ namespace PCMig.WinUI.Presentation;
 /// <summary>Step3 对象清单行：ObjectId + 状态文案（状态由 Receipt / 进度快照驱动）。</summary>
 public sealed class SessionObjectRow : ObservableObject
 {
-    public SessionObjectRow(string objectId, string sourcePath, string sizeText)
+    public SessionObjectRow(string objectId, string sourcePath, string sizeText, string? targetPath = null)
     {
         ObjectId = objectId;
         SourcePath = sourcePath;
         SizeText = sizeText;
+        TargetPath = targetPath ?? "";
     }
 
     public string ObjectId { get; }
     public string SourcePath { get; }
     public string SizeText { get; }
+
+    /// <summary>
+    /// ★ P1-07(2) ★ 该对象的最终目标绝对路径 —— 直接取 plan.json 里那条**映射快照**的原值，不在这里重算。
+    /// 计划生成之后就把「源 → 目标」摆给用户看：多嵌一层同名目录 / 是否内容直达，在开始复制**之前**就可辨认，
+    /// 而不是等目标盘上真的长出多余目录才发现。空串 = 计划没给目标路径（不臆造）。
+    /// </summary>
+    public string TargetPath { get; }
 
     private string _statusText = "待传输";
     public string StatusText { get => _statusText; set => Set(ref _statusText, value); }
@@ -158,8 +166,10 @@ public delegate Task<JobPhase> TransferRunnerDelegate(
 /// 线程纪律（硬约束）：
 ///   · 一切跨线程 UI 更新经 <see cref="Post"/>（DispatcherQueue.TryEnqueue）；
 ///   · 阻塞式 Core 调用（JobManager.Create/Open/ListAll、MigrationMatrix.Load、NetworkShare 连接、
-///     ReportGenerator.Generate）一律 Task.Run 包裹；已是纯异步的 Core 方法（ScanAsync/RunAsync/
-///     Verifier.RunAsync）直接 await（与 WPF MainViewModel 同口径）。
+///     ReportGenerator.Generate）一律 Task.Run 包裹；已是纯异步的 Core 方法（ScanAsync/RunAsync）直接 await。
+///     ★ 例外（实测得出，2026-10-11）★ Verifier.RunAsync **必须** Task.Run 包裹：它在对象循环开始前是
+///     同步枚举（96,000 文件实测 769 ms），直接 await 会把 UI 线程占住到枚举结束——验证面板来不及
+///     渲染、"取消验证"点不到（实测窗口比验证结束还晚 1.3 s 才出现）。
 ///
 /// ★ 线程数定案（用户授权）★
 ///   · 写进 job.json 的**永远是解析后的真实整数**：自动 ⇒ 16（Core 默认，Models.cs:91）、4 ⇒ 4、8 ⇒ 8、16 ⇒ 16…；
@@ -207,6 +217,12 @@ public sealed class MigrationSessionViewModel : ObservableObject
     private readonly ConnectionViewModel? _connection;
     private readonly DispatcherQueue? _queue;
     private readonly ILogger _log;
+
+    /// <summary>
+    /// ★ P0-06(1) ★ UI 心跳监视器（后台采样）：判"界面未响应"的事实来源。
+    /// 只在一次运行期间（节拍存活期间）判定——没有节拍就不该拿"没有心跳"当卡住。
+    /// </summary>
+    private readonly UiStallWatchdog _uiStallWatchdog;
 
     // ════════════════════════ A.5（P1-5）UI 节流：缓冲 + 薄泵 ════════════════════════
 
@@ -274,6 +290,12 @@ public sealed class MigrationSessionViewModel : ObservableObject
             _queue is null
             || string.Equals(Environment.GetEnvironmentVariable("PCMIG_UI_THROTTLE"), "0", StringComparison.Ordinal);
         _batcher = new UiBatchBuffer<ProgressSnapshot>(LiveFileCapacity, LogLineCapacity);
+
+        // ★ P0-06(1)/(4) ★ UI 心跳监视器：把"点击停止时界面卡住"从用户口述变成可读事实。
+        //   心跳由 UI 线程的节拍（DrainOnTick）与用户操作（点停止）打；采样在**后台线程**，
+        //   因此界面真的卡住时它仍能观察沉默并立刻落一条证据（见 UiStallWatchdog 的类注释）。
+        //   纪律：它绝不改业务结论（不停止、不取消、不改状态），只写事实；回调异常只计数。
+        _uiStallWatchdog = new UiStallWatchdog(onStall: OnUiStallFact);
         if (_uiThrottleDisabled)
             _log.Information("UI 节流未启用（完全直通）：queue={HasQueue}，PCMIG_UI_THROTTLE={Throttle}",
                 _queue is not null, Environment.GetEnvironmentVariable("PCMIG_UI_THROTTLE") ?? "(unset)");
@@ -396,6 +418,42 @@ public sealed class MigrationSessionViewModel : ObservableObject
     }
 
     public string MtText => _mtValuePinnedByJob ? $"{_selectedMt}（任务原值，续传沿用）" : MtTextFor(_selectedMt);
+
+    // ═══════════════ ★ P1-07(1) ★ 目录映射语义的界面选择 ═══════════════
+    //   产品语义（用户裁决口径）：
+    //     contentDirect（默认）= 复制**所选文件夹的内部内容**到 TargetRoot —— 选 \\host\Users\d970
+    //       就在 C:\Users\D970 根下直接出现文件与原有下级目录，不再额外套一层 d970（现场 33.72GB 的错层来源）。
+    //     keepFolder          = 保留**所选文件夹本身**（旧行为，用户明确要时才用）。
+    //   真实落盘位置只有一处：job.json 的 Options.SelectedFolderMapping（预检时从本属性写入新定义）；
+    //   恢复既有任务一律以旧 job.json 的原值为准，本类在恢复路径上**从不**覆写它。
+    private string _selectedFolderMapping = MigrationOptions.SelectedFolderMappingContentDirect;
+
+    /// <summary>目录映射语义（<see cref="MigrationOptions.SelectedFolderMappingContentDirect"/> / ...KeepFolder）。</summary>
+    public string SelectedFolderMapping
+    {
+        get => _selectedFolderMapping;
+        set
+        {
+            var v = string.Equals(value, MigrationOptions.SelectedFolderMappingKeepFolder, StringComparison.OrdinalIgnoreCase)
+                ? MigrationOptions.SelectedFolderMappingKeepFolder
+                : MigrationOptions.SelectedFolderMappingContentDirect;
+            if (Set(ref _selectedFolderMapping, v)) Raise(nameof(FolderMappingText));
+        }
+    }
+
+    /// <summary>供 Step2 下拉使用的序号：0 = 内容直达（推荐），1 = 保留所选文件夹本身。</summary>
+    public int FolderMappingUiIndex
+    {
+        get => SelectedFolderMapping == MigrationOptions.SelectedFolderMappingKeepFolder ? 1 : 0;
+        set => SelectedFolderMapping = value == 1
+            ? MigrationOptions.SelectedFolderMappingKeepFolder
+            : MigrationOptions.SelectedFolderMappingContentDirect;
+    }
+
+    /// <summary>下拉项文案（页面回读时用同一套字面，避免"界面显示 B、写盘是 A"）。</summary>
+    public string FolderMappingText => SelectedFolderMapping == MigrationOptions.SelectedFolderMappingKeepFolder
+        ? "保留所选文件夹本身"
+        : "复制所选文件夹的内容（推荐）";
 
     /// <summary>
     /// 线程数下拉项的显示文案（页面用）：
@@ -608,7 +666,77 @@ public sealed class MigrationSessionViewModel : ObservableObject
     public bool IsRunning
     {
         get => _isRunning;
-        private set { if (Set(ref _isRunning, value)) RaiseDerived(); }
+        private set
+        {
+            if (!Set(ref _isRunning, value)) return;
+            RaiseDerived();
+            if (value) return;
+            // ★ P0-06 ★ 引擎真值说"不再运行" ⇒ 这一次停止请求到此收尾：
+            //   时间线记下此刻（点击→引擎收尾的毫秒数），退出"正在停止…"进行时，
+            //   并把状态句从"正在停止…"换成收尾结论（否则那句进行时会永远留在界面上）。
+            _lastStopTimeline?.Mark("engine-settled");
+            var wasStopping = IsStopping;
+            IsStopping = false;
+            if (wasStopping)
+                SetOperational("已停止：本轮已收尾，已拷入的部分全部保留，可点「恢复任务」续传。");
+        }
+    }
+
+    // ── ★ P0-06 ★ 停止是"请求 → 兑现"两段，中间这段是**可见的进行时** ──────────────────────
+    //   现场症状：点了停止之后界面像死了一样（控件不响应、看不到任何进行时反馈）。
+    //   下面两个成员让"已请求停止、引擎仍在收尾"成为一等状态：
+    //     · IsStopping      → 底栏按钮文案变"正在停止…"、按钮进入 busy（不可重复按）；
+    //     · LastStopTimeline → 分段 Stopwatch 事实（点击→反馈→Flush→取消投递→引擎收尾→可再操作）。
+    //   它们只表达"进行时"，**绝不**把"请求已发出"冒充"已经停下"——停下仍只认引擎真值 IsRunning。
+    private bool _isStopping;
+    /// <summary>已经请求停止、引擎尚未收尾（界面必须显示"正在停止…"）。</summary>
+    public bool IsStopping
+    {
+        get => _isStopping;
+        private set { if (Set(ref _isStopping, value)) RaiseDerived(); }
+    }
+
+    private StopTimeline? _lastStopTimeline;
+    /// <summary>最近一次停止请求的分段计时（诊断/报告取证用；没有停止过时为 null）。</summary>
+    public StopTimeline? LastStopTimeline
+    {
+        get => _lastStopTimeline;
+        private set => Set(ref _lastStopTimeline, value);
+    }
+
+    /// <summary>停止按钮文案（进行时真值 ⇒ 文案，不反过来）。</summary>
+    public string StopButtonText => IsStopping ? "正在停止…" : "停止";
+
+    // ── ★ P0-06(1)/(4) ★ 界面未响应的实测证据（不是靠用户口述，也不是靠猜） ────────────────
+    //   现场只有一句"点击停止时 UI 卡住、偶发崩溃"，ZIP 里没有 WER / Application Hang 1002 / 转储，
+    //   于是"卡了多久、最后还能操作什么"完全没有证据。UiStallWatchdog 在后台采样 UI 心跳，
+    //   把这一段变成可读事实：卡住当时就落一条，恢复时再补一条总时长。
+    //   纪律：这些属性只**读出事实**，不参与任何业务判定。
+    /// <summary>已记录的界面未响应事实（检测 + 恢复，按发生顺序；没有则空）。</summary>
+    public IReadOnlyList<UiStallFact> UiStalls => _uiStallWatchdog.Stalls;
+
+    /// <summary>最严重的一次界面未响应（从未发生时为 null）。</summary>
+    public UiStallFact? WorstUiStall => _uiStallWatchdog.Worst;
+
+    /// <summary>距离 UI 线程最后一次心跳过去了多少毫秒（诊断/报告取证用）。</summary>
+    public long UiSilenceMs => _uiStallWatchdog.SinceLastHeartbeatMs;
+
+    /// <summary>
+    /// 检测到（或恢复到）界面未响应时的唯一出口：**只写日志事实**，不改任务状态、不取消、不停止。
+    /// 运行在后台线程 ⇒ 不得触任何 UI 对象，也不得抛（异常只计在 Watchdog 的 CallbackFailures 里）。
+    /// </summary>
+    private void OnUiStallFact(UiStallFact fact)
+    {
+        if (fact.Recovered)
+        {
+            _log.Warning("界面已恢复响应：本次未响应共 {StallMs} ms（最后一次心跳在监视器启动后 {LastBeatMs} ms，来自 {Context}）",
+                fact.TotalStallMs, fact.LastHeartbeatMs, fact.LastHeartbeatContext ?? "(未知)");
+            return;
+        }
+
+        // ★ 卡住**当时**就落证据：应用若被强杀/崩溃，这条日志是唯一留下的现场。
+        _log.Warning("界面未响应：距最后一次心跳已 {StallMs} ms 没有滴答（最后一次心跳在监视器启动后 {LastBeatMs} ms，来自 {Context}）——正在进行的迁移不会被本监视器改变",
+            fact.StallMs, fact.LastHeartbeatMs, fact.LastHeartbeatContext ?? "(未知)");
     }
 
     // ─────────────── 暂停真值（FIX BATCH 2：Single Source of Truth = 引擎）───────────────
@@ -740,7 +868,20 @@ public sealed class MigrationSessionViewModel : ObservableObject
             try { await Task.Delay(50, ct); }
             catch (OperationCanceledException) { break; }
         }
-        return !IsRunning;
+        var settled = !IsRunning;
+        if (settled)
+        {
+            _lastStopTimeline?.Mark("settle-observed");
+            return true;
+        }
+        // ★ P0-06(2) ★ 超过 SLA 仍未收尾：绝不谎称"已停止"，也绝不把界面装成"已经好了"——
+        //   如实告诉用户引擎还在清理/等网络 IO（点击→此刻已过去多少毫秒也是事实），
+        //   并且不解除 IsStopping（按钮继续显示"正在停止…"，不给出第二次取消的机会）。
+        _lastStopTimeline?.Mark("settle-timeout");
+        var waited = _lastStopTimeline?.TotalMs ?? ActionSla.StopSettleDeadlineMs;
+        SetOperational($"停止尚未落定：引擎仍在清理或等待网络 I/O（已等待 {waited} ms）——尚未真正停止，请不要关机；其它控件仍可操作。");
+        _log.Warning("停止在 SLA 内未落定，仍在收尾（已等待 {Waited} ms）", waited);
+        return false;
     }
 
     /// <summary>是否**真的**已暂停（引擎已确认 worker 停止）。不是"点了暂停按钮"。</summary>
@@ -894,7 +1035,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// 暂停失败时**重新可用**（文案变成「重试暂停」）——用户必须有一条重试的路。</summary>
     public bool CanPause => IsRunning && PauseUiState is PauseUiState.Idle or PauseUiState.PauseFailed;
     /// <summary>可停止（运行中）。"正在暂停中"也允许停止：用户仍需要一条能真正结束的路。</summary>
-    public bool CanStop => IsRunning;
+    public bool CanStop => IsRunning && !IsStopping;
 
     /// <summary>暂停按钮文案（状态机真值 ⇒ 文案，不反过来）。</summary>
     public string PauseButtonText => PauseUiState switch
@@ -941,6 +1082,33 @@ public sealed class MigrationSessionViewModel : ObservableObject
 
     private string _dataLabel = "已传 / 计划";
     public string DataLabel { get => _dataLabel; private set => Set(ref _dataLabel, value); }
+
+    // ── ★ P0-04 ★ 进度 vs 结果的语义分离 ────────────────────────────────────────────
+    // 现场症状："修复的进度条跑到 100%，可最后验证还是失败" —— 用户据此以为"已经修好了"。
+    // 根因不是算术错，而是**一个百分比在讲两件事**：它测的是"重拷/传输干了多少活"，
+    // 却被读成"这次修复成功了"。因此这里把语义显式拆开：
+    //   · Percent / DataLabel  → 只表达"重拷（传输）干了多少"，标签必须写清它测的是什么；
+    //   · ProgressNeedsAttention → 复验没过时的**醒目位**（百分比/进度条由页面按它变色）；
+    //   · StatusMessage        → 唯一说"结果"的地方，且必须写明"100% 只代表重拷完成"。
+    // 只有"修复重拷完 + 复验通过"才算这次修复达成；复验未通过时进度宁可显示 100% 也不许说成功。
+    private bool _progressNeedsAttention;
+    /// <summary>本次修复的近况是否为"需要用户注意"（复验未通过）。页面据此把百分比/进度条转为警示色。</summary>
+    public bool ProgressNeedsAttention
+    {
+        get => _progressNeedsAttention;
+        private set { if (Set(ref _progressNeedsAttention, value)) Raise(nameof(ProgressNeedsAttention)); }
+    }
+
+    /// <summary>
+    /// ★ P0-04 ★ 收尾态是否已封版：一旦写出终局结论，**后到的旧快照一律不许再改显示位**
+    /// （现场"100% 之后又跳回 87%"、"结果页结论被旧的运行中快照覆盖"都由这类过期回调造成）。
+    /// 封版只由"新一次运行/换任务"解除（见 <c>ResetRunProjection</c>）。
+    /// </summary>
+    private bool _progressSealed;
+
+    private int _postFinishSnapshotsIgnored;
+    /// <summary>收尾后被拒绝应用的过期快照条数（诊断用；非 0 说明确有旧回调在追，绝不是"没发生"）。</summary>
+    public int PostFinishSnapshotsIgnored => _postFinishSnapshotsIgnored;
 
     private string _engineSpeedText = "—";
     public string EngineSpeedText { get => _engineSpeedText; private set => Set(ref _engineSpeedText, value); }
@@ -1321,6 +1489,43 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// <summary>最近一次验证的结论文案（已按 L1 口径措辞，绝不说成"完整性验证通过"）。</summary>
     public string LastVerifyResultText { get => _lastVerifyResultText; private set => Set(ref _lastVerifyResultText, value); }
 
+    private string _lastVerifyHintText = string.Empty;
+    /// <summary>
+    /// ★ UX-2（2026-10-11 用户现场观察）★ 左侧提示框专用的一句话结论：**只讲验证状态、结论与差异数量**，
+    /// 一个对象编号都不列。完整结论见 <see cref="LastVerifyResultText"/>，逐对象明细见验证报告。
+    /// 背景：现场一次 1000 个对象的验证把全部编号塞进提示框，提示框被铺满、真正要看的结论被淹掉。
+    /// </summary>
+    public string LastVerifyHintText { get => _lastVerifyHintText; private set => Set(ref _lastVerifyHintText, value); }
+
+    /// <summary>★ UX-1 ★ 结论文案里最多列出的对象编号个数（超过则只给"如 … 等 N 个"）。</summary>
+    public const int MaxObjectIdsInSummary = 3;
+
+    /// <summary>
+    /// ★ UX-2 ★ 提示框口径的一句话结论：状态 + 四态数量，不列对象编号。
+    /// 措辞沿用 <see cref="L1ResultText"/> 的 L1 口径，绝不把数量/字节对账说成内容一致。
+    /// </summary>
+    public static string DescribeVerifyHint(VerifyReport report, VerifyLevel level)
+    {
+        var ok = report.Objects.Count(o => o.Status == "OK");
+        var mismatch = report.Objects.Count(o => o.Status == "MISMATCH");
+        var unknown = report.Objects.Count(o => o.Status == "UNKNOWN");
+        var empty = report.Objects.Count(o => o.Status == "EMPTY");
+        var canceled = report.Objects.Count(o => o.Status == "CANCELED");
+        // ★ 用户口径（2026-10-11 现场）：提示卡只给一句话，例：
+        //   「L1 对账完成：通过 1，差异 413，无法确认 0。点「打开验证报告」查看详细清单。」
+        //   一个 object-xxxxx 都不出现；超出 4 态之外的状态只在非零时追加，长度可控。
+        var counts = new List<string> { $"通过 {ok}", $"差异 {mismatch}", $"无法确认 {unknown}" };
+        if (empty > 0) counts.Add($"无可核对数据 {empty}");
+        if (canceled > 0) counts.Add($"已取消 {canceled}");
+        var verb = level >= VerifyLevel.L2_SampleHash ? "L2 抽样哈希核对" : "L1 对账";
+        var head = report.OverallPass ? $"{verb}完成" : $"{verb}未通过";
+        // L1 通过时必须带上口径限定语（T07）：数量/字节一致不等于逐文件内容一致。
+        var caveat = report.OverallPass && level < VerifyLevel.L2_SampleHash
+            ? "（只核对文件数量与总字节，不等于内容一致）"
+            : string.Empty;
+        return $"{head}：{string.Join("，", counts)}。点「打开验证报告」查看详细清单。{caveat}";
+    }
+
     /// <summary>
     /// 验证前置闸门（含**源根可达性实测**，IO 在后台线程）：
     ///   ① 无任务 / 无计划 → 拒绝；
@@ -1350,6 +1555,9 @@ public sealed class MigrationSessionViewModel : ObservableObject
         if (unreachable.Count > 0)
         {
             var sample = string.Join("、", unreachable.Take(5)) + (unreachable.Count > 5 ? $" 等 {unreachable.Count} 个" : "");
+            // ★ P0-05 ★ 这里是"源共享真的不在"的硬证据（不是猜测）：闸门刚刚逐个对象实测过可达性。
+            //   旧版只拒绝验证、不动底栏源灯 ⇒ 共享被策略关闭后灯还是绿的，用户看到"已连接"却怎么都验证不过。
+            _connection?.NotifySourceLost();
             return new VerifyGateResult(false,
                 $"拒绝验证：源根目录不可访问（{sample}）。源侧读不到时「目标一致」无法成立，" +
                 "此时的“通过”是假通过——请先在 Step 1 恢复与旧电脑的连接（必要时重新输入凭据）后重试。",
@@ -1377,8 +1585,26 @@ public sealed class MigrationSessionViewModel : ObservableObject
         if (report.Objects.Count == 0) return "验证未执行：计划里没有任何对象。";
         if (!report.OverallPass)
         {
-            var bad = report.Objects.Where(o => o.Status != "OK").Select(o => o.ObjectId).ToList();
-            return $"✘ 存在不一致对象（{DescribeLevel(level)}）：{string.Join("、", bad)}。详见报告。";
+            // ★ P0-02 ★ 不能把所有非 OK 一律说成"存在不一致对象"：真正的差异与"根本没核对成"
+            //   （源/目标不可达、枚举不完整）是两件事，处置方式相反 —— 前者去查差异，后者先恢复可达性。
+            //   现场正是这句话把 10/12（数量不同、样本为空）与真缺失混成了一种说法，故按状态如实分组。
+            // ★ UX-1（2026-10-11 用户现场观察）★ 这里**不再把全部对象编号拼进结论行**：
+            //   现场 1000 个对象（object-000001…object-001000）的编号把"结果与校验"正文与左侧提示框全部铺满，
+            //   真正要看的结论（几个差异、几个没核对成）反而看不见了。现在只给数量 + 少量示例，
+            //   逐对象明细 / 差异文件清单 / 错误原因 / 建议操作一律落到验证报告（VerifyReportGenerator）里。
+            var mismatch = report.Objects.Where(o => o.Status == "MISMATCH").ToList();
+            var unknown = report.Objects.Where(o => o.Status == "UNKNOWN").ToList();
+            var others = report.Objects
+                .Where(o => o.Status is not ("OK" or "MISMATCH" or "UNKNOWN"))
+                .Select(o => $"{o.ObjectId}（{o.StatusText}）").ToList();
+            var parts = new List<string>();
+            if (mismatch.Count > 0) parts.Add($"存在差异 {mismatch.Count} 个对象{IdSample(mismatch.Select(o => o.ObjectId))}");
+            if (unknown.Count > 0)
+                parts.Add($"无法确认 {unknown.Count} 个对象{IdSample(unknown.Select(o => o.ObjectId))}" +
+                          "（源或目标不可达 / 枚举不完整，属「没核对成」而非「不一致」）");
+            if (others.Count > 0) parts.Add($"其他 {others.Count} 个对象{IdSample(others)}");
+            return $"✘ 验证未通过（{DescribeLevel(level)}）：{string.Join("；", parts)}。" +
+                   "逐对象明细、差异文件清单与建议操作见验证报告。";
         }
 
         var sampled = report.Objects.Sum(o => o.HashSampled);
@@ -1390,6 +1616,18 @@ public sealed class MigrationSessionViewModel : ObservableObject
 
         return $"✔ {L1ResultText}；本次另有 {sampled} 个文件做了 SHA-256 双向内容核对" +
                "（抽样通过不等于全部文件内容一致，未被抽到的文件仍只做过数量/字节核对）。";
+    }
+
+    /// <summary>
+    /// ★ UX-1 ★ 结论文案里的对象编号示例：≤ <see cref="MaxObjectIdsInSummary"/> 个时全列，
+    ///   超过时只给"如 … 等 N 个"，**绝不**把成百上千个编号拼进一句话。
+    /// </summary>
+    private static string IdSample(IEnumerable<string> ids)
+    {
+        var list = ids.ToList();
+        if (list.Count == 0) return string.Empty;
+        if (list.Count <= MaxObjectIdsInSummary) return "（" + string.Join("、", list) + "）";
+        return "（如 " + string.Join("、", list.Take(MaxObjectIdsInSummary)) + $" 等 {list.Count} 个）";
     }
 
     /// <summary>验证层级的人话名称（界面不要直接显示枚举名）。</summary>
@@ -1531,6 +1769,11 @@ public sealed class MigrationSessionViewModel : ObservableObject
 
         // ★ 线程数定案：写进 job.json 的永远是解析后的真实整数（自动 ⇒ 16；4 ⇒ 4；8 ⇒ 8）
         definition.Options.Threads = ResolveThreads(SelectedMt);
+        // ★ P1-07(1) ★ 目录映射语义随新任务一起落盘（job.json 的 Options.SelectedFolderMapping）。
+        //   必须在这里定案——Planner 生成计划时就按它决定"内容直达 / 保留文件夹"；
+        //   之后 Robocopy Dest / Verifier / Repair / Report 全部读计划里的目标路径，不再各自重算。
+        //   恢复既有任务不走本行（续传以旧 job.json 的原值为准，绝不改写历史作业的目标路径）。
+        definition.Options.SelectedFolderMapping = SelectedFolderMapping;
 
         SetOperational("正在预检…");
         // ★ A.5（P1-4）：预检 = 进入"新任务"上下文。先把上一个任务的实时投影、验证投影与日志投影
@@ -1688,10 +1931,17 @@ public sealed class MigrationSessionViewModel : ObservableObject
         if (observed.LockRiskFiles <= 0 && observed.EncryptedFiles <= 0) return string.Empty;
         var parts = new List<string>();
         if (observed.LockRiskFiles > 0)
-            parts.Add($"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件（.pst/.ost）：旧电脑上 Outlook 若正在运行，这些文件会被锁定导致迁移失败，建议先让旧电脑用户关闭 Outlook");
+        {
+            // ★ P1-08 / R8 ★ 候选数 ≠ 被占用数：只有**实测**打不开（Win32 32/33）的才说"会失败"；
+            //   其余明确说"可现在都是能读的、可正常迁移"，不再制造假警报（归档 PST 从不被 Outlook 打开）。
+            parts.Add(observed.LockedRiskFiles > 0
+                ? $"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件（.pst/.ost）：其中 {observed.LockedRiskFiles} 个实测当前打不开（被其他程序独占），这些会被跳过或失败，请先在旧电脑上关闭占用程序"
+                : $"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件（.pst/.ost）：实测当前都能正常读取，可以正常迁移（只有迁移期间旧电脑上正打开它们才会失败）");
+        }
         if (observed.EncryptedFiles > 0)
             parts.Add($"检测到 {observed.EncryptedFiles} 个 EFS 加密文件：内容可以正常复制，但在新机上将失去加密保护（明文可读）");
-        _log.Warning("迁移前提醒：锁风险 {Lock} 个 / EFS 加密 {Enc} 个", observed.LockRiskFiles, observed.EncryptedFiles);
+        _log.Warning("迁移前提醒：锁风险候选 {Lock} 个（实测独占 {Locked} 个）/ EFS 加密 {Enc} 个",
+            observed.LockRiskFiles, observed.LockedRiskFiles, observed.EncryptedFiles);
         return " ⚠ " + string.Join("；", parts) + "。";
     }
 
@@ -1891,10 +2141,39 @@ public sealed class MigrationSessionViewModel : ObservableObject
     {
         // D6.3 §11：本次停止请求有没有"在跑的运行"可取消（业务事实，来自既有 IsRunning）。
         var running = IsRunning;
+        // ★ P0-06(1)/(2) ★ 用户操作本身就是"界面此刻可用"的最强证据：先打一拍心跳，
+        //   这样事后能精确回答"最后一次可用交互发生在什么时候、是什么操作"。
+        _uiStallWatchdog.Heartbeat("stop-click");
+        // ★ P0-06(1) ★ 分段计时从"用户点击"这一刻开始（第一次请求建时间线，重入不重建）。
+        var timeline = _lastStopTimeline;
+        if (timeline is null || timeline.IsComplete)
+        {
+            timeline = new StopTimeline("user-stop");
+            LastStopTimeline = timeline;
+        }
+        else
+        {
+            // ★ P0-06(2) ★ 重复按停止：绝不能开启第二个取消/第二段收尾，只如实记一笔。
+            timeline.Mark("reentry-ignored");
+        }
         try
         {
+            if (IsStopping)
+            {
+                // 进行中：幂等返回（不重投取消、不重写状态），并把事实留给时间线。
+                timeline.Mark("already-stopping");
+                _log.Information("WinUI 会话停止请求被忽略（已在停止进行中）");
+                return Task.CompletedTask;
+            }
+
+            // ★ P0-06(2) ★ 立即反馈必须先于任何可能耗时的工作：按钮文案/使能状态与状态句
+            //   在 Flush 之前就落到 UI（现场"点了没反应"就是这里缺一段可见进行时）。
+            IsStopping = true;
+            timeline.Mark("feedback-shown");
+
             // ★ A.5（P1-5）★ 停止同属"不可被节流延迟的量"：先 Flush 再写状态。
             FlushPendingNow();
+            timeline.Mark("flush-done");
             // ★ Round-2 2026-10-05（§2.1-4/5）★ 用户点停止**之前**先捕获显示检查点：停止是一次
             //   "可恢复的中断"，引擎随后会把这一轮收尾成 Interrupted 并从 committed 回执重建真值
             //   （真机视频证据：24.8% 在点击「停止」后**立刻**掉到 0.0%）——
@@ -1905,15 +2184,27 @@ public sealed class MigrationSessionViewModel : ObservableObject
                 new TrnPauseObservedPayload("Cancel", null),
                 DiagnosticLevel.Information, DiagnosticOutcome.Accepted);
             _cts?.Cancel();
-            SetOperational("已请求停止：已拷入的部分全部保留，可点「恢复任务」续传。");
+            timeline.Mark("cancel-delivered");
+            SetOperational("正在停止…：已请求引擎停止，已拷入的部分全部保留，可点「恢复任务」续传。");
             _log.Information("WinUI 会话停止请求");
+            _log.Information("{StopTimeline}", timeline.ToSummary());
             // 有在跑的运行 ⇒ 取消请求已投递（Accepted）；没有 ⇒ 什么都没停成，如实 Skipped。
             LastStopOutcome = running
                 ? ActionOutcomePolicy.ForRequest(honored: true, "stop-requested", "stop-no-running-run")
                 : new ActionOutcomeDecision(DiagnosticOutcome.Skipped, "stop-no-running-run");
+            if (!running)
+            {
+                // 没有在跑的运行 ⇒ 不存在"引擎收尾"，进行时立即结束（否则按钮会永远卡在"正在停止…"），
+                // 并且状态句必须改口：此刻什么都没停成，不能留着"正在停止…"骗人。
+                timeline.Complete("stop-no-running-run");
+                IsStopping = false;
+                SetOperational("未在运行：没有可停止的迁移，未更改任何文件。");
+            }
         }
         catch (Exception ex)
         {
+            timeline.Complete("stop-failed", ex.Message);
+            IsStopping = false;
             SetErrorSummary($"停止请求失败：{ex.Message}");
             LastStopOutcome = new ActionOutcomeDecision(DiagnosticOutcome.Failed, "stop-request-failed");
         }
@@ -2168,6 +2459,35 @@ public sealed class MigrationSessionViewModel : ObservableObject
         RaiseDerived();
     }
 
+    /// <summary>
+    /// ★ P0-05 ★ 引擎侧结构化信号 → 会话层源灯：把"本次运行结束时的错误文本"翻译成共享可达性事实。
+    ///
+    /// 为什么放在收尾而不是传输中：错误文本的**权威副本**是作业状态里的
+    /// <see cref="JobState.LastError"/>（引擎每趟运行自己写入），会话层读到它时结论已经稳定，
+    /// 不会因为一行被覆盖的流式输出而误判。灯只认证据：这里落下的是"某条源根不可读 + 原因"。
+    /// 计划里没有源根时（计划都读不出来）退化为 <see cref="ConnectionViewModel.NotifySourceLost"/>。
+    /// </summary>
+    private void ApplyShareLossSignalFromRunEnd(JobContext ctx, JobState end)
+    {
+        if (_connection is null) return;
+        if (!ShareLossSignal.TryMatchShareLossText(end.LastError, out _, out var evidence)) return;
+
+        var roots = ctx.Plan?.Objects
+            .Select(o => o.SourcePath)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+        if (roots.Count == 0)
+        {
+            _connection.NotifySourceLost();
+        }
+        else
+        {
+            foreach (var root in roots) _connection.NotifyShareReachability(root!, false, evidence);
+        }
+        Log("WARN", $"引擎报告共享级错误（{evidence}）：已把源连接灯拉回真实状态（不再显示已连接）。");
+    }
+
     private async Task FinishRunAsync(JobContext ctx, JobPhase phase, IReadOnlyCollection<string>? onlyObjectIds, CancellationToken ct)
     {
         // ★ A.5（P1-5）★ **必须先 Flush 再写结束态**：结束态（Percent/StatusMessage/IsFinished）
@@ -2177,6 +2497,12 @@ public sealed class MigrationSessionViewModel : ObservableObject
 
         var end = ctx.LoadStateOrNew();
         var spaceShort = end.LastError?.Contains("空间不足") == true;
+
+        // ★ P0-05（引擎侧结构化信号）★ 本次运行的收尾错误若是**共享级**错误
+        //（Win32 53/55/59/64/67/1219/1231/1236/1326），立刻把底栏源灯拉回真相：
+        // 现场共享被公司策略关闭后，引擎一路报"错误 67"，旧版界面却照旧显示"已连接"。
+        // 文件锁（32/33）在此被明确排除——那是单个文件被占用，不是共享断开。
+        ApplyShareLossSignalFromRunEnd(ctx, end);
         Phase = phase;
         // ★ A.5（P1-3）：**只有真正的 Completed 才是 100%**。
         //   CompletedWithErrors 可能对应"目标盘满 / 网络故障 / 大量失败 / 被迫中断"——实际只传了一部分
@@ -2184,14 +2510,27 @@ public sealed class MigrationSessionViewModel : ObservableObject
         //   IsFinished（流程是否结束）继续包含两者（流程语义），但**百分比必须区分**。
         var completed = phase == JobPhase.Completed;
         var finished = completed || phase == JobPhase.CompletedWithErrors;
+        // ★ P0-04 ★ 本次运行是不是"定向修复重拷"（onlyObjectIds 非空）：它决定 DataLabel 与结束句的措辞。
+        //   修复轮的百分比量的是**重拷完成度**，与"迁移完成度"不是同一件事——标签必须写清它测的是什么，
+        //   否则用户看到 100% 就会以为"修好了"（这正是现场症状）。
+        var isRepairRun = onlyObjectIds is { Count: > 0 };
         IsFinished = finished;
         if (completed) Percent = 100.0;
         else if (finished) Percent = ActualPercent(end);
-        DataLabel = finished ? "实际落盘 / 计划" : "已传 / 计划";
+        DataLabel = isRepairRun
+            ? (finished ? "修复重拷 / 计划（待复验）" : "已传 / 计划")
+            : (finished ? "实际落盘 / 计划" : "已传 / 计划");
         BalanceText = $"计划 {Format.Bytes(end.TotalBytes)}　·　实际落盘 {Format.Bytes(end.CompletedBytes)}";
 
         SetOperational(phase switch
         {
+            // ★ P0-04 ★ 修复轮的收尾**绝不允许**出现"✔ 迁移完成！"：修复是否成功由紧随其后的**复验结论**决定，
+            //   而"重拷完成"只说明活干完了。措辞故意留出结论位，并明说"重拷完成 ≠ 修复成功"。
+            JobPhase.Completed when isRepairRun =>
+                "◇ 本次修复的重拷已完成，正在按基础一致性复验…（重拷完成 ≠ 修复成功，结论见本条后续文字）",
+            JobPhase.CompletedWithErrors when isRepairRun =>
+                $"◐ 本次修复的重拷**未完整完成**（{(spaceShort ? "目标磁盘空间不足，已提前停止" : "存在失败对象")}，" +
+                $"重拷完成 {ActualPercent(end):0.#}%）：修复尚未达成，正在复验…",
             JobPhase.Completed => "✔ 迁移完成！建议点「验证」确认一致性，然后「打开报告」。",
             // 两条分支都必须明确"未完整完成"，并给出实际完成比例与可恢复路径；
             // 任何让人以为"全部完成"的措辞都不允许（A.5/P1-3）。
@@ -2218,6 +2557,13 @@ public sealed class MigrationSessionViewModel : ObservableObject
             _ => $"阶段结束：{phase}",
         });
 
+        // ★ P0-04 ★ **封版**：终局结论已经写出（Phase / IsFinished / Percent / DataLabel / StatusMessage）。
+        //   从这里开始，任何"还在路上"的旧进度快照都不许再改显示位——现场"结果页已给出失败结论，
+        //   底栏却又跳回运行中的百分比 / 结果被旧的运行中快照覆盖"就是这类过期回调造成的。
+        //   下面的修复复验结论、错误摘要都是**直接写入**（不受封版影响）；解除封版只发生在
+        //   "新一次运行 / 换任务"（ResetRunProjection）。
+        _progressSealed = true;
+
         // ★ FIX BATCH 2 ★ 收尾时绝不"忘记"一次未达成的暂停：用户的暂停请求失败过、而迁移后来跑完了，
         //   这件事必须留在状态句里（Diagnostics 侧的 expectation FAILED + incident 由 BATCH 3 承担）。
         //   旧实现里这个信息只活到下一次快照为止，用户永远不知道自己那次暂停其实落空了。
@@ -2228,19 +2574,53 @@ public sealed class MigrationSessionViewModel : ObservableObject
                 "）；下面的结束状态是它之后的真实结果。" + Environment.NewLine + StatusMessage);
         }
 
-        if (onlyObjectIds is { Count: > 0 })
+        if (isRepairRun)
         {
             // 定向修复路径：重拷结束后自动复验（与 WPF RepairAsync 同口径）
             IsRepairing = false;
-            var repairCount = onlyObjectIds.Count;
+            var repairCount = onlyObjectIds!.Count;
             SetOperational($"重拷结束（{phase}），正在重新校验…");
             Log("INFO", $"重拷结束（{phase}）：正在重新校验（基础一致性检查）…");
             await VerifyAsync(VerifyLevel.L1_CountSize, null, ct);
+
+            // ── ★ P0-04 ★ 这次修复到底算不算成功，由**复验结论**说了算，不由"重拷跑了多少"说了算 ──────
+            //   现场症状："修复的进度跑到 100%，可最后验证还是失败"，用户据此以为已经修好了。
+            //   所以这里必须用刚写入的复验报告（ctx.LoadVerify() = 上一步 SaveVerify 的同一份）判定，
+            //   并把结论明确写进状态句：
+            //     · 通过   → 修复达成，此时百分比 100% 名实相符；
+            //     · 未通过 → 进度**可能确实**停在 100%（重拷的活干完了），但结论必须明说"未达成"、
+            //                并写明"100% 只表示重拷完成度，不代表一致性达成"，同时置起
+            //                ProgressNeedsAttention 让页面把百分比/进度条转为警示色。
+            //   读报告失败时**按未通过处理**——不许把"读不到结论"当成"修好了"。
+            VerifyReport? repairVerify = null;
+            try { repairVerify = ctx.LoadVerify(); }
+            catch (Exception ex) { _log.Warning(ex, "读取复验报告失败：本次修复的结论按未通过处理（不假装成功）"); }
+            var verifyPassed = repairVerify?.OverallPass == true;
+            var mismatchCount = repairVerify?.Objects.Count(o => o.Status == "MISMATCH") ?? 0;
+            var unknownCount = repairVerify?.Objects.Count(o => o.Status == "UNKNOWN") ?? 0;
             // ★ F2b（D16 实测：点「修复」重拷一趟后界面没有任何新提示，用户看不出修复做了什么）★
             //   复验文案会把上面那句"重拷结束"整个覆盖掉，而"这次修复重拷了哪些对象"是用户唯一能拿到的
             //   修复记录（作业记录里的 attempt 现在会递增，但界面必须自己说清楚）。两者合成一句，不丢信息。
             var repairScope = repairCount == 1 ? "1 个对象" : $"{repairCount} 个对象";
-            SetOperational($"重拷结束（{phase}，本次修复重拷 {repairScope}）：{StatusMessage}");
+            ProgressNeedsAttention = !verifyPassed;
+            DataLabel = verifyPassed ? "修复重拷 / 计划（复验通过）" : "修复重拷 / 计划（复验未通过）";
+            if (verifyPassed)
+            {
+                Percent = 100.0;
+                SetOperational($"✔ 修复完成（本次重拷 {repairScope}，进度 100%）→ {StatusMessage}");
+                Log("INFO", $"修复完成：本次重拷 {repairScope} + 复验通过（结论见状态栏）。");
+            }
+            else
+            {
+                var counts = unknownCount > 0
+                    ? $"差异 {mismatchCount} 个对象 / 无法确认 {unknownCount} 个对象"
+                    : $"差异 {mismatchCount} 个对象";
+                SetOperational(
+                    $"✘ **本次修复未达成**：重拷 {repairScope} 已完成（进度百分比只表示**重拷完成度**，" +
+                    $"**不代表一致性已达成**），但复验未通过（{counts}）→ {StatusMessage}");
+                Log("WARN", $"修复未达成：本次重拷 {repairScope} 完成，但复验未通过（{counts}）" +
+                    "——进度条到 100% 不代表修好了；请按失败清单处理后再次点「修复」。");
+            }
             Log("INFO", $"本次修复重拷范围：{repairScope}（复验结论见上方状态栏）");
         }
         await RefreshExistingJobsAsync(null, ct);
@@ -2261,13 +2641,24 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// 验证（默认 L1）。**必须先通过闸门**（无计划 / 0 对象 / 源不可达一律拒绝）。
     /// 结论文案统一由 <see cref="DescribeVerifyOutcome"/> 产出：L1 绝不说成"完整性验证通过"。
     /// </summary>
-    public async Task VerifyAsync(VerifyLevel level = VerifyLevel.L1_CountSize, IProgress<string>? progress = null, CancellationToken ct = default)
+    /// <param name="detail">
+    /// ★ P1-12 ★ 结构化真实进度（验收 R9）：验证面板用它显示真实计数。
+    /// 纯只读投影——不参与任何判定，投递失败/抛异常都不会影响验证结论。
+    /// </param>
+    public async Task VerifyAsync(VerifyLevel level = VerifyLevel.L1_CountSize, IProgress<string>? progress = null, CancellationToken ct = default, IProgress<VerifyProgressSnapshot>? detail = null)
     {
+        LastVerifyReport = null;   // 每次开跑先清掉上一次的报告：界面绝不能把旧结论当本次结果展示
+        // ★ K5（2026-10-12 实测缺口）★ 验证动作原先只写界面日志（Log → 本页日志卡），**不进 app 日志**：
+        //   现场用 %ProgramData%\PCMig\Logs\app-*.log 定位「点击验证 → 验证开始/结束」时 grep「验证」零命中，
+        //   只能靠 verify-report.json 的 mtime 反推时刻。用户在远程排障时读的是 app 日志，因此三处
+        //   （开始 / 结束 / 取消或失败）都要留可定位的证据，并带上级别、任务号、对象数与真实耗时。
+        var verifyClock = System.Diagnostics.Stopwatch.StartNew();
         var ctx = Ctx;
         if (ctx is null)
         {
             SetUserHint("尚无任务：不能验证。");
             Log("WARN", "验证被拒绝：尚无任务。");
+            _log.Warning("验证被拒绝（未开始核对）：尚无任务。级别={Level}", DescribeLevel(level));
             LastVerifyOutcome = ActionOutcomePolicy.ForVerify(new VerifyBusinessResult(false, false, "verify-no-task", false, false));
             return;
         }
@@ -2275,6 +2666,8 @@ public sealed class MigrationSessionViewModel : ObservableObject
         {
             SetUserHint("迁移/修复进行中：请先结束运行再验证。");
             Log("WARN", "验证被拒绝：迁移/修复进行中。");
+            _log.Warning("验证被拒绝（未开始核对）：迁移/修复进行中。任务={JobId}，级别={Level}",
+                ctx.JobId, DescribeLevel(level));
             LastVerifyOutcome = ActionOutcomePolicy.ForVerify(new VerifyBusinessResult(false, false, "verify-already-running", false, false));
             return;
         }
@@ -2285,7 +2678,8 @@ public sealed class MigrationSessionViewModel : ObservableObject
             AddFail("验证被拒绝", gate.Reason);
             SetErrorSummary(gate.Reason);
             Log("WARN", "验证被闸门拒绝：" + gate.Reason);
-            _log.Warning("验证被闸门拒绝: {Reason}", gate.Reason);
+            _log.Warning("验证被闸门拒绝（未开始核对）：任务={JobId}，级别={Level}，已用 {Elapsed} ms，原因={Reason}",
+                ctx.JobId, DescribeLevel(level), verifyClock.ElapsedMilliseconds, gate.Reason);
             LastVerifyOutcome = ActionOutcomePolicy.ForVerify(new VerifyBusinessResult(false, false, "verify-gate-blocked", false, false));
             return;
         }
@@ -2293,6 +2687,8 @@ public sealed class MigrationSessionViewModel : ObservableObject
         Phase = JobPhase.Verifying;
         SetOperational($"正在验证（{DescribeLevel(level)}）…");
         Log("INFO", $"开始验证：{DescribeLevel(level)}（闸门通过：有计划且源路径可达）");
+        _log.Information("验证开始：级别={Level}，任务={JobId}，计划对象数={ObjectCount}（闸门已实测源根可达）",
+            DescribeLevel(level), ctx.JobId, ctx.Plan?.Objects.Count ?? 0);
         VerifyReport? report = null;
         var canceled = false;
         var faulted = false;
@@ -2301,12 +2697,26 @@ public sealed class MigrationSessionViewModel : ObservableObject
             var jobLog = LogBootstrap.CreateJobLogger(ctx.JobDir, ctx.JobId);
             var matrix = MigrationMatrix.Load(null, jobLog);
             var verifier = new Verifier(ctx, matrix, jobLog);
-            report = await verifier.RunAsync(level, progress, ct);
+            // ★ P1-12 实测修复（2026-10-11，真实 UI 证据）★
+            //    旧写法 `await verifier.RunAsync(...)` 直接跑在 UI 线程上：Verifier 在对象循环开始前是
+            //    **同步枚举**（本机实测 12,000 文件约 94 ms、96,000 文件约 769 ms，网络共享只会更慢），
+            //    于是 UI 线程被占住，"验证完整性"点下去后第二窗口要等枚举结束才渲染得出来：
+            //    实测窗口在点击后 2066 ms 才出现，而验证本身只用了 769 ms ⇒ 取消按钮从"还没出现"直接
+            //    跳到"已结束、已禁用"，用户根本没有取消的机会（R9 要求取消有效）。
+            //    按本类既有的线程纪律（阻塞式 Core 调用一律 Task.Run 包裹）放到后台线程；
+            //    progress/detail 都是 UI 线程上创建的 Progress<T>，回调仍会 marshal 回 UI 线程。
+            report = await Task.Run(() => verifier.RunAsync(level, progress, ct, detail), ct);
             ctx.SaveVerify(report);
+            // ★ P0-05 ★ 验证报告里每个对象的 SourceUnavailable 都是"源根当时真的读不到"的实测结论，
+            //   是整个程序里关于源共享是否还在的**最硬证据**；据此把底栏源灯拉回真实状态。
+            SyncSourceLampFromVerify(report);
             _hasVerifyReport = true;
             TotalHashSampled = report.Objects.Sum(o => o.HashSampled);
             LastVerifyResultText = DescribeVerifyOutcome(report, level);
-            SetOperational(LastVerifyResultText);
+            // ★ UX-2（用户现场观察）★ 左侧提示框只放一句话结论（状态 + 四态数量，不列对象编号）；
+            //   完整结论（含少量示例编号）留在本页结论行，逐对象明细落到验证报告。
+            LastVerifyHintText = DescribeVerifyHint(report, level);
+            SetOperational(LastVerifyHintText);
             // 结论行：文案只能来自 DescribeVerifyOutcome（L1 绝不说成"完整性验证通过"）。
             Log("INFO", "验证结论：" + LastVerifyResultText);
             // 内容级证据行：抽样数为 0 时必须明确说"不代表内容一致"（NoHashSampleText）。
@@ -2317,14 +2727,36 @@ public sealed class MigrationSessionViewModel : ObservableObject
             ApplyVerifyToRows(report);
             Raise(nameof(CanRepair));
             await RefreshExistingJobsAsync(null, ct);
+            _log.Information(
+                "验证结束：任务={JobId}，级别={Level}，运行号={RunId}，耗时={Elapsed} ms，对象数={Count}，" +
+                "总体结论={OverallPass}（通过 {Ok} 存在差异 {Mismatch} 无法确认 {Unknown} 无可核对数据 {Empty}）",
+                ctx.JobId, DescribeLevel(level), report.VerifyRunId, verifyClock.ElapsedMilliseconds, report.Objects.Count,
+                report.OverallPass,
+                report.Objects.Count(o => o.Status == "OK"),
+                report.Objects.Count(o => o.Status == "MISMATCH"),
+                report.Objects.Count(o => o.Status == "UNKNOWN"),
+                report.Objects.Count(o => o.Status == "EMPTY"));
         }
-        catch (OperationCanceledException) { canceled = true; SetOperational("验证已取消。"); }
+        catch (OperationCanceledException)
+        {
+            canceled = true;
+            // ★ UX-2 ★ 提示卡同样只给一句话；取消**不是**通过，也不产生结论。
+            LastVerifyHintText = "验证已取消：没有结论（取消不等于通过）。重新验证后才能判断。";
+            SetOperational(LastVerifyHintText);
+            Log("WARN", "验证已取消：没有结论（取消不等于通过）。");
+            _log.Warning("验证已取消：没有结论（取消不等于通过）。任务={JobId}，级别={Level}，已用 {Elapsed} ms，" +
+                         "未写出任何验证报告（取消不产生报告）",
+                ctx.JobId, DescribeLevel(level), verifyClock.ElapsedMilliseconds);
+        }
         catch (Exception ex)
         {
             faulted = true;
+            LastVerifyHintText = $"验证失败：没有结论（{ex.Message}）。详见下方错误摘要与本页日志。";
+            SetOperational(LastVerifyHintText);
             SetErrorSummary($"验证失败：{ex.Message}");
             Log("ERROR", $"验证失败：{ex.Message}");
-            _log.Error(ex, "WinUI 验证失败");
+            _log.Error(ex, "WinUI 验证失败：任务={JobId}，级别={Level}，已用 {Elapsed} ms",
+                ctx.JobId, DescribeLevel(level), verifyClock.ElapsedMilliseconds);
         }
 
         // D6.3 §11：验证的实际业务结果 = **既有验证报告的结构化结论**（OverallPass / 对象数），
@@ -2335,6 +2767,41 @@ public sealed class MigrationSessionViewModel : ObservableObject
             BlockedReason: null,
             Canceled: canceled,
             Faulted: faulted));
+        // ★ P1-12 ★ 报告是二级窗口「对象结论」清单的唯一数据源；取消/故障时保持 null（界面据此说"没有报告"）。
+        LastVerifyReport = report;
+    }
+
+    /// <summary>
+    /// ★ P1-12 ★ 最近一次验证的报告（唯一真值来源，供验证面板逐对象展示四态结论）。
+    /// 每次验证开跑时先置 null、仅在真的拿到报告后赋值：取消或故障时**不会**留下上一次的旧结论。
+    /// </summary>
+    public VerifyReport? LastVerifyReport { get; private set; }
+
+    /// <summary>
+    /// ★ P0-05 ★ 用一次真实验证的结论同步底栏源灯（唯一判据 = 实测可达性，不做任何推测）：
+    ///   · 任一计划对象 <see cref="ObjectVerifyResult.SourceUnavailable"/> ⇒ 源根读不到 ⇒ 灯打回未连接；
+    ///   · 计划非空且每个对象都实测可达（无一个 SourceUnavailable）⇒ 灯如实恢复成已连接。
+    /// 两条都只在**有实测证据**时出手：验证被取消 / 没有报告 / 计划为空一律不动灯（不猜、不美化）。
+    /// </summary>
+    private void SyncSourceLampFromVerify(VerifyReport report)
+    {
+        if (_connection is null || report.Objects.Count == 0) return;
+        if (report.Objects.Any(o => o.SourceUnavailable))
+        {
+            _connection.NotifySourceLost();
+            return;
+        }
+        // ★ P0-05 ★ 恢复要带**实测证据的目标**：把逐个对象的源根实测结论送进灯的证据表
+            //（多共享场景下"哪一条恢复了"要能定位），再把状态收敛回"已连接"。
+            // 源根路径来自**计划**（验证报告按 ObjectId 对应，报告本身不带路径）。
+            var roots = Ctx?.Plan?.Objects.ToDictionary(o => o.ObjectId, o => o.SourcePath, StringComparer.Ordinal);
+            var verifiedRoots = new List<string>();
+            foreach (var o in report.Objects)
+                if (roots is not null && roots.TryGetValue(o.ObjectId, out var sp) && !string.IsNullOrWhiteSpace(sp))
+                    verifiedRoots.Add(sp);
+            foreach (var sp in verifiedRoots.Distinct(StringComparer.OrdinalIgnoreCase))
+                _connection.NotifyShareReachability(sp, true, "验证实测源根可达");
+            _connection.NotifySourceRestored(verifiedRoots.FirstOrDefault());
     }
 
     /// <summary>
@@ -2472,6 +2939,79 @@ public sealed class MigrationSessionViewModel : ObservableObject
             SetErrorSummary($"报告生成失败：{ex.Message}");
             Log("ERROR", $"报告生成失败：{ex.Message}");
             _log.Error(ex, "WinUI 报告生成失败");
+        }
+    }
+
+    /// <summary>
+    /// ★ m03985 执行令 §UI-C/§UI-D + §数据采集契约 4 ★ 生成并打开**验证报告**（与迁移报告严格分开）：
+    ///   · 迁移报告讲「传了什么」（<see cref="OpenReportAsync"/>）；本方法讲「核对到了什么、没核对成什么」；
+    ///   · 没有验证报告、或本轮还没出结论 ⇒ 如实拒绝并解释（**不生成空报告、不打开旧报告冒充本轮结果**）；
+    ///   · 报告基于最近一次**已完成**验证的落盘数据（JobId + VerifyRunId + Level + 验证时刻），
+    ///     正在执行的验证不会被当成已完成；
+    ///   · 生成在后台线程（不占 UI 线程）、报告器自己原子落盘；打开失败时返回本机路径供复制，绝不假称成功。
+    /// </summary>
+    public async Task<VerifyReportOpenResult> OpenVerifyReportAsync(CancellationToken ct = default)
+    {
+        var ctx = Ctx;
+        if (ctx is null)
+        {
+            const string noJob = "尚无任务：没有可生成的验证报告。";
+            SetUserHint(noJob);
+            Log("WARN", noJob);
+            return new VerifyReportOpenResult(false, null, noJob);
+        }
+
+        // ★ 只认「已经出过结论」的验证：正在跑的验证（或跑完但被判为取消/无报告）都不能当成本轮结果。
+        if (LastVerifyReport is null)
+        {
+            const string noResult = "还没有验证报告：请先在本页点击「验证完整性」，完成后即可打开。";
+            SetUserHint(noResult);
+            Log("WARN", "打开验证报告被拒绝：本次会话还没有已完成验证的结论。");
+            return new VerifyReportOpenResult(false, null, noResult);
+        }
+
+        try
+        {
+            var jobLog = LogBootstrap.CreateJobLogger(ctx.JobDir, ctx.JobId);
+            var path = await Task.Run(() => new VerifyReportGenerator(ctx, jobLog).Generate(), ct);
+            if (path is null)
+            {
+                const string empty = "验证报告未能生成：本机没有可用的验证数据（结论不受影响，详见本页日志）。";
+                SetErrorSummary(empty);
+                Log("ERROR", empty);
+                return new VerifyReportOpenResult(false, null, empty);
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                var openFailed = $"验证报告已生成，但用系统默认浏览器打开失败（{ex.Message}）。" +
+                                 $"可复制本机路径手动打开：{path}";
+                SetErrorSummary(openFailed);
+                Log("ERROR", openFailed);
+                return new VerifyReportOpenResult(false, path, openFailed);
+            }
+
+            SetOperational($"验证报告已生成并打开：{path}");
+            Log("INFO", $"验证报告已生成并打开：{path}");
+            return new VerifyReportOpenResult(true, path, $"验证报告已打开（本机文件，可离线查看）：{path}");
+        }
+        catch (OperationCanceledException)
+        {
+            const string canceled = "已取消打开验证报告（没有生成文件）。";
+            Log("WARN", canceled);
+            return new VerifyReportOpenResult(false, null, canceled);
+        }
+        catch (Exception ex)
+        {
+            var failed = $"验证报告生成失败：{ex.Message}（验证结论不受影响）";
+            SetErrorSummary(failed);
+            Log("ERROR", failed);
+            _log.Error(ex, "WinUI 验证报告生成失败");
+            return new VerifyReportOpenResult(false, null, failed);
         }
     }
 
@@ -3207,6 +3747,19 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// <summary>把引擎的进度快照翻译成显示位（唯一入口；所有 UI 更新都在 UI 线程）。</summary>
     private void ApplySnapshot(ProgressSnapshot s)
     {
+        // ★ P0-04 ★ **收尾封版**：终局结论（Percent / DataLabel / StatusMessage / IsFinished）已经写出后，
+        //   任何后到的旧快照都不许再改显示位——现场"结果页已给出失败结论，底栏却又跳回运行中百分比"
+        //   就是这类过期回调造成的。这里只**拒绝**应用并留一条计数与日志（拒绝本身也要有证据，
+        //   不能是静默丢弃）；解除封版只发生在"新一次运行 / 换任务"（ResetRunProjection）。
+        if (_progressSealed)
+        {
+            _postFinishSnapshotsIgnored++;
+            _log.Debug(
+                "收尾后忽略过期进度快照：job={JobId} 快照 phase={Phase} percent={Percent:0.###}（终局结论保持不变）",
+                Ctx?.JobId, s.Phase, s.Percent);
+            return;
+        }
+
         // ★ A.5（P1-3）：进度条只有在**真 Completed** 时才走满；CompletedWithErrors 用引擎报的实际比例。
         var finished = s.Phase is JobPhase.Completed or JobPhase.CompletedWithErrors;
         Phase = s.Phase;
@@ -3643,7 +4196,8 @@ public sealed class MigrationSessionViewModel : ObservableObject
     private static string ExitCodePhrase(int code)
         => code < 0 ? "未执行（该通道没跑）" : $"{code}（{ErrorTranslator.ExitCodeText(code)}）";
 
-    /// <summary>把计划对象填进清单（RootFiles 给人话标签；体积未知时写"传输时实测"）。</summary>
+    /// <summary>把计划对象填进清单（RootFiles 给人话标签；体积未知时写"传输时实测"）。
+    /// ★ P1-07(2) ★ 同时带上计划里的目标绝对路径，让评审期就能看到真实映射。</summary>
     private void FillObjectsFromPlan(MigrationPlan? plan)
     {
         Objects.Clear();
@@ -3653,7 +4207,8 @@ public sealed class MigrationSessionViewModel : ObservableObject
             Objects.Add(new SessionObjectRow(
                 o.ObjectId,
                 o.Kind == ObjectKind.RootFiles ? $"{o.SourcePath}　［根目录散落文件］" : o.SourcePath,
-                o.EstimatedBytes < 0 ? "传输时实测" : Format.Bytes(o.EstimatedBytes)));
+                o.EstimatedBytes < 0 ? "传输时实测" : Format.Bytes(o.EstimatedBytes),
+                o.TargetPath));
         }
     }
 
@@ -3666,18 +4221,48 @@ public sealed class MigrationSessionViewModel : ObservableObject
         {
             var row = Objects.FirstOrDefault(o => string.Equals(o.ObjectId, r.ObjectId, StringComparison.OrdinalIgnoreCase));
             if (row is null) continue;
-            row.StatusText = r.Status == "OK" ? "✔ 数量/字节一致" : "✘ 不一致（数量或字节不符）";
+            // ★ P0-02 ★ 不再二值判断（旧代码 r.Status == "OK" ? "一致" : "不一致"）：现场三种完全不同的
+            //   状态（目标真的多文件 / 根层统计缺陷 / NTUSER 真锁未到）被压成同一句话。现在逐态陈述。
+            row.StatusText = VerifyStatusWord(r);
             if (r.Status != "OK")
             {
-                AddFail($"✘ 校验不一致　{r.ObjectId}",
-                    $"源 {r.SourceFiles} 个文件 / {Format.Bytes(r.SourceBytes)}　→　目标 {r.TargetFiles} 个文件 / {Format.Bytes(r.TargetBytes)}",
-                    objectLevel: true, verifyDerived: true);
+                var detail = $"源 {r.SourceFiles} 个文件 / {Format.Bytes(r.SourceBytes)}　→　目标 {r.TargetFiles} 个文件 / {Format.Bytes(r.TargetBytes)}";
+                if (r.SourceUnavailable) detail += "　［源根不可达］";
+                if (r.TargetUnavailable) detail += "　［目标根不可达］";
+                // ★ F-1（2026-10-13 定点修复）★ 只有确证缺失才写"缺失样例"；其余（源/目标不可达、
+                //   枚举不全）一律"无法确认（未核实）"，避免用户在不可确认状态下按"缺失"去删自己目标盘上的文件。
+                if (r.MissingSamples.Count > 0)
+                    detail += (r.MissingConfirmed ? "　缺失样例：" : "　无法确认（未核实，不得当作缺失）样例：") +
+                              string.Join("、", r.MissingSamples.Take(3)) +
+                              (r.MissingSamples.Count > 3 ? $" 等 {r.MissingSamples.Count} 项" : "");
+                if (r.ExtraOnTarget.Count > 0)
+                    detail += $"　目标多出：{string.Join("、", r.ExtraOnTarget.Take(3))}" +
+                              (r.ExtraOnTarget.Count > 3 ? $" 等 {r.ExtraOnTarget.Count} 项" : "") + "（非缺失，不自动清理）";
+                if (r.SizeMismatched > 0) detail += $"　同名不同长度：{r.SizeMismatched} 个";
+                if (r.HashReadFailed > 0) detail += $"　抽样读取失败：{r.HashReadFailed} 个（≠ 内容不同）";
+                if (r.EnumerationSkipped > 0) detail += $"　枚举跳过：{r.EnumerationSkipped} 个（统计不完整）";
+                AddFail($"✘ 校验{r.StatusText}　{r.ObjectId}", detail, objectLevel: true, verifyDerived: true);
             }
         }
         if (!report.OverallPass && report.Objects.Any(o => o.HashMismatched > 0))
             AddFail("内容级抽样不一致", $"{report.Objects.Sum(o => o.HashMismatched)} 个抽样文件 SHA-256 不匹配（内容确实不同）。",
                 verifyDerived: true);
     }
+
+    /// <summary>
+    /// ★ P0-02 ★ 逐对象的验证结论用词（与 <c>ObjectVerifyResult.StatusText</c> 同一口径）。
+    /// 「无法确认」和「无可核对数据」都**不是**通过：前者是源不可达/枚举被跳过/两侧都空但计划预期有数据，
+    /// 后者是计划与实测都为空。只有 OK 才是核对过的通过。
+    /// </summary>
+    private static string VerifyStatusWord(ObjectVerifyResult r) => r.Status switch
+    {
+        "OK" => "✔ 通过（数量/字节一致）",
+        "MISMATCH" => "✘ 存在差异",
+        "UNKNOWN" => "？ 无法确认",
+        "EMPTY" => "○ 无可核对数据（两侧为空）",
+        "CANCELED" => "… 已取消",
+        _ => r.Status,
+    };
 
     private readonly HashSet<string> _failIndex = new(StringComparer.Ordinal);
 
@@ -3740,6 +4325,12 @@ public sealed class MigrationSessionViewModel : ObservableObject
         EtaText = "—";
         _lastCompletedCount = -1;
 
+        // ★ P0-04 ★ 新一次运行（Run / Resume / Repair）或换任务 = **解除收尾封版**：
+        //   否则上一轮的终局结论会把本轮的进度显示位锁死。同时清掉上一轮的"复验需注意"与过期计数。
+        _progressSealed = false;
+        ProgressNeedsAttention = false;
+        _postFinishSnapshotsIgnored = 0;
+
         // ★ A.5（P1-5）★ 上一轮遗留的待刷新数据与丢弃计数一并作废：
         //   否则它们会冒充"本轮的真实状态"，而丢弃计数更是会跨轮累加成不诚实的数字。
         _batcher.Clear();
@@ -3758,6 +4349,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
     {
         ClearVerifyDerivedFails();
         LastVerifyResultText = string.Empty;
+        LastVerifyHintText = string.Empty;
         TotalHashSampled = 0;
         _hasVerifyReport = false;
     }
@@ -3986,6 +4578,9 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// </summary>
     private bool DrainOnTick()
     {
+        // ★ P0-06(1) ★ 先打心跳：只要这一拍真的在 UI 线程上跑到了，就是"界面还活着"的证据。
+        //   放在任何 return 之前——节拍自行停止（无待处理数据）时那最后一拍也必须算数。
+        _uiStallWatchdog.Heartbeat("tick");
         if (!IsRunning && !_batcher.HasPending) return false;
         var batch = _batcher.Drain();
         ApplyBatch(batch);
@@ -4003,6 +4598,8 @@ public sealed class MigrationSessionViewModel : ObservableObject
         if (_uiRefreshStopped) return;   // 已走关闭路径：绝不让节拍复活（幽灵刷新防线 4）
         _flushPump ??= CreateFlushPump(DrainOnTick);
         _flushPump.Start();
+        // ★ P0-06(1) ★ 节拍存活 = "UI 线程承诺每 50ms 响一次"，此时才允许判"未响应"。
+        _uiStallWatchdog.Start();
     }
 
     /// <summary>
@@ -4011,6 +4608,9 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// </summary>
     private void StopFlushTimer()
     {
+        // ★ P0-06(1) ★ 节拍停了就不再判"未响应"（这里没有心跳不是卡住，是没人要求滴答）；
+        //   已记录的卡住事实一律保留，供报告与诊断读取。
+        _uiStallWatchdog.Stop();
         var pump = _flushPump;
         if (pump is null) return;
         try { pump.Stop(); } catch { /* 关闭期异常不得外溢 */ }
@@ -4621,3 +5221,17 @@ internal readonly record struct ContinuationOutcome(
     long RawRegressionBytes,
     long RawDisplayedBytes,
     long HighWaterBytes);
+
+/// <summary>
+/// ★ m03985 执行令 §UI-C/§UI-D ★ 「打开验证报告」的真实结果 —— 界面只按这三样事实说话：
+///   · <see cref="Opened"/>：系统默认浏览器是否**真的**把本地 HTML 打开了；
+///   · <see cref="Path"/>：本机报告文件路径（非 null 就说明文件确实存在）；
+///   · <see cref="Message"/>：直接展示给用户的一行如实说明（失败原因 / 可复制路径 / 成功文案）。
+///
+/// 存在的理由：旧写法把「调用没抛异常」当成「打开成功」，浏览器关联坏了也会显示成功；
+/// 这里让"生成成功但打开失败"成为一个**可区分**的结果，界面据此把本机路径交给用户，而不是假称成功。
+/// </summary>
+/// <param name="Opened">用系统默认浏览器打开成功（true）或失败（false）。</param>
+/// <param name="Path">本机验证报告 HTML 的绝对路径；null 表示没有生成任何文件。</param>
+/// <param name="Message">给用户看的一行说明（不含口令、令牌等敏感信息）。</param>
+public sealed record VerifyReportOpenResult(bool Opened, string? Path, string Message);

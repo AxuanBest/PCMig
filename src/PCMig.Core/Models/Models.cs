@@ -102,6 +102,24 @@ public sealed class MigrationOptions
     /// 旧版恒用 /Z 单线程，真实生产实测吞吐只有手工 robocopy /MT:32 的 1/3（30 vs 90–137 MB/s）。
     /// </summary>
     public string LargeChannelMode { get; set; } = "auto";
+
+        /// <summary>
+        /// ★ P1-07 ★ 「目录树选中文件夹」的目标映射语义。**唯一真值是写进 plan.json 的 TargetPath**：
+        /// 一旦计划生成，Robocopy Dest / Verifier / Repair / Resume / Report 全部读同一个 plan，
+        /// 因此本选项只影响**新计划**的生成，绝不改变已存在 Job 的映射（旧 Job 按旧映射恢复）。
+        ///   contentDirect（默认）= 复制所选文件夹**内部内容**到 TargetRoot：
+        ///                          选 \\host\Users\d970 ⇒ 内容直接落在 C:\Users\D970（不再多嵌一层 d970）；
+        ///   keepFolder          = 保留所选文件夹**本身**：内容落在 C:\Users\D970\d970。
+        /// 仅对「自定义选择（Custom 模式）」且**只有一个**选择时生效；多选一律按源根相对结构映射
+        /// （保持可辨识，避免不同来源的同名文件静默合并/覆盖）。
+        /// </summary>
+        public string SelectedFolderMapping { get; set; } = "contentDirect";
+
+        /// <summary>contentDirect 的取值常量（避免各处手写字符串）。</summary>
+        public const string SelectedFolderMappingContentDirect = "contentDirect";
+
+        /// <summary>keepFolder 的取值常量。</summary>
+        public const string SelectedFolderMappingKeepFolder = "keepFolder";
 }
 
 // ------------------------------------------------------------
@@ -116,6 +134,8 @@ public sealed class ObservedState
     public long TotalBytes { get; set; }
     public long TotalFiles { get; set; }
     public long LockRiskFiles { get; set; }          // 全源 .pst/.ost 合计（迁移前提醒用户关 Outlook）
+    /// <summary>★ P1-08 ★ 其中**实测**当前被独占打不开（Win32 32/33）的个数。候选数 ≠ 被占用数。</summary>
+    public long LockedRiskFiles { get; set; }
     public long EncryptedFiles { get; set; }         // 全源 EFS 加密合计
     public List<string> Warnings { get; set; } = new();
 
@@ -142,6 +162,8 @@ public sealed class ScannedObject
     public bool HasCloudPlaceholders { get; set; }   // OneDrive 等占位符
     public bool ScanIncomplete { get; set; }         // 部分目录不可访问
     public long LockRiskFiles { get; set; }          // .pst/.ost 打开即锁的高危文件数
+    /// <summary>★ P1-08 ★ 其中实测当前被独占打不开（Win32 32/33）的个数。</summary>
+    public long LockedRiskFiles { get; set; }
     public long EncryptedFiles { get; set; }         // EFS 加密文件数
     /// <summary>非空 = 文件清单对象：SourcePath 目录下仅这些文件。</summary>
     public List<string>? FileList { get; set; }
@@ -345,6 +367,108 @@ public sealed class VerifyReport
     public VerifyLevel Level { get; set; }
     public bool OverallPass { get; set; }
     public List<ObjectVerifyResult> Objects { get; set; } = new();
+
+    // ═══════════════ ★ 2026-10-11（验证报告返修，用户执行令 00–10）★ ═══════════════
+    // 逐次验证的"证据档案"。**全部可选**：旧 verify-report.json 反序列化后这些字段保持
+    // null / 空集合，报告如实写"未采集"，绝不推导、绝不编造（用户执行令 §02/§06/§08）。
+
+    /// <summary>本次验证的唯一运行号（同一 Job 连续验证两次时可区分轮次）。旧报告为 null。</summary>
+    public string? VerifyRunId { get; set; }
+
+    /// <summary>本次验证的起止时刻（UTC）与总耗时（毫秒）。旧报告为 null ⇒ 报告写"未采集"。</summary>
+    public DateTime? StartedUtc { get; set; }
+    public DateTime? FinishedUtc { get; set; }
+    public double? ElapsedMs { get; set; }
+
+    /// <summary>产生本报告的构建版本（如实取程序集版本；不编造日期号）。</summary>
+    public string? ToolVersion { get; set; }
+
+    /// <summary>内容级核对使用的算法名（L2 为 "SHA-256"；L1 未做任何内容级核对 ⇒ null）。</summary>
+    public string? HashAlgorithm { get; set; }
+
+    /// <summary>本次实际生效的抽样百分比（1–100）。L1 未抽样 ⇒ 仍记录配置值并注明未执行。</summary>
+    public int? SampleHashPercent { get; set; }
+
+    /// <summary>统计完整性：Complete / Partial（与诊断事件 StatsCompletenessObserved 同一判据）。</summary>
+    public string? EvidenceCompleteness { get; set; }
+
+    /// <summary>统计完整性的自然语言说明（枚举被跳过多少项、是否有流式降级等）。</summary>
+    public string? EvidenceNote { get; set; }
+
+    /// <summary>环境档案：源主机、目标根、用户显式选择、映射规则、策略排除名单快照。</summary>
+    public string? SourceHost { get; set; }
+    public string? TargetRoot { get; set; }
+    public List<string> SelectedPaths { get; set; } = new();
+    public string? MappingRule { get; set; }
+    public List<string> ExcludedByPolicy { get; set; } = new();
+
+    /// <summary>阶段耗时表（真实累计：源侧枚举 / 目标侧枚举 / 对账 / 内容级抽样）。旧报告为空。</summary>
+    public List<VerifyStageRecord> Stages { get; set; } = new();
+
+    /// <summary>
+    /// 文件级差异记录（有界：<c>MaxFileDiffRecords</c> 条；超限只计数并置 <see cref="FileDiffsTruncated"/>）。
+    /// **只有真的逐文件核对过才写**；哈希不一致只知总数、引擎未记录文件名时不得编造条目。
+    /// </summary>
+    public List<FileDiffRecord> FileDiffs { get; set; } = new();
+    public bool FileDiffsTruncated { get; set; }
+
+    /// <summary>枚举期被跳过的条目明细（有界；含侧别、路径、类型、错误文本与时刻）。</summary>
+    public List<EnumerationFailure> EnumerationFailures { get; set; } = new();
+    public bool EnumerationFailuresTruncated { get; set; }
+
+    /// <summary>
+    /// 本轮验证的运行状态：completed / canceled / failed / partial。
+    /// 引擎正常跑完写 "completed"；旧报告为 null ⇒ 报告按"未记录"陈述（不假装知道）。
+    /// </summary>
+    public string? RunStatus { get; set; }
+}
+
+/// <summary>一个验证阶段的真实耗时记录（按对象累计，Note 里写明口径）。</summary>
+public sealed class VerifyStageRecord
+{
+    public string Stage { get; set; } = "";
+    public double ElapsedMs { get; set; }
+    /// <summary>该阶段覆盖的对象数（0 = 不按对象计）。</summary>
+    public long CoveredObjects { get; set; }
+    /// <summary>口径说明（如"按对象累计""未执行"），不许留空让读者猜。</summary>
+    public string? Note { get; set; }
+}
+
+/// <summary>
+/// 一条文件级差异（有界记录）。字段都来自引擎**当时真的读过**的东西：
+/// 相对路径、源/目标绝对路径、两侧长度、证据来源、以及（确实有的话）Win32 错误码。
+/// </summary>
+public sealed class FileDiffRecord
+{
+    public string ObjectId { get; set; } = "";
+    /// <summary>差异类型：missing-on-target / extra-on-target / size-mismatch / hash-mismatch / unreadable。</summary>
+    public string DiffKind { get; set; } = "";
+    public string RelativePath { get; set; } = "";
+    public string SourcePath { get; set; } = "";
+    public string TargetPath { get; set; } = "";
+    /// <summary>源侧长度；-1 = 该侧不存在（不是 0 字节）。</summary>
+    public long SourceLength { get; set; } = -1;
+    /// <summary>目标侧长度；-1 = 该侧不存在（不是 0 字节）。</summary>
+    public long TargetLength { get; set; } = -1;
+    /// <summary>证据来源（如"L1 枚举比较""长度比较""SHA-256 双向核对"）。</summary>
+    public string? Evidence { get; set; }
+    /// <summary>确实拿到的 Win32 错误码文本（如 "Win32 32 ERROR_SHARING_VIOLATION"）；没有就 null，不编造。</summary>
+    public string? Win32Code { get; set; }
+    /// <summary>补充明细（例如两侧哈希值；内容级证据）。</summary>
+    public string? Detail { get; set; }
+}
+
+/// <summary>枚举期被跳过的一条记录（阶段、路径、类型、错误文本、时刻）。</summary>
+public sealed class EnumerationFailure
+{
+    /// <summary>source / target。</summary>
+    public string Side { get; set; } = "";
+    /// <summary>被跳过条目的路径（目录或文件；引擎给出的是当时在遍历的那一层）。</summary>
+    public string Path { get; set; } = "";
+    /// <summary>directory / file。</summary>
+    public string Kind { get; set; } = "";
+    public string Message { get; set; } = "";
+    public DateTime AtUtc { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class ObjectVerifyResult
@@ -359,5 +483,79 @@ public sealed class ObjectVerifyResult
     public int HashSampled { get; set; }
     public int HashMismatched { get; set; }
     public List<string> MissingSamples { get; set; } = new(); // 最多记录前 50 条
-    public string Status => CountMatch && BytesMatch && HashMismatched == 0 ? "OK" : "MISMATCH";
+
+    /// <summary>
+    /// ★ F-1（2026-10-13 定点修复）★ <see cref="MissingSamples"/> 里的路径是否**已被确证**"源有目标无"。
+    ///
+    /// 为什么单列一个布尔：当对象是 UNKNOWN（源/目标不可达、枚举不全、两侧 0/0 与计划矛盾）时，
+    /// 比对过程会把"读不到的一侧"当成"什么都没有"，于是**每一个源文件都会被记进 MissingSamples**。
+    /// 那些路径**不是**缺失证据（实测证明：`target-unavailable` 的对象在控制台被逐条打成
+    /// 「缺失: a.bin」，与报告卡片上「无法确认不是缺失」自相矛盾 —— 现场"假缺失"话术的来源）。
+    /// 因此：只有**结论为 MISMATCH**（= 两侧都读到了、确实比对出差异）时，MissingSamples 才算"确证缺失"。
+    /// 所有人类可读出口（CLI 控制台 / 报告 HTML / 状态摘要 / UI 差异面板）都必须按本字段决定用词。
+    /// </summary>
+    public bool MissingConfirmed { get; set; }
+
+    // ═══════════════ P0-02：结构化差异与四态结论 ═══════════════
+    // 旧实现只有 OK / MISMATCH 两态，且把「枚举被跳过」「源不可达」「两边 0/0」都算成 OK。
+    // 现场三种完全不同的状态因此被压成同一个词：10/12（目标多文件）、根目录 14/0（统计缺陷）、
+    // NTUSER 真锁未到目标（真实缺失）。下面把它们分开陈述。
+
+    /// <summary>目标侧存在、源侧没有的相对路径（最多 50 条）。**这不是缺失**，默认也不自动清理。</summary>
+    public List<string> ExtraOnTarget { get; set; } = new();
+
+    /// <summary>两侧都存在但长度不同的相对路径样例（最多 50 条）。「数量/字节相同也可能内容不同」的兜底。</summary>
+    public List<string> SizeMismatchSamples { get; set; } = new();
+
+    /// <summary>长度不一致的文件总数（超出样例上限时仍准确计数）。</summary>
+    public long SizeMismatched { get; set; }
+
+    /// <summary>哈希样本读取失败数（≠ 内容不一致：可能是共享冲突/权限/源中断）。</summary>
+    public long HashReadFailed { get; set; }
+
+    /// <summary>枚举期被跳过的条目数（权限/竞态/瞬态 IO）。&gt; 0 ⇒ 统计不完整，不得声称 OK。</summary>
+    public long EnumerationSkipped { get; set; }
+
+    /// <summary>源根不可达（不存在/未挂载/共享已被策略关闭）。</summary>
+    public bool SourceUnavailable { get; set; }
+
+    /// <summary>目标根不可达。</summary>
+    public bool TargetUnavailable { get; set; }
+
+    /// <summary>两侧都是 0 文件 0 字节。只有计划本身预期为空时才是「真的空」。</summary>
+    public bool BothSidesEmpty { get; set; }
+
+    /// <summary>计划预期（判断「空」是否合理、以及验证是否偏离计划规模的依据）。</summary>
+    public long PlannedFiles { get; set; }
+    public long PlannedBytes { get; set; }
+
+    /// <summary>UNKNOWN 的原因码（如 source-unavailable / enumeration-incomplete / both-sides-empty）。</summary>
+    public string? UnknownReason { get; set; }
+
+    /// <summary>
+    /// ★ 2026-10-11（验证报告返修）★ 本对象的枚举覆盖状态：
+    ///   <c>complete</c> = 两侧枚举都完整；<c>incomplete</c> = 有条目被跳过，
+    ///   此时该对象**既不能说通过、也不能把没出现的文件说成真实缺失**。
+    /// 旧报告没有这个字段 ⇒ 读取后为 null，报告按 <see cref="EnumerationSkipped"/> 推导。
+    /// </summary>
+    public string? EnumerationStatus { get; set; }
+
+    /// <summary>
+    /// 业务结论：OK / MISMATCH / UNKNOWN / EMPTY / CANCELED。
+    /// UNKNOWN 与 EMPTY 都不等于"核对过内容"；<see cref="VerifyReport.OverallPass"/> 只认 OK 与"计划与实测都为空"的 EMPTY。
+    /// </summary>
+    public string Status { get; set; } = "OK";
+
+    /// <summary>是否可安全进入破坏性修复（只有确认差异才可以）。P0-01(4)/P0-03 的闸门判据。</summary>
+    public bool AllowsDestructiveRepair { get; set; }
+
+    public string StatusText => Status switch
+    {
+        "OK" => "通过",
+        "MISMATCH" => "存在差异",
+        "UNKNOWN" => "无法确认",
+        "EMPTY" => "无可核对数据",
+        "CANCELED" => "已取消",
+        _ => Status
+    };
 }

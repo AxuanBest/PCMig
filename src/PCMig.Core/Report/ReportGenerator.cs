@@ -119,7 +119,7 @@ th{background:#eff6ff} tr:nth-child(even){background:#f9fafb}
                       "<b>本报告未做数据一致性核对</b>——已传部分仍留在目标位置，处理后点「恢复任务」补齐，再点「验证」确认：</p><ul>");
             if (verify is { OverallPass: false })
             {
-                sb.Append("<p class='bad' style='font-size:14px'>注意：已有的验证结果显示<b>存在不一致对象</b>，请以「验证结果」一节为准。</p>");
+                sb.Append($"<p class='bad' style='font-size:14px'>注意：已有的验证结果<b>未通过</b>——{E(VerifyProblemSummary(verify))}。请以「验证结果」一节为准。</p>");
             }
             foreach (var o in incomplete)
             {
@@ -171,7 +171,9 @@ th{background:#eff6ff} tr:nth-child(even){background:#f9fafb}
             sb.Append($"<h2>验证结果（{verify.Level}，{verify.VerifiedUtc:yyyy-MM-dd HH:mm} UTC）</h2>");
             sb.Append(verify.OverallPass
                 ? "<p class='ok'>✔ 全部对象通过验证</p>"
-                : "<p class='bad'>✘ 存在不一致对象，请检查下表</p>");
+                // ★ P0-02 ★ 这一行原来一律写"存在不一致对象"：现场 10/12（数量不同、样本为空）与
+                //   真正的缺失、以及"根本没核对成（源不可达）"三种情形被同一句话概括。现在如实分列。
+                : $"<p class='bad'>✘ 验证未通过：{E(VerifyProblemSummary(verify))}</p>");
             sb.Append("<table><tr><th>对象</th><th>源文件</th><th>目标文件</th><th>源字节</th><th>目标字节</th><th>计数</th><th>字节</th><th>哈希抽样</th><th>结论</th></tr>");
             foreach (var o in verify.Objects)
             {
@@ -180,9 +182,18 @@ th{background:#eff6ff} tr:nth-child(even){background:#f9fafb}
                     $"<td>{(o.CountMatch ? "<span class='ok'>✔</span>" : "<span class='bad'>✘</span>")}</td>" +
                     $"<td>{(o.BytesMatch ? "<span class='ok'>✔</span>" : "<span class='bad'>✘</span>")}</td>" +
                     $"<td>{(o.HashSampled > 0 ? $"{o.HashSampled} 项/{o.HashMismatched} 不一致" : "-")}</td>" +
-                    $"<td>{(o.Status == "OK" ? "<span class='ok'>OK</span>" : "<span class='bad'>MISMATCH</span>")}</td></tr>");
+                    // ★ P0-02 ★ 结论列不得再把"无法确认/无可核对数据"写成 MISMATCH（现场 10/12 与 0/0
+                    //   曾被渲染成同一格），也不得把 UNKNOWN 渲染成通过。
+                    $"<td>{VerifyConclusionCell(o)}</td></tr>");
+                // ★ F-1（2026-10-13 定点修复）★ 只有确证缺失（MISMATCH 且两侧都读到）才写"缺失"；
+                //   UNKNOWN 对象里的这些路径一律说"无法确认"，不得冒充缺失。
                 foreach (var m in o.MissingSamples.Take(10))
-                    sb.Append($"<tr><td colspan='9' class='mono bad'>缺失: {E(m)}</td></tr>");
+                    sb.Append(o.MissingConfirmed
+                        ? $"<tr><td colspan='9' class='mono bad'>缺失: {E(m)}</td></tr>"
+                        : $"<tr><td colspan='9' class='mono warn'>无法确认（未核实，不得当作缺失）: {E(m)}</td></tr>");
+                // 目标多出的文件不是缺失、也不自动清理：单独一行，避免读者照"缺失"去删目标盘上的文件。
+                foreach (var e in o.ExtraOnTarget.Take(10))
+                    sb.Append($"<tr><td colspan='9' class='mono warn'>目标多出（非缺失，不自动清理）: {E(e)}</td></tr>");
             }
             sb.Append("</table>");
         }
@@ -467,6 +478,47 @@ th{background:#eff6ff} tr:nth-child(even){background:#f9fafb}
         ObjectStatus.Skipped => "<span class='tag gray'>跳过</span>",
         _ => s.ToString()
     };
+
+    /// <summary>
+    /// ★ P0-02 ★ 把"验证没通过"如实拆成两件不同的事，不再一律叫"存在不一致对象"：
+    ///   差异（MISMATCH）= 真的对不上；无法确认（UNKNOWN）= 根本没核对成
+    ///   （源不可达 / 目标不可达 / 枚举不完整 / 计划有数据而两侧全空）。
+    /// 把后者说成"不一致"，用户会去翻根本不存在的差异；把前者说成"无法确认"，真实缺失就被掩盖了。
+    /// 两种同时存在时**两个数都给**，不做任何"取最严重的一个"式简化。
+    /// </summary>
+    private static string VerifyProblemSummary(VerifyReport r)
+    {
+        var mismatch = r.Objects.Count(o => o.Status == "MISMATCH");
+        var unknown = r.Objects.Count(o => o.Status == "UNKNOWN");
+        var canceled = r.Objects.Count(o => o.Status == "CANCELED");
+        var parts = new List<string>();
+        if (mismatch > 0) parts.Add($"{mismatch} 个对象存在差异");
+        if (unknown > 0) parts.Add($"{unknown} 个对象无法确认（源或目标不可达 / 枚举不完整，属「没核对成」而非「不一致」）");
+        if (canceled > 0) parts.Add($"{canceled} 个对象已取消");
+        return parts.Count == 0
+            // 没有任何对象级结论却 OverallPass=false：如实说是报告/计划层面的问题，不编造对象数量。
+            ? "没有任何对象级结论（请核对计划与验证报告是否完整）"
+            : string.Join("；", parts);
+    }
+
+    /// <summary>
+    /// ★ P0-02 ★ 验证结论单元格：五态各自成词并带原因码。
+    /// 「无法确认（UNKNOWN）」「无可核对数据（EMPTY）」**不是通过**，也不等同于「存在差异」；
+    /// 旧版把非 OK 一律渲染成 MISMATCH，于是"目标一个文件都没有的统计缺陷"与"目标多了两个文件"
+    /// 在报告里长得一模一样。UNKNOWN 用 warn 色而非 bad 色：它是"没核对成"，不是"核对出不一致"。
+    /// </summary>
+    private static string VerifyConclusionCell(ObjectVerifyResult o)
+    {
+        var reason = string.IsNullOrEmpty(o.UnknownReason) ? "" : $"（{E(o.UnknownReason)}）";
+        return o.Status switch
+        {
+            "OK" => "<span class='ok'>✔ 通过</span>",
+            "EMPTY" => $"<span class='tag gray'>○ 无可核对数据</span>{reason}",
+            "UNKNOWN" => $"<span class='warn'>？ 无法确认</span>{reason}",
+            "CANCELED" => "<span class='tag gray'>… 已取消</span>",
+            _ => "<span class='bad'>✘ 存在差异</span>",
+        };
+    }
 
     /// <summary>
     /// 最简 HTML 转义：只转义 5 个结构字符，中文原样输出。

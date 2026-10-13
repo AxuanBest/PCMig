@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using PCMig.Diagnostics.Abstractions;
 using Xunit;
 
@@ -134,7 +135,19 @@ public sealed class CoverageMatrixTests
         sb.AppendLine();
 
         var docPath = Path.Combine(RepoRoot(), "docs", "诊断系统实施-事件覆盖矩阵.md");
-        File.WriteAllText(docPath, sb.ToString(), new UTF8Encoding(false));
+        // ★ 并行安全性 ★ 本用例会在**仓库里生成**这份矩阵文档，而同一个测试程序集可能被多个进程
+        //   同时跑（重负载验证就是 5 路并行）——直接 File.WriteAllText 会撞上
+        //   `IOException : The process cannot access the file ... because it is being used by another process`
+        //   （实测出现过）。这里用**跨进程命名互斥**串行化生成，并"临时文件 + 原子替换"，
+        //   并行读者不会看到半截文档。断言不变（矩阵必须生成，must-have 必须接入）。
+        using (var gate = new Mutex(false, @"PCMig.CoverageMatrix.doc"))
+        {
+            var held = false;
+            try { held = gate.WaitOne(TimeSpan.FromMinutes(2)); }
+            catch (AbandonedMutexException) { held = true; }
+            try { WriteDocAtomically(docPath, sb.ToString()); }
+            finally { if (held) gate.ReleaseMutex(); }
+        }
 
         // ---- must-have 清单：Stage B 之前不可缺少的观察点 ----
         var mustHave = new[]
@@ -176,5 +189,24 @@ public sealed class CoverageMatrixTests
         // 覆盖底线：至少一半事件已接入（防止"目录很热闹、实际没接几个"）。
         Assert.True(produced + deepOnly >= rows.Count / 2,
             $"生产覆盖过低：Produced {produced} + Deep-only {deepOnly} / 共 {rows.Count}");
+    }
+
+    /// <summary>临时文件 + 原子替换：并行读者不会读到半截文档。</summary>
+    private static void WriteDocAtomically(string docPath, string content)
+    {
+        var tmp = docPath + ".tmp-" + Guid.NewGuid().ToString("N")[..8];
+        File.WriteAllText(tmp, content, new UTF8Encoding(false));
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.Move(tmp, docPath, overwrite: true);
+                return;
+            }
+            catch (IOException) when (attempt < 60)
+            {
+                Thread.Sleep(50);   // 文件被杀毒/索引器短暂持有 ⇒ 退避重试（不改变要生成的内容）
+            }
+        }
     }
 }

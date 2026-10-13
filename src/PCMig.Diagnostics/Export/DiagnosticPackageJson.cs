@@ -383,6 +383,8 @@ internal static class DiagnosticPackageJson
                 writer.WriteString("flushStatus", c.FlushStatus);
                 writer.WriteNumber("coverageEndSequence", c.CoverageEndSequence);
                 writer.WriteBoolean("anyTailLoss", c.AnyTailLoss);
+                // ★ D61 偶发失败收口 ★ 截止点之后新建、被有意排除的段数：如实记数，且**与 anyTailLoss 无关**。
+                writer.WriteNumber("postCutoffSegmentsExcluded", c.PostCutoffSegmentsExcluded);
                 writer.WriteNumber("pendingAtCutoff", c.PendingAtCutoff);
                 writer.WriteNumber("sealedSegments", c.SealedSegments);
                 // ★ D6.3 §3 ★ 导出闸门聚合：本包证据面**全部**产出方各自的结果都在这里如实登记，

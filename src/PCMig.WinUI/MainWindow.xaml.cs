@@ -12,6 +12,7 @@ using PCMig.Core.Diagnostics;
 using PCMig.Core.Models;
 using PCMig.Core.Util;
 using PCMig.WinUI.Presentation;
+using PCMig.WinUI.Views;
 using Windows.Graphics;
 
 namespace PCMig.WinUI;
@@ -59,6 +60,12 @@ public sealed partial class MainWindow : Window
     private double _lastFooterFillWidth;
 
     /// <summary>
+    /// ★ P0-04 ★ 上一次已应用的"需要用户注意"（修复复验未通过）视觉状态。
+    /// 只用于避免每拍重复写控件（写属性会触发渲染失效），不参与任何业务判定。
+    /// </summary>
+    private bool _footerAttentionApplied;
+
+    /// <summary>
     /// ★ Round-2 2026-10-05（§3.2 / §3.3）★ **Shell 级呈现节拍（80 ms）**：全局唯一推进共享呈现时间线的地方。
     /// 为什么放在 Shell：底栏在四页都常驻，顶栏只在 Step3；推进者必须只有一个（否则同一时刻被推进两次），
     /// 而消费它的页面（Step3 的顶栏）只**读**视觉值。数字与进度条因此永远读同一个视觉比例。
@@ -101,6 +108,10 @@ public sealed partial class MainWindow : Window
         // 会话状态源同样必须先于适配层：Step3/Step4 的文案由它的真实状态决定（不再有假数据）。
         Session = new MigrationSessionViewModel(ViewModel);
 
+        // ★ P0-05（2026-10-13）★ 源共享可达性证据的巡检需要在 UI 线程把探测结论回投到 ViewModel：
+        //   这里（唯一的窗口装配点）把 UI DispatcherQueue 交进去；取不到也不影响（探测结论会直接调用）。
+        ViewModel.AttachUiQueue(DispatcherQueue);
+
         // ★ A.5（P1-5/D2）★ 节拍薄泵的生产装配点（唯一）。
         //   为什么在装配层注入而不是在 VM 里直接 new：MigrationSessionViewModel.cs 被**链入**
         //   tests\PCMig.Core.Tests 编译，而该测试项目没有 DispatcherQueueTimer 替身
@@ -127,6 +138,8 @@ public sealed partial class MainWindow : Window
         };
         Readiness = new PageReadiness(ViewModel, Session);
         InitializeComponent();
+        // ★ P1-10 ★ 壳 XAML 解析完成（此前的耗时 = App 构造 + XAML 加载 + 主题资源 + 首个 VM 装配）。
+        StartupTimeline.Mark("shell-xaml-loaded");
         ExtendsContentIntoTitleBar = true;
         // A21：拖动区改为**独立的细标题栏**（左侧有品牌内容），不再是 Product Header —— 这样系统
         // Caption Buttons 落在标题栏细条内，不再压在 Product Header 上；我们不自绘 — □ ×。
@@ -183,6 +196,10 @@ public sealed partial class MainWindow : Window
         // 数据源是**只读**适配器：运行时不存在时界面显示"尚未采集"，绝不让 Shell 起不来。
         DiagnosticCenterPanel.CloseRequested += (_, _) => ClosePanel(DiagnosticCenterPanel);
         DiagnosticCenterPanel.DeepTraceToggled += (_, enabled) => SetDeepTraceInputObservation(enabled);
+        // ★ PMML 返修（2026-10-11）★ 验证完整性面板走**同一条**编排路径：
+        //   关闭按钮只发 CloseRequested，由 Shell 播反向 morph 后折叠（绝不是 Hard Cut）。
+        //   注意语义：收起面板 ≠ 取消验证（取消要由面板里的「取消验证」真的向引擎发请求）。
+        VerificationProgressPanel.CloseRequested += (_, _) => ClosePanel(VerificationProgressPanel);
         _diagnosticCenterVm = new DiagnosticCenterViewModel(new RuntimeDiagnosticCenterSource())
         {
             ExportHandler = ExportDiagnosticPackageAsync,
@@ -249,7 +266,11 @@ public sealed partial class MainWindow : Window
                 UpdateSourceStatus();
             // ★ 2026-10-08（真机问题 4）★ 底栏「源连接」指示器同样只认业务状态（不猜、不轮询）：
             //   SourceState 由 ConnectionViewModel 单点派生，这里只做投影。
-            if (e.PropertyName is nameof(ConnectionViewModel.SourceState))
+            // ★ P0-05 ★ 证据本身变化（新增/替换某条源的可达性结论、或失效原因文字变了）也必须重投影，
+            //   否则会出现"颜色对了但提示还写着上一条源的问题"这种半新半旧的状态。
+            if (e.PropertyName is nameof(ConnectionViewModel.SourceState)
+                or nameof(ConnectionViewModel.UnreachableShares)
+                or nameof(ConnectionViewModel.SourceStateDetail))
                 UpdateSourceConnectionIndicator();
         };
         UpdateSourceStatus();
@@ -343,6 +364,47 @@ public sealed partial class MainWindow : Window
         // 其余按钮（含侧栏 Step Card、页面动作按钮、底栏四动作、Utility Panel 内按钮）保留该效果。
         InteractionFeedback.Exclude(DeveloperTuningButton);
         InteractionFeedback.Exclude(ChangelogButton);
+
+        // ★ P1-10 ★ 构造函数收尾：挂"壳真正加载完 / 首个可交互调度轮"两段，并写末行汇总。
+        InstallStartupTimelineHook();
+    }
+
+    /// <summary>
+    /// ★ P1-10 ★ 启动分段的最后两段（首帧已提交 → 用户可以真的动手）。
+    ///
+    /// 为什么需要它们：<c>window-activated</c> 只说明窗口被激活，**不代表用户已经能看见并操作界面**；
+    /// 用户抱怨的"首启慢"代价恰恰落在这两者之间（布局/资源/首屏页面的真实加载）。
+    /// 因此：
+    ///   · <c>shell-loaded</c> = 根内容 Loaded（首帧已提交，界面已经在屏幕上）；
+    ///   · <c>interactive</c>  = 紧随其后的**第一个调度轮**（输入已经能被受理）。
+    /// 只记事实：不改变任何启动行为，也不等待任何业务数据；失败一律降级。
+    /// </summary>
+    private void InstallStartupTimelineHook()
+    {
+        StartupTimeline.Mark("mainwindow-ctor");
+        if (Content is not FrameworkElement root)
+        {
+            // 拿不到根元素也要留一条汇总（如实记到哪一段为止），不能静默无输出。
+            StartupTimeline.Complete("window-activated");
+            return;
+        }
+
+        root.Loaded += (_, _) =>
+        {
+            StartupTimeline.Mark("shell-loaded", "根内容 Loaded（首帧已提交）");
+            try
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    StartupTimeline.Mark("interactive", "首个可交互调度轮");
+                    StartupTimeline.Complete("interactive");
+                });
+            }
+            catch
+            {
+                StartupTimeline.Complete("shell-loaded");
+            }
+        };
     }
 
     /// <summary>
@@ -650,6 +712,11 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void RefreshFooterPresentation()
     {
+        // ★ P0-05（2026-10-13）★ 空闲期源共享**证据新鲜度巡检**（与底栏呈现共用这个 80 ms 节拍）：
+        //   证据一过期就把"已连接"降级为"待确认"（无 IO、立即生效），随后按 ≥20 s 间隔异步补一次读探测。
+        //   放在 session 判空之前：没有会话时底栏灯同样必须诚实。
+        try { ViewModel.SweepEvidenceFreshness(); } catch { /* 巡检失败绝不影响底栏呈现 */ }
+
         var session = Session;
         if (session is null) return;
 
@@ -683,8 +750,45 @@ public sealed partial class MainWindow : Window
         FooterImmersiveProgress.Value = clamped;
         FooterImmersiveProgress.ProgressState = MapFooterProgressState(Session.Phase);
 
+        // ★ P0-04 ★ 醒目位与 Step3 主条同口径：修复复验未通过 ⇒ 底栏条不得收成"完成"态。
+        if (Session.ProgressNeedsAttention) FooterImmersiveProgress.ProgressState = ImmersiveProgressState.Warning;
+
         _lastFooterFillWidth = clamped;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(FooterProgressHost, $"迁移进度 {clamped:0.0}%");
+    }
+
+    /// <summary>
+    /// ★ P0-04 ★ 底栏醒目位：修复复验未通过时，百分比转警示色 —— 现场"进度 100% 却验证失败"里，
+    /// 底栏那个绿色的 100% 是最容易被记住的证据。纯投影，真值只有
+    /// <see cref="MigrationSessionViewModel.ProgressNeedsAttention"/> 一个来源；复位用 ClearValue 让样式原色回来。
+    /// </summary>
+    private void ApplyFooterAttentionVisual()
+    {
+        var attention = Session.ProgressNeedsAttention;
+        if (_footerAttentionApplied == attention) return;
+        _footerAttentionApplied = attention;
+
+        var brush = attention ? TryFindWarningBrush() : null;
+        if (brush is not null) FooterPercentText.Foreground = brush;
+        else FooterPercentText.ClearValue(Microsoft.UI.Xaml.Controls.TextBlock.ForegroundProperty);
+
+        // 状态切换时条态必须重算一次：呈现节拍在收尾后可能已停，不能只等下一拍。
+        UpdateFooterProgressFill();
+    }
+
+    private static Microsoft.UI.Xaml.Media.Brush? TryFindWarningBrush()
+    {
+        try
+        {
+            return Application.Current?.Resources is { } res && res["WarningBrush"] is Microsoft.UI.Xaml.Media.Brush b
+                ? b
+                : null;
+        }
+        catch (Exception)
+        {
+            // 资源键缺失（主题被替换）时只退化为"不加色"：配色问题绝不允许影响到业务界面。
+            return null;
+        }
     }
 
     /// <summary>
@@ -739,6 +843,10 @@ public sealed partial class MainWindow : Window
         FooterSpeedText.Text = Session.NetworkSpeedText;
         FooterEtaText.Text = Session.NetworkEtaText;
 
+        // ★ P0-04 ★ 复验未通过 ⇒ 底栏百分比转警示色（内部有"值没变就不写"的门，可每拍调用）。
+        //   收尾后呈现节拍可能已经停下，因此必须在这里无条件投影一次，不能只依赖节拍。
+        ApplyFooterAttentionVisual();
+
         // 四态在底栏的呈现（可用性矩阵，全部来自会话的真实布尔量，不自行推断）：
         //   运行中（Resume 后正在传）：开始✗ 暂停✓ 停止✓ 恢复✗
         //   正在暂停…（请求已受理，引擎尚未确认停住）：开始✗ 暂停✗ 停止✓ 恢复✗  ← FIX BATCH 2
@@ -757,6 +865,11 @@ public sealed partial class MainWindow : Window
         FooterPauseLabel.Text = Session.PauseButtonText;
         FooterPauseIcon.Glyph = Session.IsPauseFailed ? "\uE7BA" : "\uE769";
 
+        // ★ P0-06(2) ★ 停止同理（真值 ⇒ 文案）：点下去之后必须立刻看到「正在停止…」，
+        //   而不是继续显示「停止」让人以为没点上（现场症状就是"点了没反应"）。
+        FooterStopLabel.Text = Session.StopButtonText;
+        FooterStopIcon.Glyph = Session.IsStopping ? "\uE769" : "\uE71A";
+
         // ★ 2026-10-08（真机问题 4）★ 底栏是"真值每次推送"的汇聚点：顺手把「源连接」指示器也投影一次。
         //   幂等：状态没变时只是重设同一画刷、停同一条动画，不产生额外布局。
         UpdateSourceConnectionIndicator();
@@ -764,6 +877,11 @@ public sealed partial class MainWindow : Window
 
     /// <summary>开始迁移（底栏）：与 Step2 的「开始迁移」同一入口（同一个会话、同一份 Core 计划）。</summary>
     private async void FooterStart_Click(object sender, RoutedEventArgs e)
+    {
+    // ★ P0-06(4) ★ 底栏四个按钮都是 `async void`：漏出来的异常没有任何调用者能接住，
+    //   直接落到 XAML UnhandledException ⇒ 进程结束（现场"点击停止时偶发崩溃"正是这条链）。
+    //   兜底纪律：记录（日志 + 诊断事实）+ 会话日志留痕 + 刷新底栏，绝不静默吞掉。
+    try
     {
         // ★ D6.1 §11 ★ 观察既有 guard（CanStart）的结果；不改任何迁移行为。
         using var trace = ActionTrace.Begin(ActionKinds.Start, ControlIds.ShellTransferStart, "click", "ShellFooter");
@@ -780,9 +898,17 @@ public sealed partial class MainWindow : Window
         trace.Finish(Session.LastRunOutcome, "ShellFooter");
         PushFooter();
     }
+    catch (Exception ex)
+    {
+        UiFaultGuard.Report("MainWindow.FooterStart_Click", ex);
+        SafeCompleteFooterAction("start-threw", ex);
+    }
+    }
 
     /// <summary>暂停（底栏）：走 VM 的 PauseAsync —— FIX BATCH 1 起两种模式都是"立即打断当前对象"。</summary>
     private async void FooterPause_Click(object sender, RoutedEventArgs e)
+    {
+    try
     {
         using var trace = ActionTrace.Begin(ActionKinds.Pause, ControlIds.ShellTransferPause, "click", "ShellFooter");
         // ★ FIX BATCH 2 ★ 观察**真实**的可用性守卫（旧写法把 Eligibility 硬编码成 true/"allowed"，
@@ -818,9 +944,17 @@ public sealed partial class MainWindow : Window
         }
         PushFooter();
     }
+    catch (Exception ex)
+    {
+        UiFaultGuard.Report("MainWindow.FooterPause_Click", ex);
+        SafeCompleteFooterAction("pause-threw", ex);
+    }
+    }
 
     /// <summary>停止（底栏）：走 VM 的 StopAsync（取消令牌；已拷入部分保留，可续传）。</summary>
     private async void FooterStop_Click(object sender, RoutedEventArgs e)
+    {
+    try
     {
         using var trace = ActionTrace.Begin(ActionKinds.Stop, ControlIds.ShellTransferStop, "click", "ShellFooter");
         trace.Eligibility(true, "allowed");
@@ -829,6 +963,9 @@ public sealed partial class MainWindow : Window
         //   StopAsync 只发取消令牌就返回；终点事件必须等运行真的收尾（否则"已受理"冒充"已停止"）。
         trace.Expect("stop.v1", "stop.external");
         await Session.StopAsync();
+        // ★ P0-06(1) ★ 这里开始就是"等引擎收尾"这一段：先量它（点击→进入等待、点击→等待结束），
+        //   再谈优化。等待本身是 await + Task.Delay 轮询，不阻塞 Dispatcher。
+        Session.LastStopTimeline?.Mark("footer-await-settle");
         var stopped = await Session.WaitForStopSettledAsync();
         if (stopped)
         {
@@ -840,10 +977,23 @@ public sealed partial class MainWindow : Window
             trace.Complete(DiagnosticOutcome.Unknown, "stop-unsettled");
         }
         PushFooter();
+        // 底栏投影完成 ⇒ 用户此刻重新拿到可操作的界面，这一段就是 P0-06(1) 要的"窗口可响应"终点。
+        Session.LastStopTimeline?.Mark("footer-pushed");
+        Session.LastStopTimeline?.Complete(stopped ? "stop-settled" : "stop-unsettled");
+    }
+    catch (Exception ex)
+    {
+        UiFaultGuard.Report("MainWindow.FooterStop_Click", ex);
+        // 时间线不得留在"未收口"上冒充"还在收尾"：如实写成本次停止请求以异常收场。
+        Session.LastStopTimeline?.Complete("stop-threw", ex.GetType().Name);
+        SafeCompleteFooterAction("stop-threw", ex);
+    }
     }
 
     /// <summary>恢复（底栏）：走 VM 的 ResumeAsync（先 ClearPauseRequest，再沿用 job.json 原定义续传）。</summary>
     private async void FooterResume_Click(object sender, RoutedEventArgs e)
+    {
+    try
     {
         using var trace = ActionTrace.Begin(ActionKinds.Resume, ControlIds.ShellTransferResume, "click", "ShellFooter");
         trace.Eligibility(Session.CanResume, Session.CanResume ? "allowed" : "cannot-resume");
@@ -864,6 +1014,24 @@ public sealed partial class MainWindow : Window
             trace.Complete(DiagnosticOutcome.Unknown, "resume-unsettled");
         }
         PushFooter();
+    }
+    catch (Exception ex)
+    {
+        UiFaultGuard.Report("MainWindow.FooterResume_Click", ex);
+        SafeCompleteFooterAction("resume-threw", ex);
+    }
+    }
+
+    /// <summary>
+    /// ★ P0-06(4) ★ 底栏 <c>async void</c> 处理器的兜底收口：会话日志留痕 + 刷新底栏真实可用性。
+    /// 本方法**自身绝不抛**（它一旦抛就重新变成崩溃源），也**不**改任何业务状态/任务状态：
+    /// 失败证据已经由 <see cref="UiFaultGuard.Report"/> 写进日志与诊断事实。
+    /// </summary>
+    private void SafeCompleteFooterAction(string phase, Exception ex)
+    {
+        try { Session.AppendLog("ERROR", $"底栏操作失败（{phase}）：{ex.Message}——失败证据已写入日志与诊断包，可到「诊断中心」导出。"); }
+        catch { /* 留痕失败不得外溢 */ }
+        try { PushFooter(); } catch { /* 刷新失败不得外溢 */ }
     }
     /// <summary>
     /// 开发者材质调节入口（标题栏小图标）：切换浮层显示。
@@ -1007,6 +1175,50 @@ public sealed partial class MainWindow : Window
         if (!willOpen) DiagnosticCenterPanel.StopRefresh();
     }
 
+    // ★ PMML 返修（2026-10-11）★ 验证完整性：由 Step4 页驱动，Shell 负责编排几何与动画。
+
+    /// <summary>验证完整性面板（Step4 页在点「验证完整性」时用它显示真实进度；只读投影）。</summary>
+    public VerificationProgressPanel VerificationPanel => VerificationProgressPanel;
+
+    /// <summary>
+    /// 打开（或保持）验证完整性面板，锚点 = **真实被点击的入口**（Step4 的「验证完整性」按钮）。
+    ///   · 已打开 ⇒ 不重播入场（避免重复打开时同一面板抖动/重影），只按本次真实入口刷新锚点与位置；
+    ///   · 未打开 ⇒ 走与诊断中心完全相同的 TogglePanel → OpenPanel（Fluid Zoom 正反向 morph）；
+    ///   · 与其它 Utility 面板互斥时，先让对方**完整收回**再展开（既有串行语义，不并行双 morph）。
+    /// 面板开不出来（极端环境）不影响验证本身：调用方必须继续跑验证。
+    /// </summary>
+    public void ShowVerificationPanel(FrameworkElement? anchor)
+    {
+        var realAnchor = anchor ?? _verificationAnchor ?? (FrameworkElement)DiagnosticCenterButton;
+        _verificationAnchor = realAnchor;
+
+        if (VerificationProgressPanel.Visibility == Visibility.Visible
+            && ReferenceEquals(_activePanel, VerificationProgressPanel))
+        {
+            // 已经开着：锚点可能变过（窗口缩放/移动过），用当前真实几何重算一次，不重播动画。
+            _activeAnchor = realAnchor;
+            if (TryPlacePanel(VerificationProgressPanel, realAnchor, VerificationPanelWidth, out var cx, out var cy))
+                _activeCenterPoint = new Windows.Foundation.Point(cx, cy);
+            return;
+        }
+
+        TogglePanel(VerificationProgressPanel, OtherVisibleToolPanel(VerificationProgressPanel), realAnchor, onOpened: null);
+
+        // ★ 诊断专用（PMML D5 像素证据）★ 设了 PCMIG_PANEL_EXPORT 才按时刻抓 morph 的真实像素；未设立即返回。
+        if (VisualCaptureDiagnostics.Enabled)
+        {
+            VisualCaptureDiagnostics.CaptureTimeline(Content as FrameworkElement, "panel-morph", 0, 60, 120, 180, 240, 300, 500, 1500);
+        }
+    }
+
+    /// <summary>互斥用：除自己以外**当前可见**的第一个工具面板（都不在就退回诊断中心，语义与既有实现一致）。</summary>
+    private FrameworkElement OtherVisibleToolPanel(FrameworkElement self)
+    {
+        foreach (var candidate in new FrameworkElement[] { DiagnosticCenterPanel, ChangelogPanel, TuningPanel })
+            if (!ReferenceEquals(candidate, self) && candidate.Visibility == Visibility.Visible) return candidate;
+        return DiagnosticCenterPanel;
+    }
+
     /// <summary>
     /// 两个浮层共用的开合语义（§28/§29：打开与关闭都必须有动画，关闭不是 Hard Cut）：
     ///   • 互斥：打开一个就关掉另一个（同样是带动画的关闭）；
@@ -1092,12 +1304,18 @@ public sealed partial class MainWindow : Window
         panel.IsHitTestVisible = true;
     }
 
+    /// <summary>★ PMML 返修（2026-10-11）★ 验证完整性面板的默认宽度（默认大号展开；实际可用高由 TAOP 夹紧）。</summary>
+    private const double VerificationPanelWidth = 820;
+
     /// <summary>
     /// U60：定位已改为**同步**完成（`UpdateLayout()` + 二次夹紧），不再需要"补一帧"的常驻回调 ——
     /// 那正是"Panel 先出现在旧位置、下一帧才跳到锚点"的来源。
     /// </summary>
-    private static double PanelFallbackWidth(FrameworkElement panel)
+    private double PanelFallbackWidth(FrameworkElement panel)
     {
+        // 验证面板的宽度写在它的根 Border 上（与诊断中心同一约定），UserControl.Width 是 NaN：
+        // 取不到就退回它声明的 820，而不是通用的 440（否则关闭期夹紧会用错的宽度算缩回原点）。
+        if (ReferenceEquals(panel, VerificationProgressPanel)) return VerificationPanelWidth;
         var width = panel.Width;
         return double.IsNaN(width) || width <= 0 ? 440.0 : width;
     }
@@ -1131,9 +1349,16 @@ public sealed partial class MainWindow : Window
         }
         MotionState.Current.Release("panel-entrance");
 
+        // ★ 诊断专用（PMML D5 像素证据）★ 反向 morph 的真实像素按时刻抓；未设 PCMIG_PANEL_EXPORT 立即返回。
+        if (VisualCaptureDiagnostics.Enabled && ReferenceEquals(panel, VerificationProgressPanel))
+        {
+            VisualCaptureDiagnostics.CaptureTimeline(Content as FrameworkElement, "panel-close", 0, 60, 120, 180, 240, 300, 600);
+        }
+
         // 缩回方向的入口：优先用打开时那个**真实被点击的元素**；否则退回该面板的默认入口。
         var anchor = ReferenceEquals(panel, _activePanel) && _activeAnchor is not null
             ? _activeAnchor
+            : ReferenceEquals(panel, VerificationProgressPanel) ? _verificationAnchor ?? (FrameworkElement)DiagnosticCenterButton
             : ReferenceEquals(panel, DiagnosticCenterPanel) ? DiagnosticCenterButton
             : ReferenceEquals(panel, ChangelogPanel) ? ChangelogButton
             : DeveloperTuningButton;
@@ -1204,7 +1429,11 @@ public sealed partial class MainWindow : Window
     // 即"预检通过或存在可访问共享"）：
     //   · 尚未连接 / 连接失败 / 运行中失效 / 没有任何已验证可访问共享 ⇒ 红，**常亮不闪烁**；
     //   · 正在连接（建 SMB 会话、枚举共享、验证手工共享）            ⇒ 琥珀，Composition 柔和呼吸；
-    //   · 至少一个已验证可访问的源共享                              ⇒ 绿，稳定常亮。
+    //   · 已确认失效、正在重探（Recovering）                        ⇒ 琥珀，呼吸；
+    //   · 部分共享可用（Partial）/ 只有历史事实、未被实测确认（SuspectOrUnknown）⇒ 琥珀，**常亮**；
+    //   · 至少一个**实测可读**的源共享                              ⇒ 绿，稳定常亮。
+    // ★ P0-05 ★ 琥珀不表示"在忙"，它表示"**PCMig 不敢说源可用**"：未知、部分可用与正在连接共用
+    //   Warning 色，但可读名称与 HelpText 各不相同（颜色不是唯一通道）。
     // ping 通、能上网、网卡 UP 都不得让它变绿：这个灯表示 SMB 源可用性，不是 ICMP。
     // View 只投影、绝不自己猜 —— 旧缺陷的根因就是"View 里写死了一个颜色"。
 
@@ -1224,23 +1453,41 @@ public sealed partial class MainWindow : Window
         var key = state switch
         {
             SourceConnectionState.Connected => SourceStateConnectedBrushKey,
+            // ★ P0-05 ★ 未知绝不当绿：Partial（多共享里坏了一条）/ SuspectOrUnknown（只有历史连接事实、
+            //   没有任何"刚刚读到"的证据）/ Recovering（已确认失效、正在重探）一律走琥珀，不进绿灯分支。
             SourceConnectionState.Connecting => SourceStateConnectingBrushKey,
+            SourceConnectionState.Partial => SourceStateConnectingBrushKey,
+            SourceConnectionState.SuspectOrUnknown => SourceStateConnectingBrushKey,
+            SourceConnectionState.Recovering => SourceStateConnectingBrushKey,
             _ => SourceStateDisconnectedBrushKey,
         };
         if (Application.Current?.Resources is { } res && res.TryGetValue(key, out var raw) && raw is Brush brush)
             SourceStateDot.Fill = brush;
 
-        // 只有"正在连接"才呼吸；Reduced Motion 开启时 MotionDirector 会吸附成常亮（不做大幅动画）。
-        if (state == SourceConnectionState.Connecting) MotionDirector.PlaySourceBreathing(SourceStateDot);
+        // 只有"正在连接"与"已确认失效、正在重探（Recovering）"才呼吸；Partial / SuspectOrUnknown 常亮
+        // （未知不是"在忙"，它是一个静止的结论）；Reduced Motion 开启时 MotionDirector 会吸附成常亮。
+        if (state is SourceConnectionState.Connecting or SourceConnectionState.Recovering)
+            MotionDirector.PlaySourceBreathing(SourceStateDot);
         else MotionDirector.ResetSourceBreathing(SourceStateDot);
 
-        // 无障碍与自动化：颜色不是唯一通道，状态名必须可读（契约测试也据此断言三态）。
+        // 无障碍与自动化：颜色不是唯一通道，状态名必须可读（★ P0-05 ★ 六态各有可读名，
+        // 且"未知/部分可用"必须与"已连接"在文字上也分得开——红灯绿灯光靠颜色对色觉障碍者无效）。
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SourceStateDot, state switch
         {
-            SourceConnectionState.Connected => "源连接：已连接",
+            SourceConnectionState.Connected => "源连接：已连接（实测可读）",
             SourceConnectionState.Connecting => "源连接：正在连接",
+            SourceConnectionState.Recovering => "源连接：已失效，正在重试",
+            SourceConnectionState.Partial => "源连接：部分共享不可用",
+            SourceConnectionState.SuspectOrUnknown => "源连接：状态未知（未被实测确认）",
             _ => "源连接：未连接",
         });
+        // 同色不同义也补一条可读的"证据说明"，供屏幕阅读器与自动化断言取用。
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(SourceStateDot, ViewModel.SourceStateDetail);
+        // ★ P0-05 ★ 底栏那一个点在多共享场景下说不清"是哪一条坏了"：把状态详情（含失效目标与证据、
+        //   如「\\SRC-PC\d（Win32 67：找不到网络名）」）挂到 ToolTip 上，用户悬停即可定位。
+        //   空详情时不清空 ToolTip 服务（保持原有的可悬停语义）。
+        if (!string.IsNullOrWhiteSpace(ViewModel.SourceStateDetail))
+            Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(SourceStateDot, ViewModel.SourceStateDetail);
     }
 
     /// <summary>把当前有效客户区映射为集中管理的 Wide / Normal / Compact 视觉密度。</summary>
@@ -1333,6 +1580,11 @@ public sealed partial class MainWindow : Window
         TryPlacePanel(TuningPanel, ResolvePanelAnchor(TuningPanel, DeveloperTuningButton), 348, out _, out _);
         TryPlacePanel(ChangelogPanel, ResolvePanelAnchor(ChangelogPanel, ChangelogButton), 440, out _, out _);
         TryPlacePanel(DiagnosticCenterPanel, ResolvePanelAnchor(DiagnosticCenterPanel, DiagnosticCenterButton), 520, out _, out _);
+        // ★ PMML 返修（2026-10-11）★ 验证完整性面板：同样在打开与 Resize 时按真实锚点重算，
+        //   宽度 820（默认大号展开；具体可用高由 TryPlacePanel 按安全区夹紧后下发 MaxHeight）。
+        TryPlacePanel(VerificationProgressPanel,
+            ResolvePanelAnchor(VerificationProgressPanel, _verificationAnchor ?? (FrameworkElement)DiagnosticCenterButton),
+            VerificationPanelWidth, out _, out _);
     }
 
     /// <summary>
@@ -1455,6 +1707,13 @@ public sealed partial class MainWindow : Window
     /// <summary>Deep Trace 的有限输入观测（仅在用户显式开启且限时窗口内注册）。</summary>
     private DeepTraceInputObserver? _deepTraceObserver;
     private FrameworkElement? _activeAnchor;
+
+    /// <summary>
+    /// ★ PMML 返修（2026-10-11）★ 验证完整性面板的**真实触发入口**（Step4 的「验证完整性」按钮）。
+    /// 面板打开时由 Step4 页传入；关闭时的缩回方向与 Resize 重算都靠它，
+    /// 取不到时退回诊断中心入口（保证任何情况下都有一个确定的几何锚点，绝不居中漂浮）。
+    /// </summary>
+    private FrameworkElement? _verificationAnchor;
 
     /// <summary>当前打开面板的 Scale 原点（Panel 局部坐标，对应触发入口）；关闭时据此缩回入口方向。</summary>
     private Windows.Foundation.Point _activeCenterPoint;

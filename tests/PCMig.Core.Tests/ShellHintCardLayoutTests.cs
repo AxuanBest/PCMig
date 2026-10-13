@@ -82,8 +82,14 @@ public class ShellHintCardLayoutTests
         Assert.Contains("HintContentPanel.DesiredSize.Height", code);
 
         // 抖动抑制：差值小于阈值时完全不动作（Q1「不能每出现一行字就小幅度变化高度」）。
+        // ★ P1-09 ★ 该判据已从卡片内联抽到平台无关的 HintCardMotionPolicy（这样无头环境也能真的
+        // 跑"±1 DIP 抖动 30 次"的行为测试，见 P1HintCardMotionTests）。断言改为同等强度地钉住两件事：
+        // ①卡片必须把阈值真的**传进**策略；②策略内部确实按"差值 < 阈值"比较。
         Assert.Contains("HeightChangeThreshold", code);
-        Assert.Contains("Math.Abs(target - current) < HeightChangeThreshold", code);
+        Assert.Contains("HeightChangeThreshold,", code);
+        Assert.Contains("HintCardMotionPolicy.Decide(", code);
+        var policy = ReadRepoFile("src", "PCMig.Core", "Util", "HintCardMotionPolicy.cs");
+        Assert.Contains("Math.Abs(target - current) < threshold", policy);
 
         // 只有一处把 Height 写成非 token 表达式：除此之外不允许再有 Height 赋值语句。
         Assert.Equal(1, CountOccurrences(code, "HintCardSurface.Height ="));

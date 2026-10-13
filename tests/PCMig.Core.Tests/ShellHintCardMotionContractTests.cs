@@ -270,9 +270,16 @@ public class ShellHintCardMotionContractTests
 
         // 写入点收敛成一个方法（参数名必须叫 target：第 6 条契约锁定"写入语句恰好一处 + 字面量不变"）。
         Assert.Contains("private void ApplySurfaceHeight(double target)", card);
-        // 收缩方向**不立即写**，写入时机按 shrinking 分流。
-        Assert.Contains("var shrinking = target < oldHeight;", card);
-        Assert.Contains("if (!shrinking || !IsLoaded || HintCardSurface.XamlRoot is null)", card);
+        // ★ P1-09（2026-10-11）★ 决策已抽到**平台无关的纯策略**（HintCardMotionPolicy），
+        //   因为"30 次变化不闪"必须能被无头测试真的跑一遍，而不是只靠源码文本断言。
+        //   因此这里从"内联的 shrinking 判定"改为**同等强度**的结构判据：
+        //   收缩方向只在策略里判定，且 UI 层严格按决策分派 ——
+        //     · Collapse 决策**不在本拍写高**（WritesHeightNow 为 false），写入仍由收尾回调完成；
+        //     · 只有 Reveal/SettleOnly 才在本拍写高。
+        Assert.Contains("HintCardMotionPolicy.Decide(", card);
+        Assert.Contains("if (decision.WritesHeightNow) ApplySurfaceHeight(decision.Target);", card);
+        Assert.Contains("if (decision.PlaysMotion) StartPendingMotion();", card);
+        Assert.DoesNotContain("if (!shrinking || !IsLoaded", card);   // 旧的内联方向判定不许回来
         // 收缩的写入交给动画收尾回调；回调里读"最新目标"，因此途中合并也不会写错。
         Assert.Contains("applyTargetHeight: () => ApplySurfaceHeight(_targetSurfaceHeight))", card);
         Assert.Contains("Action? applyTargetHeight = null", motion);
@@ -328,12 +335,30 @@ public class ShellHintCardMotionContractTests
         var card = StripComments(ReadRepoFile("src", "PCMig.WinUI", "Views", "ShellHintCard.xaml.cs"));
 
         Assert.Contains("_surfaceTransitionActive = true;", card);
-        Assert.Contains("if (_surfaceTransitionActive && target < oldHeight)", card);
+        // ★ P1-09（2026-10-11）★ "收缩在途只合并不叠动画"的判定已移入纯策略
+        //   （HintCardMotionPolicy.Decide）并有专门的 30 次变化行为测试；UI 层只按决策分派。
+        Assert.Contains("target, current, _surfaceTransitionActive,", card);
+        Assert.Contains("case HintCardMotionAction.MergeIntoInFlightCollapse:", card);
         Assert.Contains("_surfaceTransitionActive = false;", card);
         // 判据基准必须与动画基数同源：否则同一布局回合的两次请求会以过期基数重播一遍完整动画。
         Assert.Contains("_targetSurfaceHeight > 0d ? _targetSurfaceHeight : actual", card);
         Assert.Contains("var newHeight = _targetSurfaceHeight;", card);
         Assert.DoesNotContain("var newHeight = HintCardSurface.Height;", card);
+    }
+
+    [Fact]
+    public void GlobalMotionGate_RefreshesSystemPreferenceAndKeepsOptInQaOverride()
+    {
+        var motion = StripComments(ReadRepoFile("src", "PCMig.WinUI", "Presentation", "MotionDirector.cs"));
+        var gate = motion.IndexOf("public static bool SystemAnimationsEnabled", StringComparison.Ordinal);
+        Assert.True(gate > 0, "SystemAnimationsEnabled 必须存在");
+        var gateBody = motion[gate..];
+
+        Assert.Contains("PCMIG_FORCE_MOTION", motion);
+        Assert.Contains("Environment.GetEnvironmentVariable(ForceMotionEnvironmentVariable)", gateBody);
+        Assert.Contains("new Windows.UI.ViewManagement.UISettings().AnimationsEnabled", gateBody);
+        Assert.DoesNotContain("_systemAnimationsChecked", motion);
+        Assert.DoesNotContain("_systemAnimationsEnabled", motion);
     }
 
     // ── 辅助 ──────────────────────────────────────────────────────────────────────

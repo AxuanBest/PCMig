@@ -362,7 +362,8 @@ public sealed class RobocopyRunner : ITransferWorker
 
         sb.Append(" /COPY:DAT /DCOPY:T /XJ");
         // 注：想让目标侧"大小+时间相同"的文件被源覆盖，/IS /IT 无济于事（实测字节行"复制=0"），
-        // 唯一可靠办法是先删掉目标那份（见 RepairPurge），故此处不再拼接任何强制覆盖开关。
+        // 唯一可靠办法是先让目标那份消失（见 RepairPurge：★ P0-03 起为改名隔离，不再删除），
+        // 故此处不再拼接任何强制覆盖开关。
         sb.Append($" /R:{opt.RetryCount} /W:{opt.RetryWaitSec}");
 
         var thresholdBytes = (long)(matrix.LargeFileThresholdMB > 0 ? matrix.LargeFileThresholdMB : opt.LargeFileThresholdMB) * 1024 * 1024;
@@ -539,6 +540,8 @@ public sealed class RobocopyRunner : ITransferWorker
         var channelMode = ChannelModeToken(restartableLarge, UseUnbufferedJ(src, dst, opt));
         var fileLineSamples = 0;
         long fileLinesObserved = 0;
+        // ★ P1-11 ★ 逐行输出的日志采样（只约束"写日志"，不约束 OutputLine 对外事件）
+        var outputLog = new Logging.RobocopyOutputLogPolicy();
 
         Publish(RobocopyEvents.ProcessStartRequested, null, DiagnosticLevel.Information, DiagnosticOutcome.Started);
 
@@ -586,8 +589,9 @@ public sealed class RobocopyRunner : ITransferWorker
             {
                 var trimmed = line.TrimEnd();
                 if (trimmed.Length == 0) return;
-                if (trimmed.Contains("ERROR", StringComparison.OrdinalIgnoreCase) ||
-                    trimmed.Contains("错误", StringComparison.Ordinal))
+                var isErrorLine = trimmed.Contains("ERROR", StringComparison.OrdinalIgnoreCase) ||
+                                  trimmed.Contains("错误", StringComparison.Ordinal);
+                if (isErrorLine)
                 {
                     lastErrorLine = trimmed;
                     if (errorLines.Count < MaxErrorLines) errorLines.Add(trimmed);
@@ -637,7 +641,11 @@ public sealed class RobocopyRunner : ITransferWorker
                     //   隔离职责不变（传输泵必须继续），但异常必须留痕（含栈），否则故障永远不可观测。
                     _log.Warning(ex, "OutputLine 订阅方抛异常（已隔离，传输泵继续）：{Line}", trimmed);
                 }
-                _log.Debug("robocopy| {Line}", trimmed);
+                // ★ P1-11 ★ 逐行复制进任务日志曾让单任务日志达到 23 MB(.log) + 42 MB(.jsonl)（现场实测，
+                //   117,310 行几乎全是 robocopy 逐文件输出）。这里按采样策略写日志：错误行永不省略，
+                //   其余按"前 200 行 + 之后每 500 行 1 行"并设硬上限；逐行全文在 robocopy 自己的
+                //   /UNILOG（logs\robocopy\object-*.log）里，本来就没有丢证据。
+                if (outputLog.ShouldLog(isErrorLine)) _log.Debug("robocopy| {Line}", trimmed);
             });
             var stderrTask = PumpAsync(proc.StandardError, line =>
             {
@@ -664,6 +672,10 @@ public sealed class RobocopyRunner : ITransferWorker
             var success = !killed && IsSuccess(code);
             _log.Information("robocopy 退出 [{Pass}]: ExitCode={Code} (0x{CodeHex:X2}) Success={Success} Killed={Killed} 耗时 {Elapsed}",
                 pass, code, code, success, killed, sw.Elapsed);
+
+            // ★ P1-11 ★ 只有真的省略过行才写摘要（小任务日志逐行不变化），且摘要必须自洽可核对：
+            //   真实总行数 / 采样口径 / 省略行数 / 逐行全文位置。绝不静默瘦身。
+            if (outputLog.HasSkipped) _log.Information("{Summary}", outputLog.Describe(unicodeLogPath));
 
             // ★ 退出码与"被杀"分开记录 ★（0–7 是 robocopy 的成功位掩码，>=8 才是失败；
             //   被我们强杀的进程退出码为 -1，绝不能落进 IsSuccess）。

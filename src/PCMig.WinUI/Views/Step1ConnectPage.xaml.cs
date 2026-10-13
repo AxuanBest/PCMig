@@ -115,7 +115,12 @@ public sealed partial class Step1ConnectPage : UserControl
             {
                 // VM 内部一般已吞掉异常；这里只兜住真正的漏网异常（记录类型，不落原文）。
                 trace.Fault(ex, "ConnectAsync");
-                throw;
+                // ★ P0-06(4) ★ 旧写法是 `throw;` —— 在 `async void` 里 rethrow 没有调用者能接住，
+                //   它直接落到 XAML UnhandledException ⇒ **整个程序结束**。一次"连不上"绝不能变成崩溃。
+                //   "不吞"的兑现方式：日志 + 诊断事实 + 本次动作如实收口为 Failed（证据全留）。
+                UiFaultGuard.Report("Step1ConnectPage.Connect_Click", ex);
+                trace.Complete(DiagnosticOutcome.Failed, "connect-threw");
+                return;
             }
 
             // ★ L2 投影回读 ★ 在真实推送完成之后读取**控件本身**的状态。
@@ -160,10 +165,14 @@ public sealed partial class Step1ConnectPage : UserControl
 
     private async void AddShare_Click(object sender, RoutedEventArgs e)
     {
-        if (_vm is { IsConnecting: false })
+        try
         {
-            await _vm.AddManualShareAsync(PasswordInput.Password);
+            if (_vm is { IsConnecting: false })
+            {
+                await _vm.AddManualShareAsync(PasswordInput.Password);
+            }
         }
+        catch (Exception ex) { UiFaultGuard.Report("Step1ConnectPage.AddShare_Click", ex); }
     }
 
     /// <summary>密码可见性切换（A3 的眼睛图标）。纯展示层，不读取/不缓存口令。</summary>

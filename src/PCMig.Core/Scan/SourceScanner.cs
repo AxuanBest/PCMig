@@ -88,6 +88,7 @@ public sealed class SourceScanner
                             HasCloudPlaceholders = stat.HasCloudPlaceholders,
                             ScanIncomplete = stat.Incomplete,
                             LockRiskFiles = stat.LockRiskFiles,
+                            LockedRiskFiles = stat.LockedRiskFiles,
                             EncryptedFiles = stat.EncryptedFiles
                         });
                         _log.Information("对象 {Id}: {Path} = {Bytes} / {Files} 文件（显式选择目录）",
@@ -133,9 +134,9 @@ public sealed class SourceScanner
             observed.TotalBytes = observed.Objects.Where(o => o.Bytes > 0).Sum(o => o.Bytes);
             observed.TotalFiles = observed.Objects.Where(o => o.Files > 0).Sum(o => o.Files);
             observed.LockRiskFiles = observed.Objects.Sum(o => o.LockRiskFiles);
+            observed.LockedRiskFiles = observed.Objects.Sum(o => o.LockedRiskFiles);
             observed.EncryptedFiles = observed.Objects.Sum(o => o.EncryptedFiles);
-            if (observed.LockRiskFiles > 0)
-                observed.Warnings.Add($"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件(.pst/.ost)：若旧电脑 Outlook 正在运行，它们会被锁定导致复制失败。建议迁移前让旧电脑用户关闭 Outlook。");
+            AddOutlookDataWarning(observed);
             if (observed.EncryptedFiles > 0)
                 observed.Warnings.Add($"检测到 {observed.EncryptedFiles} 个 EFS 加密文件：内容可以正常复制，但在新机上将失去加密保护（明文可读）。如合规要求加密，请在新机上重新加密。");
             AddIncompleteScanWarning(observed);
@@ -192,6 +193,7 @@ public sealed class SourceScanner
                         HasCloudPlaceholders = stat.HasCloudPlaceholders,
                         ScanIncomplete = stat.Incomplete,
                         LockRiskFiles = stat.LockRiskFiles,
+                        LockedRiskFiles = stat.LockedRiskFiles,
                         EncryptedFiles = stat.EncryptedFiles
                     };
                     objects.Add(obj);
@@ -224,6 +226,7 @@ public sealed class SourceScanner
                     HasCloudPlaceholders = loose.HasCloudPlaceholders,
                     ScanIncomplete = loose.Incomplete,
                     LockRiskFiles = loose.LockRiskFiles,
+                    LockedRiskFiles = loose.LockedRiskFiles,
                     EncryptedFiles = loose.EncryptedFiles
                 });
                 if (loose.Incomplete)
@@ -241,15 +244,15 @@ public sealed class SourceScanner
         observed.TotalBytes = observed.Objects.Where(o => o.Bytes > 0).Sum(o => o.Bytes);
         observed.TotalFiles = observed.Objects.Where(o => o.Files > 0).Sum(o => o.Files);
         observed.LockRiskFiles = observed.Objects.Sum(o => o.LockRiskFiles);
+        observed.LockedRiskFiles = observed.Objects.Sum(o => o.LockedRiskFiles);
         observed.EncryptedFiles = observed.Objects.Sum(o => o.EncryptedFiles);
         AddIncompleteScanWarning(observed);
-        if (observed.LockRiskFiles > 0)
-            observed.Warnings.Add($"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件(.pst/.ost)：若旧电脑 Outlook 正在运行，它们会被锁定导致复制失败。建议迁移前让旧电脑用户关闭 Outlook。");
+        AddOutlookDataWarning(observed);
         if (observed.EncryptedFiles > 0)
             observed.Warnings.Add($"检测到 {observed.EncryptedFiles} 个 EFS 加密文件：内容可以正常复制，但在新机上将失去加密保护（明文可读）。如合规要求加密，请在新机上重新加密。");
-        _log.Information("扫描完成: {Objects} 个对象, 共 {Bytes} / {Files} 文件（锁风险 {Lock} / EFS {Enc} / 不可访问 {Inacc}）",
+        _log.Information("扫描完成: {Objects} 个对象, 共 {Bytes} / {Files} 文件（锁风险 {Lock}（实测独占 {Locked}）/ EFS {Enc} / 不可访问 {Inacc}）",
             observed.Objects.Count, Format.Bytes(observed.TotalBytes), observed.TotalFiles,
-            observed.LockRiskFiles, observed.EncryptedFiles, observed.InaccessiblePaths.Count);
+            observed.LockRiskFiles, observed.LockedRiskFiles, observed.EncryptedFiles, observed.InaccessiblePaths.Count);
         if (observed.InaccessiblePaths.Count > 0)
             _log.Warning("扫描存在不可访问位置 {Count} 处（默认拦截迁移，需修好或显式确认）: {First}",
                 observed.InaccessiblePaths.Count, observed.InaccessiblePaths.First());
@@ -292,5 +295,31 @@ public sealed class SourceScanner
             completeness == "Complete" ? DiagnosticLevel.Information : DiagnosticLevel.Warning,
             completeness == "Complete" ? DiagnosticOutcome.Succeeded : DiagnosticOutcome.Unknown,
             "SourceScanner");
+    }
+
+    /// <summary>
+    /// ★ P1-08 / R8 ★ Outlook 数据文件(.pst/.ost)提醒：**区分**"按扩展名的候选"与"实测被独占"。
+    ///
+    /// 旧文案只看扩展名就断言"它们会被锁定导致复制失败、建议先关闭 Outlook"——
+    /// 归档用的 PST 根本不归 Outlook 打开，实测迁移一直正常，属假警报；
+    /// 反过来真被独占的（Win32 32/33）才该提醒。两者用 <see cref="DirStat.LockedRiskFiles"/> 分开说。
+    /// </summary>
+    private static void AddOutlookDataWarning(ObservedState observed)
+    {
+        if (observed.LockRiskFiles <= 0) return;
+        var probed = Math.Min(observed.LockRiskFiles, DirStat.MaxLockProbes);
+
+        if (observed.LockedRiskFiles > 0)
+        {
+            observed.Warnings.Add(
+                $"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件(.pst/.ost)：其中 {observed.LockedRiskFiles} 个**实测当前打不开**" +
+                "（被其他程序独占，Win32 32/33），这些文件会被跳过或复制失败。请在旧电脑上关闭占用程序（如 Outlook）后点「恢复任务」，只补未传文件。");
+        }
+        else
+        {
+            observed.Warnings.Add(
+                $"检测到 {observed.LockRiskFiles} 个 Outlook 数据文件(.pst/.ost)：实测前 {probed} 个**当前都能正常读取**，可以正常迁移。" +
+                "（只有在迁移进行时旧电脑上正打开它们才会失败；届时关闭占用程序点「恢复任务」即可，已复制的数据不会重传。）");
+        }
     }
 }

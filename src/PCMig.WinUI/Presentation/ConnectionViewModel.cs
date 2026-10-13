@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Threading.Tasks;
 using PCMig.Core.Logging;
 using PCMig.Core.Models;
 using PCMig.Core.Native;
@@ -30,6 +31,60 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     private bool _benchmarkOnConnect = true;
     private bool _isConnecting;
     private bool _isConnected;
+
+    /// <summary>
+    /// ★ P0-05 ★ 源共享/源根的**实测可达性证据**（唯一能点亮绿灯的依据）：
+    /// 键 = 目标（<c>\\host</c> 或 <c>\\host\share</c>），值 = 最近一次实测结论 + 证据文字。
+    /// 只有实测（共享枚举、手工共享探测、目录/文件读取、验证报告、引擎失败码）才允许写入，
+    /// 绝不写入"上次成功"这类历史布尔值。
+    /// </summary>
+    private readonly Dictionary<string, SourceShareFact> _shareFacts = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// ★ P0-05（2026-10-13 定点修复）★ **可达证据的有效期**。超过它就不得再显示"已连接"：
+    /// 绿灯的唯一含义是"刚刚确认过读得到"，而不是"几分钟前读到过"。
+    /// 默认 60 秒（用户指定的隔离测试目标："60 秒内不再错误显示已连接"）；依据见
+    /// <see cref="PCMig.Core.Util.SourceEvidenceLedger.DefaultTtl"/>。
+    /// </summary>
+    internal static readonly TimeSpan EvidenceTtl = PCMig.Core.Util.SourceEvidenceLedger.DefaultTtl;
+
+    /// <summary>空闲期读探测的最小间隔（有界：不产生无控制的 SMB 请求）。</summary>
+    private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(20);
+
+    /// <summary>巡检节流：底栏定时器每 16 ms 触发一次，但证据重算最多每秒一次。</summary>
+    private static readonly TimeSpan SweepInterval = TimeSpan.FromSeconds(1);
+
+    private DateTime _lastSweepUtc = DateTime.MinValue;
+    private DateTime _lastProbeUtc = DateTime.MinValue;
+
+    /// <summary>单飞闸门：同一时刻最多一个读探测在跑（绝不叠加 SMB 请求）。</summary>
+    private readonly System.Threading.SemaphoreSlim _probeGate = new(1, 1);
+
+    /// <summary>UI 线程队列（用于把后台探测结论回投到 UI 线程；为空时直接调用，便于单测）。</summary>
+    private Microsoft.UI.Dispatching.DispatcherQueue? _uiQueue;
+
+    /// <summary>★ P0-05 ★ 交入 UI 线程队列（构造于 UI 线程时调用；没有也不影响正确性）。</summary>
+    internal void AttachUiQueue(Microsoft.UI.Dispatching.DispatcherQueue? queue) => _uiQueue = queue;
+
+    /// <summary>
+    /// ★ P0-05（2026-10-13）★ 时间源（**测试缝**）：单测把它换成可控时钟，即可精确验证
+    /// "证据过期后不再显示已连接"（用户指定的隔离测试目标：60 秒）。
+    /// </summary>
+    internal static Func<DateTime> Clock = () => DateTime.UtcNow;
+
+    /// <summary>
+    /// ★ P0-05（2026-10-13）★ 可达性**读探测**（**测试缝**）：返回枚举到的共享数。
+    /// 默认实现是一次有界的 SMB `NetShareEnum`（一次往返；不 ping、不查网卡、不认历史连接）；
+    /// 抛异常 = 这次探测"没得出结论"。
+    /// </summary>
+    internal static Func<string, int> ShareCountProbe =
+        host => PCMig.Core.Native.NetworkShare.EnumShares(host).Count;
+
+    /// <summary>★ P0-05 ★ 是否处于"已确认失效、正在重探/重连"的恢复过程（⇒ Recovering）。</summary>
+    private bool _recovering;
+
+    /// <summary>单条源目标的实测结论（★ 不是"上次连上过"，是"刚刚读到/读不到"★）。</summary>
+    private sealed record SourceShareFact(string Target, bool Reachable, string Evidence, DateTime AtUtc);
 
     public ObservableCollection<ShareItem> Shares { get; } = new();
 
@@ -67,25 +122,247 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// 由既有连接事实**单点派生**源连接状态（不允许任何调用方各写各的）：
-    /// 正在连接 ⇒ Connecting；已连接（= 预检通过或存在可访问共享）⇒ Connected；否则 Disconnected。
+    /// 由既有连接事实**单点派生**源连接状态（不允许任何调用方各写各的）。
+    ///
+    /// ★ P0-05 ★ 判据升级：**只有"可读探测确认过"才配绿色**。旧版只看 <c>IsConnected</c> 这个
+    /// "上次连上过"的布尔值 ⇒ 共享被公司策略关掉后灯还是绿的（现场日志：14:58 起
+    /// <c>Win32Error=67</c>，界面照旧显示已连接）。现在按证据分档：
+    ///   · 正在连接 ⇒ Connecting；
+    ///   · 恢复中（已确认失效，正在重连/重探）⇒ Recovering；
+    ///   · 有可达证据 + 有失效证据 ⇒ Partial（多共享里坏了一条，必须能定位）；
+    ///   · 只有可达证据 ⇒ Connected（绿）；
+    ///   · 只有失效证据 ⇒ Disconnected；
+    ///   · 两者都没有但 <c>IsConnected</c> 为真（只有历史事实、没有任何实测）⇒ **SuspectOrUnknown（琥珀，不是绿）**；
+    ///   · 其余 ⇒ Disconnected。
+    /// 未知一律不当绿：绿的唯一含义是"刚刚确认过读得到"。
     /// </summary>
     private void UpdateSourceState()
-        => SourceState = IsConnecting ? SourceConnectionState.Connecting
-            : IsConnected ? SourceConnectionState.Connected
-            : SourceConnectionState.Disconnected;
+    {
+        // ★ P0-05（2026-10-13）★ 分档判据**全部**来自证据账本（含有效期），
+        //   旧实现只数"有没有可达事实"、从不看时间 ⇒ 撤销共享后灯可以一直绿。
+        var now = Clock();
+        var ledger = new PCMig.Core.Util.SourceEvidenceLedger(EvidenceTtl);
+        foreach (var f in _shareFacts.Values) ledger.Record(f.Target, f.Reachable, f.Evidence, f.AtUtc);
+
+        SourceState = MapLedgerState(ledger.Derive(now, IsConnecting, _recovering, IsConnected));
+
+        // 底栏文案与"是哪一条失效"一起变化（多共享场景必须可定位）。
+        Raise(nameof(UnreachableShares));
+        Raise(nameof(VerifiedReachableTargets));
+        Raise(nameof(SourceStateDetail));
+        Raise(nameof(EvidenceExpiredTargets));
+    }
+
+    /// <summary>账本状态 → 底栏状态（一一对应；枚举分开是为了让 Core 侧规则可被单测推进时间验证）。</summary>
+    private static SourceConnectionState MapLedgerState(PCMig.Core.Util.SourceEvidenceState state) => state switch
+    {
+        PCMig.Core.Util.SourceEvidenceState.Connecting => SourceConnectionState.Connecting,
+        PCMig.Core.Util.SourceEvidenceState.Recovering => SourceConnectionState.Recovering,
+        PCMig.Core.Util.SourceEvidenceState.Partial => SourceConnectionState.Partial,
+        PCMig.Core.Util.SourceEvidenceState.Connected => SourceConnectionState.Connected,
+        PCMig.Core.Util.SourceEvidenceState.SuspectOrUnknown => SourceConnectionState.SuspectOrUnknown,
+        _ => SourceConnectionState.Disconnected,
+    };
+
+    /// <summary>
+    /// ★ P0-05（2026-10-13）★ **可达证据已过期的目标**（曾经读得到、现在没有新鲜证据）。
+    /// 底栏/提示卡据此说明"为什么不再显示已连接"。
+    /// </summary>
+    public IReadOnlyList<string> EvidenceExpiredTargets
+    {
+        get
+        {
+            var now = Clock();
+            var ledger = new PCMig.Core.Util.SourceEvidenceLedger(EvidenceTtl);
+            foreach (var f in _shareFacts.Values) ledger.Record(f.Target, f.Reachable, f.Evidence, f.AtUtc);
+            return ledger.ExpiredReachable(now).Select(f => f.Target).ToList();
+        }
+    }
+
+    /// <summary>
+    /// ★ P0-05（2026-10-13）★ 空闲期**证据巡检**（由底栏定时器调用，必须在 UI 线程）：
+    ///   ① 先按有效期重算状态 —— 证据一过期就降级为"待确认"（琥珀），**不需要任何 IO**；
+    ///   ② 再按有界间隔异步发起一次读探测（单飞、不阻塞 UI），拿到新证据才可能重新变绿。
+    /// </summary>
+    internal void SweepEvidenceFreshness()
+    {
+        var nowUtc = Clock();
+        if (nowUtc - _lastSweepUtc < SweepInterval) return;
+        _lastSweepUtc = nowUtc;
+
+        UpdateSourceState();
+        _ = ProbeIfDueAsync(nowUtc);
+    }
+
+    /// <summary>
+    /// ★ P0-05 ★ 与 <see cref="SweepEvidenceFreshness"/> 同逻辑，但**等待探测结束**再返回（单测用；
+    /// UI 定时器路径不等待，避免任何 SMB 往返阻塞 UI 线程）。
+    /// </summary>
+    internal async Task SweepEvidenceFreshnessAsync()
+    {
+        UpdateSourceState();
+        await ProbeIfDueAsync(Clock()).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ★ P0-05 ★ 有界异步读探测：用 <see cref="PCMig.Core.Native.NetworkShare.EnumShares(string)"/>
+    /// （一次 SMB NetShareEnum 往返）重新证实主机是否读得到。
+    /// ★ 纪律 ★ 只用"真的读到了"当证据：不用 ping、不用网卡在线、不用历史连接成功；
+    /// 探测超时/权限不足/瞬态失败 ⇒ 视为"没有得出结论"（待确认），既不冒充可达、也不冒充已断开。
+    /// </summary>
+    private async Task ProbeIfDueAsync(DateTime nowUtc)
+    {
+        var host = Host;
+        if (string.IsNullOrWhiteSpace(host)) return;
+        if (_shareFacts.Count == 0 && !IsConnected) return;          // 还没连过就没有可证伪的对象
+        if (nowUtc - _lastProbeUtc < ProbeInterval) return;          // 有界：间隔不到不发请求
+        if (!await _probeGate.WaitAsync(0).ConfigureAwait(false)) return;  // 单飞：已有探测在跑
+
+        try
+        {
+            _lastProbeUtc = nowUtc;
+            bool reachable;
+            string evidence;
+            try
+            {
+                var shareCount = await Task.Run(() => ShareCountProbe(host)).ConfigureAwait(false);
+                reachable = shareCount > 0;
+                evidence = reachable
+                    ? $"空闲期读探测：枚举到 {shareCount} 个共享"
+                    : "空闲期读探测：枚举到 0 个共享";
+            }
+            catch (Exception ex)
+            {
+                PostToUi(() => NotifyProbeInconclusive($"空闲期读探测未能得出结论：{ex.GetType().Name}"));
+                return;
+            }
+            PostToUi(() => NotifyShareReachability(host, reachable, evidence));
+        }
+        finally
+        {
+            _probeGate.Release();
+        }
+    }
+
+    private void PostToUi(Action action)
+    {
+        var queue = _uiQueue;
+        if (queue is null || queue.HasThreadAccess) { action(); return; }
+        queue.TryEnqueue(() => action());
+    }
+
+    /// <summary>
+    /// ★ P0-05 ★ 已确认失效的源共享/源根（含原因），用于底栏与提示卡**定位是哪一条**。
+    /// 空列表 = 本次会话没有收到过任何失效证据（不代表"全部正常"——正常必须由可达证据证明）。
+    /// </summary>
+    public IReadOnlyList<string> UnreachableShares
+        => _shareFacts.Values.Where(f => !f.Reachable)
+            .OrderBy(f => f.Target, StringComparer.OrdinalIgnoreCase)
+            .Select(f => string.IsNullOrWhiteSpace(f.Evidence) ? f.Target : $"{f.Target}（{f.Evidence}）")
+            .ToList();
+
+    /// <summary>★ P0-05 ★ 已用可读探测确认可达的源共享/主机目标（绿灯的**唯一**依据）。</summary>
+    public IReadOnlyList<string> VerifiedReachableTargets
+        => _shareFacts.Values.Where(f => f.Reachable)
+            .OrderBy(f => f.Target, StringComparer.OrdinalIgnoreCase)
+            .Select(f => f.Target)
+            .ToList();
+
+    /// <summary>★ P0-05 ★ 状态一句话解释（底栏 ToolTip/提示卡用；不含猜测，只复述证据）。</summary>
+    public string SourceStateDetail => SourceState switch
+    {
+        SourceConnectionState.Connected => "源共享已由可读探测确认可达。",
+        SourceConnectionState.Partial => "部分源共享已确认失效：" + string.Join("、", UnreachableShares),
+        // ★ P0-05（2026-10-13）★ 过期也要说清"为什么不再认绿"：只说"曾连接过"不够，还要点出证据已过期。
+        SourceConnectionState.SuspectOrUnknown => EvidenceExpiredTargets.Count > 0
+            ? $"源共享可达性证据已过期（超过 {EvidenceTtl.TotalSeconds:0} 秒未重新证实），待确认：" + string.Join("、", EvidenceExpiredTargets)
+            : "尚无源共享可达性证据：只知曾连接过，不能当作可用。",
+        SourceConnectionState.Recovering => "源共享已确认失效，正在重新探测/重连。",
+        SourceConnectionState.Connecting => "正在连接并探测源共享…",
+        _ => UnreachableShares.Count > 0
+            ? "源共享不可达：" + string.Join("、", UnreachableShares)
+            : "没有任何可用的源共享。",
+    };
+
+    /// <summary>
+    /// ★ P0-05 ★ 记录一次**实测**的共享/源根可达性事实（引擎 Win32 53/64/67、验证
+    /// <c>SourceUnavailable</c>、手工共享探测通过等都从这里进来）。同一目标后来的实测**覆盖**先前结论。
+    /// ★ 纪律 ★ 文件锁（Win32 32/33）不是共享断开，调用方不得把它送到这里。
+    /// </summary>
+    internal void NotifyShareReachability(string target, bool reachable, string evidence)
+    {
+        if (string.IsNullOrWhiteSpace(target)) return;
+        _shareFacts[target.Trim()] = new SourceShareFact(target.Trim(), reachable, evidence ?? string.Empty, Clock());
+        UpdateSourceState();
+    }
+
+    /// <summary>★ P0-05 ★ 探测本身没得出结论（超时/权限不足/信号矛盾）⇒ SuspectOrUnknown，绝不当绿。</summary>
+    internal void NotifyProbeInconclusive(string reason)
+    {
+        _shareFacts.Clear();
+        if (!string.IsNullOrWhiteSpace(reason)) _probeInconclusiveReason = reason;
+        UpdateSourceState();
+    }
+
+    /// <summary>★ P0-05 ★ 已确认失效、正在重连/重探 ⇒ Recovering（琥珀呼吸），不是绿也不是红。</summary>
+    internal void NotifyRecovering()
+    {
+        _recovering = true;
+        UpdateSourceState();
+    }
+
+    /// <summary>★ P0-05 ★ 恢复流程结束（无论成败，结论都来自随后的一次实测，不是这个调用本身）。</summary>
+    internal void NotifyRecoveryFinished()
+    {
+        _recovering = false;
+        UpdateSourceState();
+    }
 
     /// <summary>
     /// ★ 2026-10-08（真机问题 4）★ 运行中发现源共享**真正失效**（SMB 会话掉了 / 共享不再可达）：
     /// 如实回到 <see cref="SourceConnectionState.Disconnected"/>，绝不继续亮绿灯骗用户。
     /// 这是"已建立连接后来失效"的唯一入口，供后续的会话失效检测路径调用。
+    /// ★ P0-05 ★ 它同时**清掉全部可达证据**——否则"上次连上过"会把灯重新点亮成绿。
     /// </summary>
     internal void NotifySourceLost()
     {
-        if (!IsConnected) return;
+        // 从未连接过 ⇒ 空操作（不刷无意义文案）：这条语义 2026-10-08 就锁在测试里，保持不动。
+        if (!IsConnected && _shareFacts.Values.All(f => !f.Reachable)) return;
+        var host = Host;
+        _shareFacts.Clear();
+        _recovering = false;
+        if (!string.IsNullOrWhiteSpace(host))
+            _shareFacts[NormalizeTarget(host)] = new SourceShareFact(NormalizeTarget(host), false, "运行中确认失效", Clock());
         IsConnected = false;
         SetFlowStatus("源共享已失效：请重新连接旧电脑后再继续。");
     }
+
+    /// <summary>
+    /// ★ P0-05 ★ 与 <see cref="NotifySourceLost"/> 配对的恢复入口：运行中拿到**硬证据**（验证实测
+    /// 计划里每个对象的源根都真的可达、没有任何一个 SourceUnavailable）时，把源灯如实恢复成已连接。
+    /// 没有这个配对，"共享被策略关掉一次"之后灯会永远红着，用户只能靠重启程序才看得到真实状态。
+    /// 判据仍然只来自可达性事实——调用方必须带着实测证据来（不得因为"重试了一次"就调它）。
+    /// </summary>
+    internal void NotifySourceRestored(string? verifiedTarget = null)
+    {
+        _recovering = false;
+        // ★ P0-05 ★ 恢复也要**带证据**：目标来自实测（验证报告里那个真的读到了的源根），
+        //   调用方没给就退回已知主机；两者都没有 ⇒ 说不清是"哪条源"恢复了，那就绝不点绿。
+        var target = !string.IsNullOrWhiteSpace(verifiedTarget) ? verifiedTarget!.Trim() : Host;
+        if (!string.IsNullOrWhiteSpace(target))
+            _shareFacts[NormalizeTarget(target)] = new SourceShareFact(NormalizeTarget(target), true, "验证实测源根可达", Clock());
+        if (IsConnected) { UpdateSourceState(); return; }
+        if (string.IsNullOrWhiteSpace(target)) return;   // 无可归属目标 ⇒ 保持"未知"，不冒充可用
+        IsConnected = true;
+        SetFlowStatus("源共享已恢复可达。");
+    }
+
+    private static string NormalizeTarget(string hostOrUnc)
+        => hostOrUnc.StartsWith(@"\\", StringComparison.Ordinal)
+            ? hostOrUnc.TrimEnd('\\')
+            : @"\\" + hostOrUnc.Trim('\\');
+
+    private string? _probeInconclusiveReason;
     public string Status { get => _status; private set => Set(ref _status, value); }
 
     /// <summary>
@@ -249,6 +526,10 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     /// </summary>
     internal void ForceConnectedForTest(bool connected)
     {
+        // ★ P0-05 ★ 测试缝模拟的是"预检通过 / 存在可访问共享"这一**实测事实**，
+        //   所以它必须同时落下可达证据（否则绿灯的唯一依据就成了"上次连上过"的布尔值）。
+        _shareFacts.Clear();
+        if (connected) _shareFacts[@"\\TEST-HOST"] = new SourceShareFact(@"\\TEST-HOST", true, "测试缝：模拟预检通过", Clock());
         IsConnected = connected;
         _log.Warning("ForceConnectedForTest 测试缝被调用（仅测试允许；生产路径绝不调用）：{Connected}", connected);
     }
@@ -414,7 +695,16 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
                 }
             }
 
-            IsConnected = report.OverallPass || Shares.Count > 0;
+            // ★ P0-05 ★ 连接成功同时落下**实测可达证据**（预检通过 / 共享枚举成功）——
+//   绿灯的依据必须是这次探测，而不是 IsConnected 这个布尔值本身。
+            var connectedNow = report.OverallPass || Shares.Count > 0;
+            var hostTarget = NormalizeTarget(host);
+            if (connectedNow)
+                _shareFacts[hostTarget] = new SourceShareFact(hostTarget, true,
+                    report.OverallPass ? "连接预检通过" : $"共享枚举成功（{Shares.Count} 个）", Clock());
+            else
+                _shareFacts.Remove(hostTarget);
+            IsConnected = connectedNow;
             // 观察：VM 状态确实被写入（投影来源变化）。
             ReportUiAction(PCMig.Diagnostics.Abstractions.Events.UiEvents.ProjectionChanged,
                 new PCMig.Diagnostics.Abstractions.Payloads.UiProjectionChangedPayload("Vm", 2),
@@ -523,6 +813,8 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
 
         Shares.Add(new ShareItem { Name = name, UncPath = unc, Kind = "手动指定", IsSelected = true });
         ManualShareName = string.Empty;
+        // ★ P0-05 ★ 手工共享是**真的读到了**才走到这里（上面的探测失败分支已经 return）⇒ 落下可达证据。
+        _shareFacts[NormalizeTarget(unc)] = new SourceShareFact(NormalizeTarget(unc), true, "手工共享探测通过", Clock());
         IsConnected = true;
         SetFlowStatus($"已添加并勾选 {unc}。");
         _log.Information("手动添加共享成功: {Unc}", unc);

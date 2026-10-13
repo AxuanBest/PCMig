@@ -48,6 +48,12 @@ public sealed class D2RuntimeTests
                 // 会话元数据在启动时就已落盘。
                 Assert.True(File.Exists(runtime.Store!.SessionFilePath));
                 Assert.Equal(EventCatalog.CatalogHash, DiagnosticSessionStore.TryReadSessionMetadata(runtime.Store.SessionFilePath)!.CatalogHash);
+
+                // 关闭前先把管线等到静默（只等，不改断言）：关闭排空预算是**有界**的，
+                // 而"分支泵被线程池饿死"不是产品缺陷——产品会如实记 drain-budget-exhausted
+                // 并拒绝写 clean marker。本用例要验的是"正常路径下关闭是 clean"，
+                // 所以它必须先处于"管线本来就空"的前提上。
+                D2TestSupport.WaitForPipelineQuiescent(runtime);
             }
             finally
             {
@@ -325,6 +331,7 @@ public sealed class D2RuntimeTests
         try
         {
             var runtime = DiagnosticRuntime.Start(D2TestSupport.Options(root), out _);
+            D2TestSupport.WaitForPipelineQuiescent(runtime);   // 关闭前等管线静默（只等，不断言）
             var first = D2TestSupport.Shutdown(runtime, 500);
             var second = D2TestSupport.Shutdown(runtime, 500);
 

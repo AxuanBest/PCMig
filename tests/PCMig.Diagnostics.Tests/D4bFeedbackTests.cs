@@ -369,10 +369,15 @@ public sealed class D4bFeedbackTests
                 }
 
                 Assert.True(D2TestSupport.WaitUntil(() => runtime.ActiveIncidents.Count > 0));
+                // ★ 等待条件必须覆盖"内容真的刷下去了"★
+                //   旧条件只等"文件存在"，而写者先建文件、后刷缓冲 ⇒ 重负载下会出现
+                //   "文件在、内容是空的"，随后 Assert.NotEmpty(lines) 误红（实测出现过）。
+                //   这里只补等待条件（等到有非空行），断言强度不变。
                 Assert.True(D2TestSupport.WaitUntil(() =>
                     Directory.Exists(runtime.Store!.IncidentsDir)
-                    && Directory.GetFiles(runtime.Store.IncidentsDir, "incidents-*.jsonl").Length > 0),
-                    "事件卡必须落成 incidents.jsonl");
+                    && Directory.GetFiles(runtime.Store.IncidentsDir, "incidents-*.jsonl")
+                        .Any(f => D2TestSupport.ReadAllLinesShared(f).Any(line => line.Trim().Length > 0))),
+                    "事件卡必须落成 incidents.jsonl，且**内容真的写下去了**（只有文件、还没刷内容不算落地）");
 
                 var file = Directory.GetFiles(runtime.Store!.IncidentsDir, "incidents-*.jsonl").Single();
                 var lines = D2TestSupport.ReadAllLinesShared(file);
