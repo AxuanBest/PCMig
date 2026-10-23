@@ -588,7 +588,30 @@ New-Item $delivery -ItemType Directory -Force | Out-Null
 # Portable 是发版脚本自己的产物目录：先清空再铺，避免上一版的旧 exe 与新版混在一起。
 # （交付区根目录并列的历史安装包 PCMigSetup-*.exe **不动**，用户要求全量保留。）
 $portable = Join-Path $delivery 'Portable'
-if (Test-Path $portable) { Remove-Item $portable -Recurse -Force }
+# ★ v0.5.4（2026-10-24）★ Portable 是**递归删除**目标：删之前必须证明它就是发版脚本自己的产物目录。
+#   否则一次参数错配（例如 -Delivery 指到用户资料目录）就会把非 PCMig 的文件一起删掉。
+#   四道前置检查：
+#     ①交付根不得为空，也不得是盘符根；
+#     ②Portable 的绝对路径必须严格等于 <交付根>\Portable；
+#     ③Portable 不得是重解析点 / 链接（对链接做 -Recurse 会打到链接背后去）;
+#     ④若非空，必须含至少一个 PCMig 产物标记，否则视为用户文件，拒绝删除。
+if ([string]::IsNullOrWhiteSpace($delivery)) { Abort '交付目录为空，拒绝执行 Portable 递归清理（可能误删用户文件）' }
+$deliveryFull = [IO.Path]::GetFullPath($delivery).TrimEnd('\')
+if ($deliveryFull -match '^[A-Za-z]:$') { Abort ('交付目录是盘符根 ' + $deliveryFull + '，拒绝执行 Portable 递归清理') }
+$portableExpected = [IO.Path]::GetFullPath((Join-Path $deliveryFull 'Portable')).TrimEnd('\')
+if ([IO.Path]::GetFullPath($portable).TrimEnd('\') -ne $portableExpected) { Abort ('Portable 路径与预期不符，拒绝清理：' + $portable) }
+if (Test-Path $portable) {
+  $portableItem = Get-Item $portable -Force
+  if (($portableItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { Abort ('Portable 是重解析点 / 链接，拒绝递归删除：' + $portable) }
+  if (-not $portableItem.PSIsContainer) { Abort ('Portable 是文件而不是目录，拒绝递归删除：' + $portable) }
+  $portableEntries = @(Get-ChildItem $portable -Force)
+  if ($portableEntries.Count -gt 0) {
+    $portableMarkers = @($portableEntries | Where-Object { @('PCMig.WinUI.exe','pcmig-cli.exe','更新日志.txt','使用说明.txt') -contains $_.Name })
+    if ($portableMarkers.Count -eq 0) { Abort ('Portable 目录里没有任何 PCMig 产物标记，疑似用户文件，拒绝递归删除：' + $portable) }
+  }
+  Write-Output ('   Portable 清理前置检查通过（标记 ' + @($portableEntries | Where-Object { @('PCMig.WinUI.exe','pcmig-cli.exe','更新日志.txt','使用说明.txt') -contains $_.Name }).Count + ' 个）')
+  Remove-Item $portable -Recurse -Force
+}
 New-Item $portable -ItemType Directory -Force | Out-Null
 # Portable 与工作副本都收**整棵 app 树**（WinUI 必须与其原生组件同目录才能启动）
 # ★ v0.5.1（2026-10-06）★ 工作副本是**跨版本复用**的目录：上一版（v0.5.0）铺进去的

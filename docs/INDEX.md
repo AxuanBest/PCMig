@@ -93,7 +93,7 @@
 
 发布只能通过 `tools/release.ps1 -Version X.Y.Z` 执行，禁止手工 `dotnet publish` 或直接调用 Inno Setup。
 
-> **本地实验预览版（不属正式发布链）**：v0.5.4 的 Preview.1 至 Preview.7 均以本地预览方式产出，**未 push / 未打 tag / 未发 Release / 未运行 elease.ps1**；版本号只落在构建快照，未写回仓库。七轮 Preview 的产出时间、验证结论与已知缺陷见 [预览版演进记录.md](预览版演进记录.md)。正式版本仍为 v0.5.3。
+> **本地实验预览版（不属正式发布链）**：v0.5.4 的 Preview.1 至 Preview.7 均以本地预览方式产出，**未 push / 未打 tag / 未发 Release / 未运行 elease.ps1**；版本号只落在构建快照，未写回仓库。七轮 Preview 的产出时间、验证结论与已知缺陷见 [预览版演进记录.md](预览版演进记录.md)。正式版本为 v0.5.4（2026-10-24）。
 >
 > ⚠ 正式发布流程会读 `src/PCMig.WinUI/PCMig.WinUI.csproj` 的 `<Version>` 节点：出正式版前必须先改回正式版本号（见 `RELEASE.md` 第 2 节）。
 
@@ -146,7 +146,7 @@ v0.5.0 之前一段界面改造与缺陷定位记录，作为技术参考保留�
 |---|---|
 | [`archive/`](archive/) | 已被取代或已交付的历史文档（含 `FinalPolish-*`、`阶段A-交付说明-20260929.md`、`现场验证清单-v0.3.8.txt` 等） |
 
-历史安装包与逐版本证据见 [`历史版本索引.md`](历史版本索引.md)；当前正式版本 v0.5.3，与 v0.5.1 / v0.5.0 的安装包一同通过 GitHub Releases 提供（Latest = v0.5.3）；Legacy v0.1.x – v0.4.x 安装包待通过独立归档 Release 集中发布。安装包**一律不写入 Git 历史**。
+历史安装包与逐版本证据见 [`历史版本索引.md`](历史版本索引.md)；当前正式版本 v0.5.4，与 v0.5.3 / v0.5.1 / v0.5.0 的安装包一同通过 GitHub Releases 提供（Latest = v0.5.4）；Legacy v0.1.x – v0.4.x 安装包待通过独立归档 Release 集中发布。安装包**一律不写入 Git 历史**。
 
 ---
 
