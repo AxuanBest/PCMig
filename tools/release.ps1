@@ -413,6 +413,8 @@ Write-Output ('   四个 csproj 的 <InformationalVersion> 均为 v' + $Version)
 #       (2) <InformationalVersion> 节点出现 0 处或 2 处（构建取哪个不可控）；
 #       (3) XAML 里连一处降级兜底徽章都没有（程序集读不到时界面显示旧值）。
 #     `tools\version-gate-tests.ps1` 用正向 + 反向用例证明它真的会失败（当前 10/10 PASS）。
+# 三段数字形态的文件版本（publish 时显式注入，保证每个托管程序集都带同一身份）
+$NumericVersion = ($Version + '.0')
 $versionGate = Join-Path $PSScriptRoot 'version-gate.ps1'
 if (-not (Test-Path $versionGate)) { Abort ('版本闸门脚本缺失：' + $versionGate) }
 . $versionGate
@@ -480,13 +482,13 @@ if (([IO.File]::ReadAllText($txtPath, [Text.Encoding]::UTF8)) -notmatch [regex]:
 
 Log 'publish（WinUI 主界面 + CLI，自包含）'
 Remove-Item (Join-Path $repo 'dist\cli'), (Join-Path $repo 'dist\gui'), (Join-Path $repo 'dist\winui'), (Join-Path $repo 'dist\app') -Recurse -Force -ErrorAction SilentlyContinue
-& $dotnetExe publish (Join-Path $repo 'src\PCMig.Cli\PCMig.Cli.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -o (Join-Path $repo 'dist\cli') 2>&1 | Select-String -Pattern 'error|-> ' | Select-Object -First 6
+& $dotnetExe publish (Join-Path $repo 'src\PCMig.Cli\PCMig.Cli.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:Version=$Version -p:FileVersion=$NumericVersion -p:InformationalVersion=$Version -o (Join-Path $repo 'dist\cli') 2>&1 | Select-String -Pattern 'error|-> ' | Select-Object -First 6
 # ★ v0.5.0（2026-10-06）★ 主界面换成 WinUI 3。
 #   为什么 WinUI 不能像旧 WPF 那样压成单文件：它是 unpackaged + WindowsAppSDK/Win2D 自包含应用，
 #   原生组件（Microsoft.WindowsAppRuntime.* / Microsoft.Graphics.Canvas*.dll / resources.pri 等）
 #   必须与 exe 同目录并存，压成单文件会在启动时解压失败或找不到原生依赖。
 #   ⇒ 整目录 publish 后**整棵树**进包；安装包与 Portable 都以目录形态交付。
-& $dotnetExe publish (Join-Path $repo 'src\PCMig.WinUI\PCMig.WinUI.csproj') -c Release -r win-x64 --self-contained true -p:Platform=x64 -o (Join-Path $repo 'dist\winui') 2>&1 | Select-String -Pattern 'error|-> ' | Select-Object -First 6
+& $dotnetExe publish (Join-Path $repo 'src\PCMig.WinUI\PCMig.WinUI.csproj') -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:Version=$Version -p:FileVersion=$NumericVersion -p:InformationalVersion=$Version -o (Join-Path $repo 'dist\winui') 2>&1 | Select-String -Pattern 'error|-> ' | Select-Object -First 6
 if (-not (Test-Path (Join-Path $repo 'dist\winui\PCMig.WinUI.exe'))) { Abort 'WinUI 未产出' }
 # ★ v0.5.1（2026-10-06）★ 旧 WPF 前端（src\PCMig.Gui）**退出正式交付链**：
 #   源码继续保留在仓库里作为历史实现 / 回退参考，但**不再 publish、不再进安装包与 Portable**。
