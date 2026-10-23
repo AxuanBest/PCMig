@@ -352,6 +352,23 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         var scope = ComputeLampScope();
         var (reachable, dead, unknown) = ScopeEvidence(scope, nowUtc);
 
+        // ★ 2026-10-24（R2-C 真实渲染取证发现）★ 该作用域**从未有过任何证据**时，
+        // 不得把账本已经判定的"已连接"渲染成红灯 —— 那会让用户看到"已连接但灯是红的"。
+        // 只在"完全没有事实"时兜底；**有事实但已过期**仍走红灯 + "证据已过期，正在重新确认"，
+        // 有事实且失效时更由红灯优先（两处都不许被兜底覆盖，否则等于藏起真实问题）。
+        if (unknown && !dead && !reachable && scope.Length > 0 && !_shareFacts.ContainsKey(scope))
+        {
+            switch (SourceState)
+            {
+                case SourceConnectionState.Connected:
+                case SourceConnectionState.Partial:
+                case SourceConnectionState.Transferring:
+                    reachable = true;
+                    unknown = false;
+                    break;
+            }
+        }
+
         // 四态判定本身抽成纯函数（ProjectLampState），便于单元测试逐条钉住映射，
         // 不必依赖"能不能把 IsConnecting 设成中间态"这种不可观测条件。
         var lamp = ProjectLampState(IsConnecting, _recovering, reachable, _transferActive);

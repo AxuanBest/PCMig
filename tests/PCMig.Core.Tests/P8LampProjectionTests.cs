@@ -280,4 +280,44 @@ public sealed class P8LampProjectionTests : IDisposable
         Assert.True(File.Exists(path), $"仓库文件不存在：{path}");
         return File.ReadAllText(path);
     }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    // ⑤ R2-C 真实渲染取证发现：作用域"从未有过证据"不得把已连接渲染成红灯
+    // ───────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void L13_作用域没有任何证据但账本已判已连接_不得显示红灯()
+    {
+        // 现场来源：R2-C 用真实 WinUI 帧采集时发现 `state T3` 下
+        //   SourceState=Connected 而 LampState=Disconnected / Fill=#D64758（红），
+        // 即"已连接但灯是红的"。成因：账本只有主机级证据（连接预检通过、尚未产生共享级探测），
+        // 而灯的作用域是共享根 `\\host\e`，查不到事实就被当成"未连接"。
+        var vm = NewVm();
+        AddSelectedShare(vm, "e", @"\\192.0.2.10\e");
+
+        // 只写主机级事实：模拟"预检通过 + 该共享还没被单独探测"。
+        vm.NotifySourceRestored(@"\\192.0.2.10");
+
+        Assert.Equal(SourceConnectionState.Connected, vm.SourceState);
+        Assert.Equal(SourceLampState.Connected, vm.LampState);   // 修复前这里是 Disconnected（红）
+        Assert.Contains("已连接", vm.LampText);
+    }
+
+    [Fact]
+    public void L14_作用域有事实但已过期_兜底不得把过期洗成绿灯()
+    {
+        // 与 L13 成对：兜底只允许在"完全没有事实"时生效。
+        var vm = NewVm();
+        AddSelectedShare(vm, "e", @"\\192.0.2.10\e");
+        vm.NotifySourceRestored(@"\\192.0.2.10");
+        vm.NotifyShareReachability(@"\\192.0.2.10\e", true, "预检实测可读");
+        Assert.Equal(SourceLampState.Connected, vm.LampState);
+
+        ConnectionViewModel.ShareReadProbe = _ => throw new TimeoutException("探测无结论（测试注入）");
+        _now = _now.AddSeconds(SourceEvidenceLedger.DefaultTtl.TotalSeconds + 1);
+        vm.SweepEvidenceFreshness();
+
+        Assert.Equal(SourceLampState.Disconnected, vm.LampState);
+        Assert.Contains("证据已过期", vm.LampText);
+    }
 }
