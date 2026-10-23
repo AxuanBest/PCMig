@@ -126,7 +126,7 @@ public class P0CrashEvidenceTests : IDisposable
     [Fact]
     public void E7_证据通道必须只写证据_不得参与业务判定()
     {
-        var src = File.ReadAllText(Path.Combine(RepoRoot(), @"src\PCMig.Core\Diagnostics\CrashEvidence.cs"));
+        var src = File.ReadAllText(Path.Combine(RepoRoot(), @"src\PCMig.Core\Diagnostics\CrashEvidence.cs")).Replace("\r\n", "\n");
 
         Assert.Contains("fs.Flush(flushToDisk: true)", src, StringComparison.Ordinal);
         foreach (var forbidden in new[] { "IsRunning", "Cancel", "IsStopping", "JobState", "OverallPass", "Status =" })
@@ -136,17 +136,17 @@ public class P0CrashEvidenceTests : IDisposable
     [Fact]
     public void E8_三条崩溃出口都必须接上同步落盘()
     {
-        var guard = File.ReadAllText(Path.Combine(RepoRoot(), @"src\PCMig.WinUI\Diagnostics\UiFaultGuard.cs"));
+        var guard = File.ReadAllText(Path.Combine(RepoRoot(), @"src\PCMig.WinUI\Diagnostics\UiFaultGuard.cs")).Replace("\r\n", "\n");
         Assert.Contains("CrashEvidence.Write(\"ui-exception\", ex.ToString(), where);", guard, StringComparison.Ordinal);
 
-        var app = File.ReadAllText(Path.Combine(RepoRoot(), @"src\PCMig.WinUI\App.xaml.cs"));
+        var app = File.ReadAllText(Path.Combine(RepoRoot(), @"src\PCMig.WinUI\App.xaml.cs")).Replace("\r\n", "\n");
         Assert.Contains("CrashEvidence.Write(\"task-unobserved\"", app, StringComparison.Ordinal);
         Assert.Contains("CrashEvidence.Write(\n                \"appdomain-unhandled\"", app, StringComparison.Ordinal);
         // 两条出口都必须在"记录事实"的同时同步落盘（顺序：日志 → 证据 → 诊断事实）
         Assert.True(app.IndexOf("CrashEvidence.Write(\"task-unobserved\"", StringComparison.Ordinal)
                     < app.IndexOf("RecordUnhandledException(e.Exception, \"UnobservedTaskException\")", StringComparison.Ordinal));
 
-        var wd = File.ReadAllText(Path.Combine(RepoRoot(), @"src\PCMig.Core\Diagnostics\UiStallWatchdog.cs"));
+        var wd = File.ReadAllText(Path.Combine(RepoRoot(), @"src\PCMig.Core\Diagnostics\UiStallWatchdog.cs")).Replace("\r\n", "\n");
         Assert.Contains("CrashEvidence.Write(kind, detail, where: \"UiStallWatchdog\");", wd, StringComparison.Ordinal);
         Assert.Contains("var kind = fact.Recovered ? \"ui-stall-recovered\" : \"ui-stall\";", wd, StringComparison.Ordinal);
         // 先落盘再回调：回调没接或自身崩掉都不影响证据在磁盘上

@@ -793,7 +793,10 @@ public sealed class P6SmbConnectionAndPerformanceTests : IDisposable
     }
 
     private static string ReadRepoFile(params string[] parts)
-        => File.ReadAllText(Path.Combine(new[] { FindRepoRoot() }.Concat(parts).ToArray()));
+        // 行尾归一：同一文件在不同检出可能是 LF 或 CRLF（.gitattributes 的 * text=auto + core.autocrlf），
+        // 子串断言与定长窗口都必须与检出 EOL 无关，否则"干净检出全绿"不成立。
+        => File.ReadAllText(Path.Combine(new[] { FindRepoRoot() }.Concat(parts).ToArray()))
+           .Replace("\r\n", "\n");
 
     private static string FindRepoRoot()
     {
