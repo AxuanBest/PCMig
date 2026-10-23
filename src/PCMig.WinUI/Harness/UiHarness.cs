@@ -221,6 +221,13 @@ namespace PCMig.WinUI.Harness
                             LogProbe(window, string.Join(' ', parts, 1, parts.Length - 1));
                             break;
 
+                        case "fakeon":
+                            // ★ 补救入口 ★ 启动早期窗口还没就绪时 SetVisibility 的注入会被静默跳过，
+                            //   采样器于是退回真实网卡、对本机回环目标判为不可用（usable=False）。
+                            //   这条命令让取证脚本在窗口就绪后再点一次注入，只影响测试数据源。
+                            InstallFakeProbe();
+                            Log("fakeon -> 已按需注入假网卡探针（Debug 专属）");
+                            break;
                         case "rate":
                             // ★ 只改测试数据源 ★ 设置假网卡接收速率（字节/秒；0 = 有网卡无流量）。
                             // 用于构造"已连接但未传输"（采样器可用、速率 0）与"正在传输"两种输入。
