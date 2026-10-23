@@ -251,6 +251,34 @@ namespace PCMig.WinUI.Harness
                             ApplyHostProbe(parts.Length > 1 ? parts[1] : "fail");
                             break;
 
+                        case "prog":
+                            // ★ R2-B（2026-10-24）★ 把底栏进度条钉在指定百分比，用于真实合成帧取证。
+                            // 只写投影属性；业务真值仍由会话层单向供给（先 glob off 才不会被打回）。
+                            {
+                                var pct = parts.Length > 1 && double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                                    System.Globalization.CultureInfo.InvariantCulture, out var pp) ? pp : 0d;
+                                var st = parts.Length > 2 ? parts[2] : "Running";
+                                window.HarnessSetFooterProgress(pct, st);
+                                Log("prog -> " + window.HarnessFooterProgressReport());
+                            }
+                            break;
+
+                        case "proghold":
+                            // ★ R2-B ★ 持续钉住底栏进度条（底栏节拍会把 Value 写回会话真值）。
+                            {
+                                var pct2 = parts.Length > 1 && double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                                    System.Globalization.CultureInfo.InvariantCulture, out var q2) ? q2 : 0d;
+                                var ms2 = ParseInt(parts, 2, 4000);
+                                var st2 = parts.Length > 3 ? parts[3] : "Running";
+                                window.HarnessHoldFooterProgress(pct2, ms2, st2);
+                                Log("proghold -> " + pct2.ToString(System.Globalization.CultureInfo.InvariantCulture) + " for " + ms2 + "ms");
+                            }
+                            break;
+
+                        case "progreport":
+                            Log("prog " + window.HarnessFooterProgressReport());
+                            break;
+
                         case "mark":
                             Banner(window, string.Join(' ', parts, 1, parts.Length - 1));
                             Log("mark " + string.Join(' ', parts, 1, parts.Length - 1));

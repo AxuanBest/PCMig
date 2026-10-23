@@ -49,6 +49,72 @@ namespace PCMig.WinUI
         internal void HarnessPumpFooterPresentation() => RefreshFooterPresentation();
 
         /// <summary>
+        /// ★ 仅 Debug ★ 把底栏进度条固定到指定百分比（R2-B 进度条光效视觉取证用）。
+        /// 前置条件：先 <c>glob off</c> 停掉呈现节拍，否则会被 RefreshFooterPresentation 覆盖回会话真值。
+        /// 它只写 Value / ProgressState 两个投影属性，不碰任何业务状态。
+        /// </summary>
+        internal void HarnessSetFooterProgress(double value, string state)
+        {
+            FooterImmersiveProgress.ProgressState = state.ToLowerInvariant() switch
+            {
+                "running" => PCMig.WinUI.Controls.ImmersiveProgress.ImmersiveProgressState.Running,
+                "paused" => PCMig.WinUI.Controls.ImmersiveProgress.ImmersiveProgressState.Paused,
+                "warning" => PCMig.WinUI.Controls.ImmersiveProgress.ImmersiveProgressState.Warning,
+                "failed" => PCMig.WinUI.Controls.ImmersiveProgress.ImmersiveProgressState.Failed,
+                _ => PCMig.WinUI.Controls.ImmersiveProgress.ImmersiveProgressState.Idle,
+            };
+            FooterImmersiveProgress.Value = Math.Clamp(value, 0d, 100d);
+            FooterPercentText.Text = value.ToString("0.0") + "%";
+        }
+
+        private Microsoft.UI.Dispatching.DispatcherQueueTimer? _harnessHoldTimer;
+
+        /// <summary>
+        /// ★ 仅 Debug ★ 在指定时长内**每 16 ms** 把底栏进度条钉在给定百分比。
+        /// 存在的理由：底栏呈现节拍每拍都会把 Value 写回会话真值（没有真实会话时是 0），
+        /// 一次性赋值会在下一拍被打回。这里只是持续重写同一个投影属性，不碰业务状态。
+        /// </summary>
+        internal void HarnessHoldFooterProgress(double value, int holdMs, string state)
+        {
+            try { _harnessHoldTimer?.Stop(); } catch { }
+            var timer = DispatcherQueue.CreateTimer();
+            timer.Interval = TimeSpan.FromMilliseconds(16);
+            timer.IsRepeating = true;
+            timer.Tick += (_, _) => HarnessSetFooterProgress(value, state);
+            timer.Start();
+            _harnessHoldTimer = timer;
+            HarnessSetFooterProgress(value, state);
+            var ms = Math.Max(200, holdMs);
+            _ = System.Threading.Tasks.Task.Delay(ms).ContinueWith(_ =>
+                DispatcherQueue.TryEnqueue(() => { try { timer.Stop(); } catch { } }));
+        }
+
+        /// <summary>
+        /// ★ 仅 Debug ★ 读底栏进度条的**真实**渲染量（不含任何推算），供取证脚本核对。
+        /// </summary>
+        internal string HarnessFooterProgressReport()
+        {
+            var host = FooterProgressHost;
+            double rootX = double.NaN, rootY = double.NaN, scale = double.NaN;
+            try
+            {
+                var pt = host.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(0, 0));
+                rootX = pt.X; rootY = pt.Y;
+                scale = host.XamlRoot?.RasterizationScale ?? 1d;
+            }
+            catch { /* 布局尚未完成时按 NaN 上报，取证脚本会重试 */ }
+            return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "value={0:0.###} progressWidth={1:0.###} head={2:0.###} halo={3:0.###} canvas={4} rootXY=({5:0.#},{6:0.#}) hostWH={7:0.#}x{8:0.#} scale={9:0.###} layers={10}",
+                FooterImmersiveProgress.Value,
+                FooterImmersiveProgress.ProgressWidth,
+                FooterImmersiveProgress.HeadX,
+                FooterImmersiveProgress.HaloStrength,
+                FooterImmersiveProgress.IsCanvasAttached,
+                rootX, rootY, host.ActualWidth, host.ActualHeight, scale,
+                FooterImmersiveProgress.LastLayerSummary);
+        }
+
+        /// <summary>
         /// ★ 仅 Debug ★ 把本窗口排到交互桌面最前（无交互桌面时静默失败）。
         /// </summary>
         internal void HarnessBringToFront()
