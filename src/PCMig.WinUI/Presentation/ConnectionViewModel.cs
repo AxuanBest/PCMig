@@ -179,6 +179,13 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     private SourceLampState _lampState = SourceLampState.Disconnected;
     private string _lampTargetScope = string.Empty;
     private bool _lampUnknown;
+
+    /// <summary>
+    /// ★ R2-A-2（2026-10-24）★ 指示灯作用域内是否**确证**不可达（有失效证据、且没有新鲜可达证据）。
+    /// 与 <see cref="_lampUnknown"/>（无结论）严格区分：修复入口只允许在"确证不可达"时拒绝启动，
+    /// 不能因为"证据过期"就把用户的修复请求挡回去。
+    /// </summary>
+    private bool _lampKnownUnreachable;
     private object? _lampTextSnapshot;
     private object? _lampSummarySnapshot;
 
@@ -354,6 +361,7 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
 
         _lampTargetScope = scope;
         _lampUnknown = unknown && !dead;
+        _lampKnownUnreachable = dead && !reachable;
         LampState = lamp;
         RaiseIfChanged(ref _lampTextSnapshot, LampText, nameof(LampText));
         RaiseIfChanged(ref _lampSummarySnapshot, LampScopeSummary, nameof(LampScopeSummary));
@@ -410,6 +418,12 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
 
     /// <summary>指示灯作用域（主机或共享 UNC），用于"这盏灯代表哪条共享"的显式说明。</summary>
     public string LampTargetScope => _lampTargetScope;
+
+    /// <summary>
+    /// ★ R2-A-2 ★ 当前指示灯作用域是否确证不可达。修复入口用它做"源共享失效不得启动新修复"的判据：
+    /// 只看确证失效，不看"证据过期"（后者是尚未确认，不该冒充失效）。
+    /// </summary>
+    internal bool SourceKnownUnreachable => _lampKnownUnreachable;
 
     /// <summary>
     /// ★ 2026-10-24 ★ 四态可读文案。四态不够细，但"为什么是红的"必须说清楚：

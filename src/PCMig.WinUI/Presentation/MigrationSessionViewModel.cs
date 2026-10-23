@@ -3314,7 +3314,20 @@ public sealed class MigrationSessionViewModel : ObservableObject
             return;
         }
 
-        var targets = CollectRepairTargets(out var beforeMismatch);
+        // ★ R2-A-2（2026-10-24，v0.5.4 数据安全收口）★ 源共享**确证**失效时不得启动新修复。
+        //   现场教训是"一个环境错误被当成差异，然后对目标侧同名文件全部强制覆盖"。
+        //   只拦"确证不可达"：证据过期/尚未确认不拦 —— 那只是还没测出来，不该把合理的修复请求挡回去。
+        if (_connection is { SourceKnownUnreachable: true })
+        {
+            SetUserHint("源共享当前不可访问：请先恢复连接再修复。本次未做任何改动。");
+            Log("WARN", "尝试修复被拒绝：源共享确证不可访问（不启动重拷，避免对目标做无依据覆盖）。");
+            LastRepairOutcome = ActionOutcomePolicy.ForRepair(new RepairBusinessResult(0, 0, 0, "repair-source-unreachable"));
+            return;
+        }
+
+        var selection = CollectRepairSelection();
+        var targets = selection.Targets;
+        var beforeMismatch = selection.BeforeMismatch;
         var plannedObjects = ctx.Plan?.Objects.Count ?? 0;
 
         // ★ D6.1 §16 观察点 ★ 修复链路的证据（请求 → 目标来源 → 无目标/完成）。
@@ -3328,6 +3341,25 @@ public sealed class MigrationSessionViewModel : ObservableObject
             PublishRepair(RepairEvents.RepairNoTargets,
                 new RprTargetsPayload(0, beforeMismatch, 0, plannedObjects), DiagnosticLevel.Information,
                 DiagnosticOutcome.Skipped);
+            if (selection.RequireReverify.Count > 0)
+            {
+                // UNKNOWN / 验到一半被打断：先重新核验，不许直接覆盖 —— 覆盖的依据必须是"确认差异"。
+                var reverifyMsg = $"有 {selection.RequireReverify.Count} 个对象上次核验结论不明（无法确认是否一致）："
+                                 + "请先重新核验，再决定是否修复。本次未做任何改动。";
+                SetOperational(reverifyMsg);
+                Log("WARN", "尝试修复被拒绝：" + reverifyMsg);
+                LastRepairOutcome = ActionOutcomePolicy.ForRepair(new RepairBusinessResult(0, 0, 0, "repair-requires-reverify"));
+                return;
+            }
+            if (selection.SkippedNoData.Count > 0)
+            {
+                var noDataMsg = $"有 {selection.SkippedNoData.Count} 个对象没有可核对的数据（源侧无待复制文件），"
+                               + "既没发现差异也没有失败记录：不启动重拷。";
+                SetOperational(noDataMsg);
+                Log("INFO", "尝试修复：跳过 " + selection.SkippedNoData.Count + " 个无可核对数据的对象，未启动重拷。");
+                LastRepairOutcome = ActionOutcomePolicy.ForRepair(new RepairBusinessResult(0, 0, 0, null));
+                return;
+            }
             SetOperational("没有需要修复的对象：上次校验（若有）全部一致，也没有失败对象。");
             Log("INFO", "尝试修复：没有需要修复的对象（上次校验全部一致且无失败对象）——未启动重拷。");
             LastRepairOutcome = ActionOutcomePolicy.ForRepair(new RepairBusinessResult(0, 0, 0, null));
@@ -3383,19 +3415,68 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// <summary>
     /// 需要修复的对象：优先用上次验证报告里"不一致"的对象，再补 Receipt 里失败/有错误/中断的对象。
     /// </summary>
-    public List<string> CollectRepairTargets(out int beforeMismatch)
+    /// <summary>
+    /// ★ R2-A-1（2026-10-24，v0.5.4 数据安全收口）★ 修复目标的**分类结果**。
+    ///
+    /// 旧实现用 <c>Status != "OK"</c> 当选择器，把四种完全不同的状态混成一句"要修"：
+    ///   · EMPTY（没有可核对的数据）→ 被当成不一致去重拷，等于凭"测不出来"动目标文件；
+    ///   · UNKNOWN（源/目标不可达、枚举不全、两侧 0/0）→ 被当成不一致直接强制覆盖；
+    ///   · MISMATCH（两侧都数得清且确实不一致）→ 这才是唯一有证据的修复依据；
+    ///   · OK → 本就不该进来。
+    /// 现场真实案例 OK 28 / EMPTY 10 / MISMATCH 1 / UNKNOWN 1：旧逻辑会把 12 个对象都拿去重拷，
+    /// 其中 10 个是"没东西可核"，1 个是"根本没核对成"。
+    ///
+    /// 现在的规则（只认证据，不放宽也不过度扩张）：
+    ///   · OK             → 不修；
+    ///   · EMPTY          → 不修（没有待复制文件，不存在"差异"）；
+    ///   · MISMATCH       → 修（这是唯一"确认差异"的来源）；
+    ///   · UNKNOWN / 其它 → 不修，要求**先重新核验**（结论不明时不许覆盖目标）；
+    ///   · Receipt 里 Failed / CompletedWithErrors / Interrupted → 修（这些是"上次没传成"，与是否一致无关）；
+    ///     但若同一对象在验证里结论不明，仍按 UNKNOWN 处理（更安全的一侧优先）。
+    /// 目标侧的 ExtraOnTarget（目标多出来的文件）任何情况下都不在这里删除。
+    /// </summary>
+    public sealed record RepairSelection(
+        List<string> Targets,
+        int BeforeMismatch,
+        List<string> RequireReverify,
+        List<string> SkippedNoData,
+        int SkippedOk);
+
+    /// <summary>★ R2-A-1 ★ 修复目标的分类选择。纯读盘，不做任何写操作。</summary>
+    public RepairSelection CollectRepairSelection()
     {
-        var ids = new List<string>();
-        beforeMismatch = 0;
+        var targets = new List<string>();
+        var reverify = new List<string>();
+        var noData = new List<string>();
+        var okCount = 0;
+        var mismatch = 0;
+
         var ctx = Ctx;
-        if (ctx is null) return ids;
+        if (ctx is null) return new RepairSelection(targets, 0, reverify, noData, 0);
 
         var verify = ctx.LoadVerify();
         if (verify is not null)
         {
-            var bad = verify.Objects.Where(o => o.Status != "OK").ToList();
-            beforeMismatch = bad.Count;
-            ids.AddRange(bad.Select(o => o.ObjectId));
+            foreach (var o in verify.Objects)
+            {
+                switch (o.Status)
+                {
+                    case "OK":
+                        okCount++;
+                        break;
+                    case "MISMATCH":
+                        mismatch++;
+                        targets.Add(o.ObjectId);
+                        break;
+                    case "EMPTY":
+                        noData.Add(o.ObjectId);
+                        break;
+                    default:
+                        // UNKNOWN / CANCELED / 其它未知结论：先重新核验，不许拿它当覆盖依据。
+                        reverify.Add(o.ObjectId);
+                        break;
+                }
+            }
         }
 
         var receipts = ctx.LoadReceipts(_log);
@@ -3404,9 +3485,23 @@ public sealed class MigrationSessionViewModel : ObservableObject
             .Select(g => g.OrderBy(r => r.CompletedUtc).Last());
         foreach (var r in latest)
             if (r.Status is ObjectStatus.Failed or ObjectStatus.CompletedWithErrors or ObjectStatus.Interrupted)
-                ids.Add(r.ObjectId);
+                if (!reverify.Contains(r.ObjectId, StringComparer.OrdinalIgnoreCase))
+                    targets.Add(r.ObjectId);
 
-        return ids.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return new RepairSelection(
+            targets.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            mismatch,
+            reverify.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            noData.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            okCount);
+    }
+
+    /// <summary>兼容入口：只返回"有证据支持重拷"的对象（语义已按 R2-A-1 收窄）。</summary>
+    public List<string> CollectRepairTargets(out int beforeMismatch)
+    {
+        var selection = CollectRepairSelection();
+        beforeMismatch = selection.BeforeMismatch;
+        return selection.Targets;
     }
 
     /// <summary>生成并打开报告（Core 的 ReportGenerator，唯一权威报告源）。</summary>
