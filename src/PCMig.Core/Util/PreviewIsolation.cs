@@ -47,6 +47,16 @@ public static class PreviewIsolation
     /// <summary>产物预览身份标记：<c>AssemblyInformationalVersion</c> 含此子串即视为预览产物。</summary>
     public const string PreviewMarker = "-preview";
 
+    /// <summary>
+    /// 发布候选身份标记：<c>AssemblyInformationalVersion</c> 含 <c>-rc.</c> 的产物同样按"隔离身份"处理。
+    ///
+    /// 理由（不是放宽，而是补一个缺口）：rc.1 与正式 v0.5.3 必须**并存安装**（独立 AppId / 独立安装目录），
+    /// 若 rc 仍按正式身份跑，它会把运行数据写进 <c>%LocalAppData%\PCMig</c> —— 与用户已在用的 v0.5.3
+    /// 共用同一份 Jobs/Settings/Diagnostics，等于让候选版污染正式版数据。这属于安装安全，不是产品行为变化：
+    /// 正式发布件（如 <c>0.5.4</c>）不含该标记，生产路径逐位不变。
+    /// </summary>
+    public const string ReleaseCandidateMarker = "-rc.";
+
     /// <summary>配置 schema 版本。不匹配即视为无效配置（Fail Closed）。</summary>
     public const int SupportedSchemaVersion = 1;
 
@@ -178,6 +188,14 @@ public static class PreviewIsolation
     /// 见 <c>tools\preview-build.ps1</c>）而不是文件名或目录名 —— 目录名可以被随手改，
     /// 程序集元数据不能。
     /// </summary>
+    /// <summary>
+    /// 产物身份是否属于"隔离运行数据"的一类（预览 <c>-preview</c> 或发布候选 <c>-rc.</c>）。
+    /// 判据只看程序集 <c>AssemblyInformationalVersion</c>，不看文件名/目录名。
+    /// </summary>
+    internal static bool IsIsolatedIdentity(string? informationalVersion)
+        => !string.IsNullOrEmpty(informationalVersion)
+           && (informationalVersion!.IndexOf(PreviewMarker, StringComparison.OrdinalIgnoreCase) >= 0
+               || informationalVersion!.IndexOf(ReleaseCandidateMarker, StringComparison.OrdinalIgnoreCase) >= 0);
     private static bool CurrentAssemblyIsPreviewIdentity()
     {
         try
@@ -185,10 +203,7 @@ public static class PreviewIsolation
             var asm = typeof(PreviewIsolation).Assembly;
             var info = System.Reflection.CustomAttributeExtensions
                 .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(asm);
-            var value = info?.InformationalVersion;
-            if (!string.IsNullOrEmpty(value)
-                && value!.IndexOf(PreviewMarker, StringComparison.OrdinalIgnoreCase) >= 0)
-                return true;
+            if (IsIsolatedIdentity(info?.InformationalVersion)) return true;
         }
         catch { /* 取不到元数据 ⇒ 按正式身份处理（最保守） */ }
         return false;

@@ -366,4 +366,31 @@ public class PreviewIsolationTests
     {
         try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { /* 清理失败不影响结论 */ }
     }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    // 发布候选（-rc.）同样是隔离身份：rc.1 与正式 v0.5.3 并存安装时不得共用一个数据根
+    // ───────────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("0.5.4-preview.7", true)]
+    [InlineData("0.5.4-rc.1", true)]
+    [InlineData("0.5.4-rc.2+abcdef", true)]
+    [InlineData("0.5.4", false)]
+    [InlineData("0.5.3", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void PVI30_隔离身份判定_预览与发布候选都算_正式版不算(string? informationalVersion, bool expected)
+    {
+        Assert.Equal(expected, PreviewIsolation.IsIsolatedIdentity(informationalVersion));
+    }
+
+    [Fact]
+    public void PVI31_发布候选身份_缺配置必须FailClosed()
+    {
+        // rc 身份 + 缺隔离配置 ⇒ 必须拦住，否则会把运行数据写进正式根。
+        Assert.True(PreviewIsolation.IsIsolatedIdentity("0.5.4-rc.1"));
+        var state = PreviewIsolation.EvaluateForTest(null, true);
+        Assert.False(state.IsActive);
+        Assert.NotNull(state.Failure);
+    }
 }
