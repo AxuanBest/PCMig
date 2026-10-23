@@ -1,4 +1,10 @@
-param([string]$Out = "E:\pcmig-test\uishot\shot.png", [string]$Exe = "D:\PCMig\PCMig.exe", [switch]$UseScreen)
+﻿param([string]$Out = "", [string]$Exe = "", [switch]$UseScreen)
+# 不写死本机路径：优先参数，其次环境变量，最后相对本脚本推导。
+if (-not $Out) { $Out = [Environment]::GetEnvironmentVariable("PCMIG_UISHOT_OUT") }
+if (-not $Out) { $Out = Join-Path $env:TEMP "pcmig-uishot\shot.png" }
+if (-not $Exe) { $Exe = [Environment]::GetEnvironmentVariable("PCMIG_APP_EXE") }
+if (-not $Exe) { $Exe = Join-Path (Split-Path $PSScriptRoot -Parent) "dist\app\PCMig.exe" }
+if (-not (Test-Path (Split-Path $Out -Parent))) { New-Item -ItemType Directory -Force -Path (Split-Path $Out -Parent) | Out-Null }
 Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtra);' -Name Kbd -Namespace W
 Add-Type -AssemblyName System.Drawing
 Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();' -Name Dpi -Namespace W

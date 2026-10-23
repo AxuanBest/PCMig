@@ -6,10 +6,15 @@
 #>
 param(
   [int]$Rounds = 2,
-  [string]$Cli = 'D:\PCMig\pcmig-cli.exe',
-  [string]$Root = 'E:\stab',
+  [string]$Cli = '',
+  [string]$Root = '',
   [int]$BulkMb = 300
 )
+# CLI 与临时根不写死本机路径：优先参数，其次环境变量，最后相对本脚本推导。
+if (-not $Cli)  { $Cli  = [Environment]::GetEnvironmentVariable('PCMIG_CLI') }
+if (-not $Cli)  { $Cli  = Join-Path (Split-Path $PSScriptRoot -Parent) 'dist\app\pcmig-cli.exe' }
+if (-not $Root) { $Root = [Environment]::GetEnvironmentVariable('PCMIG_STAB_ROOT') }
+if (-not $Root) { $Root = Join-Path $env:TEMP 'pcmig-stab' }
 $ErrorActionPreference = 'Continue'
 $NL = [string][char]10
 $script:results = @()
