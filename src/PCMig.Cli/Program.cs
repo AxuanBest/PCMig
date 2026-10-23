@@ -73,6 +73,18 @@ internal static class Program
             return 0;
         }
 
+        // 5) ★ 2026-10-15（Preview.2 隔离整改）★ 预览隔离 Fail Closed 闸门。
+        //    放在 help 之后（看用法不该被拦）、任何业务动作之前（尤其早于任务库打开与日志初始化）。
+        //    只有"预览身份 + 隔离不可用"才拦截；正式版与 CLI 常规用法下 Failure 恒为 null。
+        if (PCMig.Core.Util.PreviewIsolation.Failure is { } isolationFailure)
+        {
+            Console.WriteLine("✘ 预览版数据隔离不可用，已拒绝执行：");
+            Console.WriteLine("  " + isolationFailure);
+            Console.WriteLine("  为保护正式版数据，本程序不会回退到正式数据目录。");
+            Console.WriteLine("  处理建议：使用包含 preview-isolation.json 的完整预览安装包重新安装。");
+            return FailCode;
+        }
+
         var opt = parsed.Options;
 
         if (opt.TryGetValue("jobs", out var jobsDir))

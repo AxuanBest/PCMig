@@ -434,7 +434,13 @@ internal sealed class FluidZoomTransitionCoordinator
         _panelVisual = null;
         _sourceVisual = null;
 
-        if (panel is not null) panel.Opacity = 1.0;   // 可见终态；关闭方向的折叠由调用方在同一回调里做
+        // ★ 只对打开方向恢复可见终态。关闭方向**绝不能**在这里把 panel 拉回不透明 ——
+        //   关闭时 Shell（唯一带 CornerRadius 的圆角表面）已在上面 RemoveShell() 拆掉，
+        //   此刻把真实 panel 置为 Opacity=1，就会在 AfterClosed() 折叠它之前暴露一帧
+        //   方角矩形（宿主 UserControl 的矩形 bounds），即用户报告的"关闭瞬间白块 / 圆角丢失"。
+        //   关闭方向的透明度已由 ApplyFrame 的 panel 相位表收到 0（见 ApplyFrame），
+        //   可见性折叠则由调用方在同一回调里做 ⇒ 这里保持现状即可。
+        if (panel is not null && opening) panel.Opacity = 1.0;   // 仅打开方向
         if (source is not null) RestoreSourceVisual(source);
 
         Current = opening ? Phase.Open : Phase.Closed;

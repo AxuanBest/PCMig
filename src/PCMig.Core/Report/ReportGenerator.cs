@@ -217,6 +217,16 @@ th{background:#eff6ff} tr:nth-child(even){background:#f9fafb}
                 sb.Append($"<tr><td>{E(c.Name)}</td><td>{(c.Pass ? "<span class='ok'>通过</span>" : c.Severity == "Warning" ? "<span class='warn'>警告</span>" : "<span class='bad'>失败</span>")}</td><td>{E(c.Detail)}</td></tr>");
             sb.Append("</table>");
         }
+        else if (job.PreflightSkipped)
+        {
+            // ★ v0.5.4-preview.3「不预检开始迁移」★ preflight.json 不存在 = 未执行预检。
+            //   这里**必须明说没做**：否则"没有附录"会被读成"预检通过"，正是 R2 之前踩过的坑。
+            //   也不写任何"通过"字样——失败事实只在回执 / 失败清单 / 本报告其它章节里呈现。
+            sb.Append("<h2>附录：本次任务未执行预检</h2>" +
+                "<p>用户在开始迁移时选择了「不预检开始迁移」，因此源可达性 / 凭据 / 共享枚举 / " +
+                "目标空间 / 权限 / 同名冲突这些检查<b>没有运行</b>。" +
+                "这不等于「预检全部通过」——实际遇到的问题已记录在回执、失败清单与本报告的其它章节里。</p>");
+        }
         sb.Append($"<h2>附录：排障信息</h2><ul>" +
             $"<li>任务目录：<span class='mono'>{E(_ctx.JobDir)}</span></li>" +
             $"<li>任务日志：<span class='mono'>{E(_ctx.LogsDir)}</span>（job-*.log / job-*.jsonl / robocopy/*.log）</li>" +

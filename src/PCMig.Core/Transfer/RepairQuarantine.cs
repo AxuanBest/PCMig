@@ -60,6 +60,33 @@ public static class RepairQuarantine
     public static string LedgerPath(string jobDir) => Path.Combine(jobDir, LedgerFileName);
 
     /// <summary>
+    /// 判断一个文件名是否是本工具隔离出来的「旧副本」（<c>&lt;原名&gt;.pcmig-old-&lt;yyyyMMddHHmmss&gt;[-序号]</c>）。
+    /// <para>
+    /// ★ v0.5.4 Preview.2 ★ 存在的理由：旧副本留在**原目录**里，任何"全递归统计目标目录字节"的
+    /// 代码都会把它当成传输产物重复计入。进度结算必须能识别并排除它。这里按**结构**判定
+    /// （后缀 + 14 位时间戳，可选 <c>-序号</c>），不做字典匹配。
+    /// </para>
+    /// </summary>
+    public static bool IsQuarantinedOldCopy(string fileName)
+    {
+        if (string.IsNullOrEmpty(fileName)) return false;
+        var idx = fileName.LastIndexOf(Suffix, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return false;
+        // 后缀必须带内容（".pcmig-old-" 之前是本来的业务文件名）
+        if (idx == 0) return false;
+        var tail = fileName.AsSpan(idx + Suffix.Length);
+        // 时间戳：恰好 14 位数字
+        if (tail.Length < 14) return false;
+        for (var i = 0; i < 14; i++) { if (!char.IsAsciiDigit(tail[i])) return false; }
+        // 之后必须是结束，或 "-<序号>"
+        if (tail.Length == 14) return true;
+        if (tail[14] != '-') return false;
+        if (tail.Length == 15) return false;
+        for (var i = 15; i < tail.Length; i++) { if (!char.IsAsciiDigit(tail[i])) return false; }
+        return true;
+    }
+
+    /// <summary>
     /// 把目标侧同名文件改名成"旧副本"。
     /// 失败（被独占占用、权限不足、同卷限制等）一律返回 false —— **调用方必须把它计为失败**，绝不能当成删除成功。
     /// </summary>

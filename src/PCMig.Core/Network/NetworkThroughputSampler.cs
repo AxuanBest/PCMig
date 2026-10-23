@@ -102,7 +102,13 @@ public sealed class NetworkThroughputSampler : IDisposable
     public const double ReselectIntervalSeconds = 15.0;
 
     private readonly object _gate = new();
+#if DEBUG
+    // 2026-10-22：Debug 专属 UI Harness 需要在运行中热替换探针（ReplaceProbe），故此处不能 readonly。
+    // Release 编译单元里既没有 ReplaceProbe 也没有任何调用点，字段恢复 readonly 以守住不可变性。
+    private INetworkInterfaceProbe _probe;
+#else
     private readonly INetworkInterfaceProbe _probe;
+#endif
     private readonly TimeProvider _time;
     private readonly Serilog.ILogger? _log;
     private readonly NetworkThroughputEstimator _estimator;
@@ -201,6 +207,37 @@ public sealed class NetworkThroughputSampler : IDisposable
             timer?.Dispose();
         }
     }
+
+#if DEBUG
+    /// <summary>
+    /// ★ 2026-10-22 ★ 热替换网卡探针（<paramref name="probe"/> 为 null ⇒ 还原生产默认探针）。
+    ///
+    /// <para><b>整块仅在 Debug 编译单元存在。</b>Release 的 <c>PCMig.Core.dll</c> 里既没有这个方法，
+    /// 也没有任何调用点，因此它不构成正式产物的一部分公共契约。</para>
+    ///
+    /// 存在的理由：探针本来就是**可注入抽象**（<see cref="INetworkInterfaceProbe"/> 的存在就是为了让
+    /// 读数与真实网卡解耦），但此前只能在构造时注入，于是"运行中换数据源"只能重建整个采样器，
+    /// 把采样窗口与计数器基线一起丢掉。本方法只换数据源：立即重选接口、清掉采样窗口与估计器基线
+    /// （新数据源的计数器没有可比性），EMA / 稳定值 / 下限比较等**判定逻辑一律不动**。
+    ///
+    /// 生产路径从不调用它；唯一调用方是 Debug 专属的 UI Harness。
+    /// </summary>
+    public void ReplaceProbe(INetworkInterfaceProbe? probe)
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _probe = probe ?? IpHelperNetworkProbe.Instance;
+            _lastSampleUtc = default;                 // 换源 ⇒ 丢掉时间窗口
+            _selection = _probe.SelectInterface(_destinations, _log);
+            _lastSelectUtc = _time.GetUtcNow().UtcDateTime;
+            _estimator.Reset();                       // 计数器基线不可比，必须重建
+            _snapshot = BuildSnapshot(_time.GetUtcNow().UtcDateTime, StateForSelection(_selection, default, false),
+                default, false, _selection.Reason, NetworkSampleOutcome.InterfaceUnavailable);
+            _log?.Information("网卡吞吐探针已替换：{Reason}", _selection.Reason);
+        }
+    }
+#endif
 
     /// <summary>更新目标地址（例如 DNS 解析完成、或用户改了目标）并立即重选接口；不启动采样。</summary>
     public void UpdateDestinations(IReadOnlyCollection<IPAddress>? destinations)

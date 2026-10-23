@@ -19,7 +19,15 @@ namespace PCMig.WinUI.Views;
 ///     CurrentObjectStatus  → <see cref="HintObjectText"/>（空则折叠）
 ///     UserHint             → <see cref="HintUserText"/>（空则折叠）
 ///     ErrorSummary         → <see cref="HintErrorText"/>（空则折叠；状态行的图标/文案同步变化）
-///   SecurityHint 按 §9 的映射**不进本卡**，它落在 Step 2 的「连接与安全提示」卡。
+///     SecurityHint         → <see cref="HintSecurityText"/>（空则折叠）
+///
+/// ★ R2 接手修复 · 缺陷 G（2026-10-17）★
+///   上一行原本写的是「SecurityHint 按 §9 的映射**不进本卡**，它落在 Step 2 的
+///   『连接与安全提示』卡」。但那张卡在 Issue 6（2026-10-14 真机验收）按用户指示移除后，
+///   这条通道就**没有任何落点**了：VM 一直在写、枚举一直在，用户永远看不到。
+///   现在落点收回本卡（四页共用、可滚动、自适应高度），Step2 右栏那张会溢出的卡不再复活。
+///   区分度：安全提示不是错误，用普通正文色而非 WarningBrush ——
+///   「本次未提供密码」在 Windows 缓存着连接时完全能正常跑完。
 ///
 /// ★ UI Closure 2026-10-05 返修（P0：文字堆叠 / 假滚动条）★
 ///   1) 入场动画**只走 Composition 的 Translation 通道**（<see cref="MotionDirector.PlayLineEntrance"/>）。
@@ -35,6 +43,13 @@ namespace PCMig.WinUI.Views;
 public sealed partial class ShellHintCard : UserControl
 {
     private MigrationSessionViewModel? _session;
+
+    /// <summary>★ Issue 4（2026-10-14）★ 提示卡通道投递追踪开关（PCMIG_HINTCARD_TRACE=1 时启用；静态只读一次）。</summary>
+    private static readonly bool _hintTraceEnabled =
+        string.Equals(Environment.GetEnvironmentVariable("PCMIG_HINTCARD_TRACE"), "1", StringComparison.Ordinal);
+
+    private static int _traceSeq;
+    private static readonly Dictionary<string, uint> _lastTraceHash = new();
 
     /// <summary>
     /// 逐行动画策略（语义级，不看"字符串是否不同"就播）：
@@ -64,13 +79,17 @@ public sealed partial class ShellHintCard : UserControl
 
     private readonly Dictionary<TextBlock, LineMotionState> _lineMotion = new();
 
-    /// <summary>本卡订阅的通道属性（只有这四条会刷新本卡；进度类高频属性不订阅）。</summary>
+    /// <summary>本卡订阅的通道属性（只有这几条会刷新本卡；进度类高频属性不订阅）。</summary>
     private static readonly string[] WatchedProperties =
     [
         nameof(MigrationSessionViewModel.OperationalStatus),
         nameof(MigrationSessionViewModel.UserHint),
         nameof(MigrationSessionViewModel.ErrorSummary),
         nameof(MigrationSessionViewModel.CurrentObjectStatus),
+        // ★ R2 接手修复 · 缺陷 G ★ 安全提示通道（SecurityHint）。
+        //   它此前既没有落点、也不在本清单里 —— 双保险地"看不见"。
+        //   现在落点是本卡的 HintSecurityText，因此必须在这里订阅，否则控件写了也永不刷新。
+        nameof(MigrationSessionViewModel.SecurityHint),
     ];
 
     public ShellHintCard()
@@ -103,9 +122,67 @@ public sealed partial class ShellHintCard : UserControl
         {
             if (string.Equals(name, e.PropertyName, StringComparison.Ordinal))
             {
+                // ★ Issue 4 诊断（2026-10-14）★ 左侧提示框疑似重复显示时，
+                //   需要能回答"是用户重复操作，还是程序重复生成通知"。
+                //   这里记录每一次**通道属性变更抵达本卡**的事件，带足够三元组做关联：
+                //     seq        = 本次会话内第几次投递（连续递增，重复投递会连号出现）
+                //     channel    = 哪个通道（OperationalStatus / UserHint / ErrorSummary / CurrentObjectStatus）
+                //     textHash   = 文本内容哈希（同文本重复抵达 = 文本哈希相同）
+                //     sameText   = 与上一次同通道文本是否完全相同（true 且连续出现 ⇒ 重复通知）
+                //     ticks      = 时刻（Environment.TickCount64，毫秒）
+                //   未设 PCMIG_HINTCARD_TRACE=1 时本段立即返回，零开销、零输出。
+                HintTrace(name, _session);
                 Apply(_session);
                 return;
             }
+        }
+    }
+
+    /// <summary>
+    /// ★ Issue 4（2026-10-14）★ 提示卡通道投递追踪（仅在 <c>PCMIG_HINTCARD_TRACE=1</c> 时输出）。
+    ///
+    /// 用途：判定"左侧提示框重复显示"属于哪一种 ——
+    ///   · A 用户重复操作：不同时刻、文本不同（或用户点了两次同一按钮 ⇒ 两次独立投递，间隔明显）；
+    ///   · B 程序重复生成通知：同一文本在极短间隔内**连续多次**投递（seq 连号、textHash 相同、sameText=true）。
+    ///
+    /// 只读、只写日志，**绝不改变**任何通道值或 UI 行为（诊断不得成为业务逻辑依赖，PMML-R8）。
+    /// </summary>
+    private static void HintTrace(string channel, MigrationSessionViewModel? session)
+    {
+        if (!_hintTraceEnabled) return;
+        try
+        {
+            var text = channel switch
+            {
+                nameof(MigrationSessionViewModel.OperationalStatus) => session?.OperationalStatus,
+                nameof(MigrationSessionViewModel.UserHint) => session?.UserHint,
+                nameof(MigrationSessionViewModel.ErrorSummary) => session?.ErrorSummary,
+                nameof(MigrationSessionViewModel.CurrentObjectStatus) => session?.CurrentObjectStatus,
+                _ => null,
+            } ?? string.Empty;
+
+            var hash = Hash(text);
+            var same = _lastTraceHash.TryGetValue(channel, out var prev) && prev == hash;
+            _lastTraceHash[channel] = hash;
+
+            var seq = System.Threading.Interlocked.Increment(ref _traceSeq);
+            System.Diagnostics.Debug.WriteLine(
+                $"[HintTrace] seq={seq} ticks={Environment.TickCount64} channel={channel} sameText={same} textHash={hash:X8} len={text.Length}");
+        }
+        catch
+        {
+            // 诊断绝不外抛（诊断失败不得影响文本内容本身）。
+        }
+    }
+
+    private static uint Hash(string s)
+    {
+        // FNV-1a 32 位：只看"同一文本是否重复抵达"，不做安全用途。
+        unchecked
+        {
+            var h = 2166136261u;
+            foreach (var c in s) { h ^= c; h *= 16777619u; }
+            return h;
         }
     }
 
@@ -115,17 +192,29 @@ public sealed partial class ShellHintCard : UserControl
         var currentObject = session?.CurrentObjectStatus ?? string.Empty;
         var userHint = session?.UserHint ?? string.Empty;
         var errorSummary = session?.ErrorSummary ?? string.Empty;
+        // ★ R2 接手修复 · 缺陷 G ★ 安全提示是**独立通道**，与错误摘要分开显示：
+        //   「未提供密码」不是错误（Windows 缓存着连接就照样能跑），混进 WarningBrush 会误导用户。
+        var securityHint = session?.SecurityHint ?? string.Empty;
 
         SetLine(HintOperationalText, string.IsNullOrWhiteSpace(operational) ? "就绪" : operational,
             LineEntrancePolicy.FlowStatus);
         SetLine(HintObjectText, currentObject, LineEntrancePolicy.ObjectSwitch);
         SetLine(HintUserText, userHint, LineEntrancePolicy.AppearOnly);
         SetLine(HintErrorText, errorSummary, LineEntrancePolicy.AppearOnly);
+        SetLine(HintSecurityText, securityHint, LineEntrancePolicy.AppearOnly);
 
-        // 状态行：错误摘要通道决定它是"暂无报错"还是"有需要处理的项"（不是硬编码的假绿）。
+        // 状态行：错误摘要 > **检查结论** > 兜底（不是硬编码的假绿）。
+        // ★ 真机问题 2（2026-10-21）★ 旧实现只有两态：「有需要处理的项」/「暂无报错」。
+        //   现场「预检通过但有 1 条测速提醒」被显示成绿色的「暂无报错」，与提示区那句
+        //   "Access is denied" 直接矛盾 —— 用户读成"既没问题又有问题"。
+        //   现在读 CheckSummary（「检查通过 · 1 条提醒」），有提醒时用警示色而不是成功色。
         var hasError = !string.IsNullOrWhiteSpace(errorSummary);
-        HintStatusText.Text = hasError ? "有需要处理的项（见上）" : "暂无报错";
-        var brushKey = hasError ? "WarningBrush" : "SuccessBrush";
+        var checkSummary = session?.CheckSummary ?? string.Empty;
+        var notices = session?.CheckNoticeCount ?? 0;
+        HintStatusText.Text = hasError
+            ? "有需要处理的项（见上）"
+            : !string.IsNullOrWhiteSpace(checkSummary) ? checkSummary : "暂无报错";
+        var brushKey = hasError || notices > 0 ? "WarningBrush" : "SuccessBrush";
         if (Application.Current.Resources.TryGetValue(brushKey, out var brush) && brush is Brush b)
         {
             HintStatusIcon.Foreground = b;

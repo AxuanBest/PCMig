@@ -121,7 +121,14 @@ public sealed record ProgressTruthSnapshot(
         if (source == ProgressTruthSource.TargetStat && !targetStatTrusted) source = ProgressTruthSource.None;
         if (inFlight == 0) source = ProgressTruthSource.None;
 
-        var upper = plannedBytes > 0 ? Math.Max(plannedBytes, committed) : long.MaxValue;
+        // ★ v0.5.4 Preview.1 进度真值修复（2026-10-15）★
+        //   旧实现写的是 `Math.Max(plannedBytes, committed)`：它在 committed > plannedBytes 时
+        //   **主动把上界抬高到 committed**，于是 displayed 可以越过计划总量，再靠下面的
+        //   Math.Min(100.0, ...) 把百分比压成 100 —— 真机 JOB-20261014-143502-b5dc 就是这样
+        //   出现 `completedBytes=188,773,387,733 > totalBytes=139,974,393,729` 且 `percent=100`。
+        //   进度分子的可计上界只能是计划总量本身：超过它的部分必然是重复结算或来源污染，
+        //   不能靠"抬高上界"把它变成合法值。这里不再放弃封顶。
+        var upper = plannedBytes > 0 ? plannedBytes : long.MaxValue;
         var displayed = Math.Min(committed + inFlight, upper);
 
         double percent;
@@ -132,7 +139,13 @@ public sealed record ProgressTruthSnapshot(
         }
         else
         {
-            percent = settled ? 100.0 : 0.0;
+            // ★ R2 接手修复 · 缺陷 H（S-4/M-2）★ 计划字节未知时**绝不给 100%**。
+            //   旧实现写 `settled ? 100.0 : 0.0`，于是只要 settled（且 settled 的来源还包含
+            //   CompletedWithErrors）就能拿到 100 —— 这是完全绕开 IsTrustworthyCompletion 的
+            //   第二个 100% 源头，外壳兜底通路 `displayTruth?.Percent` 正是从这里取到 100 的。
+            //   语义上"不知道计划量"不等于"已经传完"：计划未知时没有任何办法证明传完了。
+            //   与外壳口径一致地封顶 99.9（同一个常量，避免两处各写一个数而漂移）。
+            percent = settled ? TransferOrchestrator.SettledPercentCapPublic : 0.0;
         }
         percent = Math.Clamp(percent, 0.0, 100.0);
 

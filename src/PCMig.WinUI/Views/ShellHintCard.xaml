@@ -92,6 +92,18 @@
                         <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap" Visibility="Collapsed"
                                    Foreground="{StaticResource WarningBrush}"
                                    x:Name="HintErrorText"/>
+
+                        <!-- ★ R2 接手修复 · 缺陷 G（2026-10-17）★ 安全提示（SecurityHint；为空则折叠）。
+                             这条通道自 Issue 6（真机验收）移除 Step2 右栏「连接与安全提示」卡后，
+                             VM 一直在写、StatusChannel 也一直在，但**没有任何 UI 落点** ——
+                             用户永远看不到「本次未提供密码，若 Windows 仍缓存着连接可正常继续，
+                             否则会以共享不可用失败」这类提示。
+                             落点选在这里（四页共用的提示卡），而不是加回 Step2 右栏：
+                             那张卡是右栏溢出 62.5 DIP 的直接原因，加回去会在 200% DPI 下重新溢出。
+                             本卡是滚动 + 自适应高度，多一行不会撑破布局。
+                             用第三档图标色（不是 WarningBrush）区分：它是"请注意"而不是"出错了"。 -->
+                        <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap" Visibility="Collapsed"
+                                   x:Name="HintSecurityText"/>
                     </StackPanel>
                 </Grid>
             </ScrollViewer>

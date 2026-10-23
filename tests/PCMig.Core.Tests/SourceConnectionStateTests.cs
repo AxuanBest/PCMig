@@ -118,7 +118,10 @@ public class SourceConnectionStateTests
         //   灯的唯一入口是 NotifyShareReachability —— 契约就写在它身上，这里锁住这句话，
         //   防止后来有人把"某个文件被锁"当成"共享挂了"顺手送进来。
         var code = ReadRepoFile("src", "PCMig.WinUI", "Presentation", "ConnectionViewModel.cs");
-        var sig = code.IndexOf("internal void NotifyShareReachability(string target, bool reachable, string evidence)", StringComparison.Ordinal);
+                // ★ 2026-10-24（R1-6B 复审）★ 用**前缀**匹配签名：该方法后来加了可选参数
+        //   `bool authoritative = false`（权威失效不得降级成子路径诊断），
+        //   把整串写死会让"加了参数"被误报成"入口被改名"。契约要锁的是"这个入口还在且只有它一个"。
+        var sig = code.IndexOf("internal void NotifyShareReachability(string target, bool reachable, string evidence", StringComparison.Ordinal);
         Assert.True(sig > 0, "找不到 NotifyShareReachability（灯的唯一入口被改名了？）");
         var funnel = code.Substring(Math.Max(0, sig - 420), Math.Min(1100, code.Length - Math.Max(0, sig - 420)));
         Assert.Contains("32", funnel);
@@ -180,7 +183,7 @@ public class SourceConnectionStateTests
     }
 
     [Fact]
-    public void C2_IndicatorProjectsSixStatesFromThemeTokens_NotHardcodedColors()
+    public void C2_IndicatorProjectsFourLampStatesFromThemeTokens_NotHardcodedColors()
     {
         var code = ReadRepoFile("src", "PCMig.WinUI", "MainWindow.xaml.cs");
 
@@ -188,25 +191,31 @@ public class SourceConnectionStateTests
         Assert.Contains("private const string SourceStateConnectingBrushKey = \"WarningBrush\";", code);
         Assert.Contains("private const string SourceStateDisconnectedBrushKey = \"DangerBrush\";", code);
 
-        var body = MethodWindow(code, "private void UpdateSourceConnectionIndicator()", 3200);
+        var body = MethodWindow(code, "private void UpdateSourceConnectionIndicator()", 5200);
 
         // 颜色取自主题 Token（此处不写死 #RRGGBB），且颜色不是唯一通道：状态名必须可读。
         Assert.Contains("SourceStateDot.Fill = brush;", body);
         Assert.Contains("源连接：已连接", body);
         Assert.Contains("源连接：正在连接", body);
         Assert.Contains("源连接：未连接", body);
-        // ★ P0-05 ★ 三态之外还必须有可读的"未知 / 部分可用 / 正在重试"，否则琥珀色的三种含义
-        //   对屏幕阅读器完全无法区分（颜色不是唯一通道）。
-        Assert.Contains("源连接：部分共享不可用", body);
-        Assert.Contains("源连接：状态未知", body);
-        Assert.Contains("源连接：已失效，正在重试", body);
-        // ★ P0-05 ★ 未知/部分可用/重试必须走琥珀，不得进绿灯分支（未知绝不当绿）。
-        Assert.Contains("SourceConnectionState.Partial => SourceStateConnectingBrushKey", body);
-        Assert.Contains("SourceConnectionState.SuspectOrUnknown => SourceStateConnectingBrushKey", body);
-        Assert.Contains("SourceConnectionState.Recovering => SourceStateConnectingBrushKey", body);
-        // ★ P0-05 ★ 一个点说不清"哪条共享坏了"：状态详情必须可读（屏幕阅读器 HelpText + 悬停 ToolTip）。
-        Assert.Contains("AutomationProperties.SetHelpText(SourceStateDot, ViewModel.SourceStateDetail)", body);
-        Assert.Contains("ToolTipService.SetToolTip(SourceStateDot, ViewModel.SourceStateDetail)", body);
+        // ★ 2026-10-24（用户冻结的四态灯定义）★ 用户可见**只有四态**：
+        //   红常亮 / 黄呼吸 / 绿常亮 / 绿呼吸。内部 Partial、SuspectOrUnknown、Recovering
+        //   一律不得再出现在灯色分支里 —— 它们要么按"灯作用域"回到绿或红，要么只活在文字与诊断里。
+        //   （这条不是放松：它同时禁止了第五种灯色，比原来更严。）
+        Assert.Contains("SourceLampState.Connected => SourceStateConnectedBrushKey", body);
+        Assert.Contains("SourceLampState.Transferring => SourceStateConnectedBrushKey", body);
+        Assert.Contains("SourceLampState.Connecting => SourceStateConnectingBrushKey", body);
+        Assert.Contains("_ => SourceStateDisconnectedBrushKey", body);
+        Assert.DoesNotContain("SourceConnectionState.Partial =>", body);
+        Assert.DoesNotContain("SourceConnectionState.SuspectOrUnknown =>", body);
+        Assert.DoesNotContain("SourceConnectionState.Recovering =>", body);
+        Assert.DoesNotContain("SourceConnectionState.Connecting =>", body);
+        // ★ 2026-10-24 ★ 一个点说不清"哪条共享坏了、这盏灯代表谁"：无障碍说明与悬停提示必须
+        //   同时带上"作用域 + X/Y"与诊断详情（四态不新增视觉通道，这么多信息只能走文字通道）。
+        Assert.Contains("AutomationProperties.SetHelpText(SourceStateDot, lampHelp)", body);
+        Assert.Contains("ToolTipService.SetToolTip(SourceStateDot, lampHelp)", body);
+        Assert.Contains("ViewModel.LampScopeSummary", body);
+        Assert.Contains("ViewModel.SourceStateDetail", body);
         Assert.DoesNotContain("#", body.Replace("#x", string.Empty));
     }
 
@@ -214,17 +223,22 @@ public class SourceConnectionStateTests
     public void C3_LampBreathesOnlyWhileWorking_AndItIsComposition_NotDispatcherTimer()
     {
         var window = ReadRepoFile("src", "PCMig.WinUI", "MainWindow.xaml.cs");
-        var body = MethodWindow(window, "private void UpdateSourceConnectionIndicator()", 2600);
+        var body = MethodWindow(window, "private void UpdateSourceConnectionIndicator()", 5200);
 
         // 只有"正在连接"与"已确认失效、正在重探"呼吸；Partial / SuspectOrUnknown 是静止结论，常亮。
-        Assert.Contains("if (state is SourceConnectionState.Connecting or SourceConnectionState.Recovering)", body);
+        // ★ 真机问题 1（2026-10-21）★ 传输中必须是**绿色呼吸**（已连接 + 有真实字节增长），
+        //   因此 Transferring 也进呼吸分支 —— 但它的画刷走 SuccessBrush，不是 WarningBrush。
+        // ★ 2026-10-24（四态定义）★ 只有"黄呼吸=正在连接"与"绿呼吸=已连接且确实在传输"会呼吸。
+        Assert.Contains("if (state is SourceLampState.Connecting or SourceLampState.Transferring)", body);
+        Assert.Contains("SourceLampState.Transferring => SourceStateConnectedBrushKey", body);
         Assert.Contains("MotionDirector.PlaySourceBreathing(SourceStateDot);", body);
         Assert.Contains("else MotionDirector.ResetSourceBreathing(SourceStateDot);", body);
         // 用户明令：呼吸不得用 DispatcherTimer 改颜色（那会变成生硬的开/关闪烁）。
         Assert.DoesNotContain("DispatcherTimer", body);
 
         var motion = ReadRepoFile("src", "PCMig.WinUI", "Presentation", "MotionDirector.cs");
-        var breath = MethodWindow(motion, "public static void PlaySourceBreathing(FrameworkElement? element)", 2200);
+        // 窗口必须覆盖到 CreateSineBreath 内部（当前实测偏移 2748，留足余量避免注释增删后脆弱）。
+        var breath = MethodWindow(motion, "public static void PlaySourceBreathing(FrameworkElement? element)", 4200);
 
         Assert.Contains("ElementCompositionPreview.GetElementVisual(element)", breath);
         Assert.Contains("visual.StartAnimation(\"Opacity\", breath);", breath);
@@ -236,9 +250,87 @@ public class SourceConnectionStateTests
         Assert.Contains("SourceBreathDurationKey", breath);
         Assert.Contains("SourceBreathMinOpacityKey", breath);
 
+        // ★ Preview.6（2026-10-22 真机视频）★ 呼吸参数：用户指定 1.8~2.4 s 一个完整周期、本体不得明显消失。
         var xaml = ReadRepoFile("src", "PCMig.WinUI", "Themes", "Motion.xaml");
-        Assert.Contains("<Duration x:Key=\"PCMigMotionSourceBreathDuration\">0:0:1.05</Duration>", xaml);
-        Assert.Contains("<x:Double x:Key=\"PCMigMotionSourceBreathMinOpacity\">0.35</x:Double>", xaml);
+        Assert.Contains("<Duration x:Key=\"PCMigMotionSourceBreathDuration\">0:0:2.0</Duration>", xaml);
+        Assert.Contains("<x:Double x:Key=\"PCMigMotionSourceBreathMinOpacity\">0.45</x:Double>", xaml);
+    }
+
+    // ★ Preview.6（2026-10-22 真机视频 20261022-0737-46）★ 绿色活动态"定频闪灭"的根因回归。
+    //
+    // 根因不是"周期短"，而是：底栏 80 ms 节拍 + 每次 PushFooter 都会调 UpdateSourceConnectionIndicator，
+    // 旧 PlaySourceBreathing 每次都 StopAnimation + StartAnimation，且关键帧 0f 起点是最低亮度
+    // ⇒ 时间线每 80 ms 被打回 t=0 ⇒ 圆点永远停在暗部，肉眼就是"一盏定频闪灭的灯"。
+    // 下面断言锁死修复后的不变量（纯源码契约测试：WinUI 控件在 Core.Tests 里无法实例化）。
+    [Fact]
+    public void C5_BreathIsIdempotent_NoPhaseResetOnRepeatedTicks()
+    {
+        var motion = ReadRepoFile("src", "PCMig.WinUI", "Presentation", "MotionDirector.cs");
+
+        // ① 幂等闸门必须存在于 PlaySourceBreathing 里，并且在 StopAnimation **之前**就返回。
+        var breath = MethodWindow(motion, "public static void PlaySourceBreathing(FrameworkElement? element)", 4200);
+        var gateReturn = breath.IndexOf("active == signature) return;", StringComparison.Ordinal);
+        var stop = breath.IndexOf("visual.StopAnimation(\"Opacity\");", StringComparison.Ordinal);
+        Assert.True(gateReturn > 0, "PlaySourceBreathing 缺少幂等闸门：重复调用会重置相位（真机定频闪灭的直接原因）");
+        Assert.True(stop > 0, "PlaySourceBreathing 找不到 StopAnimation");
+        Assert.True(gateReturn < stop, "幂等闸门必须在 StopAnimation 之前返回，否则仍会每次重建动画");
+
+        // ② 幂等状态必须挂在元素上且随元素回收（ConditionalWeakTable，不累积、不泄漏）。
+        Assert.Contains("ConditionalWeakTable<FrameworkElement, BreathSignature>", motion);
+        Assert.Contains("ActiveBreaths.AddOrUpdate(element, signature);", motion);
+
+        // ③ 呼吸曲线必须是正弦型（端点速度为零），且**起点亮度是 1.0**（切换瞬间不得突然变暗）。
+        var sine = MethodWindow(motion, "private static ScalarKeyFrameAnimation CreateSineBreath(", 2000);
+        Assert.Contains("Math.Cos(2.0 * Math.PI * t)", sine);
+        Assert.Contains("breath.InsertKeyFrame(0f, 1f);", sine);
+        Assert.Contains("AnimationIterationBehavior.Forever", sine);
+
+        // ④ 常亮复位也必须幂等：本来就没在呼吸且已不透明 ⇒ 空操作。
+        var reset = MethodWindow(motion, "public static void ResetSourceBreathing(FrameworkElement? element)", 1400);
+        Assert.Contains("ActiveBreaths.Remove(element);", reset);
+        Assert.Contains("if (!wasBreathing && element.Opacity >= 1.0) return;", reset);
+    }
+
+    [Fact]
+    public void C6_IndicatorProjectionAndStateNotifiesAreIdempotent()
+    {
+        // 信号源侧：状态没变 ⇒ 不广播（否则底栏灯每 80 ms 被叫醒一次）。
+        var conn = ReadRepoFile("src", "PCMig.WinUI", "Presentation", "ConnectionViewModel.cs");
+        var update = MethodWindow(conn, "private void UpdateSourceState()", 4200);
+        Assert.Contains("RaiseIfChanged(ref _stateDetailSnapshot, SourceStateDetail, nameof(SourceStateDetail));", update);
+        Assert.DoesNotContain("Raise(nameof(SourceStateDetail));", update);
+        Assert.DoesNotContain("Raise(nameof(UnreachableShares));", update);
+        Assert.DoesNotContain("Raise(nameof(VerifiedReachableTargets));", update);
+        // 派生属性每次新建 List ⇒ 必须按内容比较，不能比引用。
+        Assert.Contains("(IReadOnlyList<string> a, IReadOnlyList<string> b) => a.SequenceEqual(b, StringComparer.Ordinal)", conn);
+
+        // 消费侧：投影本身也必须幂等，且闸门在"设画刷 / 进 MotionDirector"之前返回。
+        var window = ReadRepoFile("src", "PCMig.WinUI", "MainWindow.xaml.cs");
+        var body = MethodWindow(window, "private void UpdateSourceConnectionIndicator()", 5200);
+        var gate = body.IndexOf("_sourceIndicatorProjection is { } previous", StringComparison.Ordinal);
+        var fill = body.IndexOf("SourceStateDot.Fill = brush;", StringComparison.Ordinal);
+        Assert.True(gate > 0, "UpdateSourceConnectionIndicator 缺少幂等闸门");
+        Assert.True(fill > 0, "UpdateSourceConnectionIndicator 找不到画刷赋值");
+        Assert.True(gate < fill, "幂等闸门必须在画刷赋值之前返回");
+        Assert.Contains("previous.State == state", body);
+        Assert.Contains("string.Equals(previous.Detail, detail, StringComparison.Ordinal)", body);
+    }
+
+    [Fact]
+    public void C7_StateSemanticsUnchanged_OnlyTransferringStaysAnimatedGreen()
+    {
+        var window = ReadRepoFile("src", "PCMig.WinUI", "MainWindow.xaml.cs");
+        var body = MethodWindow(window, "private void UpdateSourceConnectionIndicator()", 5200);
+        // ★ 2026-10-24（四态定义）★ 绿呼吸只属于 Transferring；Connected 绿常亮；Connecting 琥珀呼吸。
+        Assert.Contains("SourceLampState.Transferring => SourceStateConnectedBrushKey", body);
+        Assert.Contains("SourceLampState.Connected => SourceStateConnectedBrushKey", body);
+        Assert.Contains("SourceLampState.Connecting => SourceStateConnectingBrushKey", body);
+        Assert.Contains("if (state is SourceLampState.Connecting or SourceLampState.Transferring)", body);
+        // 暂停可立即熄呼吸（只允许"退出活动位"），亮呼吸仍只能由呈现节拍依据网卡/引擎证据决定。
+        var session = ReadRepoFile("src", "PCMig.WinUI", "Presentation", "MigrationSessionViewModel.cs");
+        var flag = MethodWindow(session, "private void SyncTransferActivityFlag(bool active)", 900);
+        Assert.Contains("if (active) return;", flag);
+        Assert.Contains("SyncTransferActivity(false,", flag);
     }
 
     [Fact]

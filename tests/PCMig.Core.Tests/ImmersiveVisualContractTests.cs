@@ -141,6 +141,14 @@ public sealed class ImmersiveChromaContractTests
     private static string Renderer() =>
         ReadRepoFile("src", "PCMig.WinUI", "Controls", "ImmersiveProgress", "ImmersiveTransferProgressRenderer.cs");
 
+    /// <summary>取一个方法的窗口文本（用于"这个方法必须/不得包含 X"这类结构契约）。</summary>
+    private static string MethodWindow(string text, string signature, int length)
+    {
+        var i = text.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(i >= 0, $"找不到方法签名：{signature}");
+        return text.Substring(i, Math.Min(length, text.Length - i));
+    }
+
     // ── R32-①：Fill 必须是**锚定整个 Track 宽度**的水平色场，而不是进度宽度 ────────
     [Fact]
     public void ChromaFieldIsAnchoredToTrackWidthNotProgressWidth()
@@ -204,11 +212,26 @@ public sealed class ImmersiveChromaContractTests
     {
         var code = Renderer();
 
-        // 必须是两层径向（椭圆）光场
-        Assert.Contains("CanvasRadialGradientBrush", code);
-        Assert.Contains("_haloOuterBrush", code);
-        Assert.Contains("_haloInnerBrush", code);
-        Assert.Contains("ds.FillEllipse", code);
+        // ★ 2026-10-21 真机问题 4 重设计（用户判词：孤立、明显呈圆形的模糊泛光，视觉粗糙）★
+        //   旧契约锁的是"两层同心椭圆径向光场"—— 那正是被判为缺陷的形态：
+        //   在 12 DIP 厚的条上，横向半径 24 DIP 的椭圆等于直径 48 DIP 的对称光斑，大半溢出轨道外，
+        //   既不属于填充条形态，也不表达运动方向。
+        //   新契约锁的是"贴住填充终点的非对称光带"，判据更强：
+        //     ① 必须是**横向**线性渐变 + 非对称剖面（不再是径向/椭圆）；
+        //     ② 必须被**填充胶囊**裁剪（旧实现刻意不裁剪，正是"飘在条外"的来源）；
+        //     ③ 位置必须锚定 HeadX（不是固定坐标）；
+        //     ④ 椭圆/圆形填充必须彻底消失（FillEllipse 一旦回来立刻变红）。
+        Assert.Contains("CanvasLinearGradientBrush? _headEdgeBrush", code);
+        Assert.Contains("HeadEdgeStops", code);
+        Assert.Contains("private static void DrawHeadEdge(", code);
+        Assert.DoesNotContain("FillEllipse", code);
+
+        var headBody = MethodWindow(code, "private bool DrawHead(", 3200);
+        Assert.Contains("CreateLayer(1f, capsule)", headBody);        // 只能在已完成区域内
+        Assert.Contains("if (capsule is null) return false;", headBody);
+
+        var edgeBody = MethodWindow(code, "private static void DrawHeadEdge(", 1600);
+        Assert.Contains("var head = (float)m.HeadX;", edgeBody);      // 锚定真实前沿
 
         // ★ 关键回归：旧版那圈可辨识的白色锐光弧必须彻底不在 —— 断言按**元素用法**精确匹配，
         //   避免命中注释里对该类名/常量的文字提及（先例：Assert.DoesNotContain 会被自己的注释命中）。
@@ -217,14 +240,16 @@ public sealed class ImmersiveChromaContractTests
         Assert.DoesNotContain("_headRimArc is not null", code);
         Assert.DoesNotContain("ImmersiveProgressParameters.HeadRimThickness", code);
 
-        // 光场剖面必须两端为 0（无硬边界）
-        Assert.Contains("HaloRadialStops", code);
-        Assert.Contains("Position = 1.00f, Color = WithAlpha(color, 0.00f)", code);
+        // 光带剖面必须从 0 单调升到峰值（有方向、无硬边界），且旧的三层椭圆参数必须已删除。
+        Assert.Contains("Position = 1.00f, Color = WithAlpha(color, 1.00f)", code);
+        Assert.Contains("Position = 0.00f, Color = WithAlpha(color, 0.00f)", code);
+        Assert.DoesNotContain("HeadHaloOuterRadiusX", code);
+        Assert.DoesNotContain("HaloRadialStops", code);
 
-        // 光场中心必须在 Head **后方**
+        // 参数侧：拖尾长度与峰值内缩必须存在（这两者共同表达"方向"）。
         var p = ReadRepoFile("src", "PCMig.WinUI", "Controls", "ImmersiveProgress", "ImmersiveProgressParameters.cs");
-        Assert.Contains("HeadHaloCenterBackOffset", p);
-        Assert.Contains("m.HeadX - ImmersiveProgressParameters.HeadHaloCenterBackOffset", code);
+        Assert.Contains("HeadEdgeTailLength", p);
+        Assert.Contains("HeadEdgePeakInset", p);
     }
 }
 

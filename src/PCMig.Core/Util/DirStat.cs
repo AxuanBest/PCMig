@@ -1,3 +1,5 @@
+using PCMig.Core.Transfer;
+
 namespace PCMig.Core.Util;
 
 /// <summary>
@@ -61,7 +63,8 @@ public static class DirStat
     public static Stat Measure(string root, long largeFileThresholdBytes,
         ISet<string>? excludeDirs = null, IEnumerable<string>? excludeFiles = null,
         Action<string, string>? onInaccessible = null, bool skipPlaceholders = false,
-        bool probeLockRisk = true)
+        bool probeLockRisk = true,
+        bool skipQuarantineOldCopies = false)
     {
         var stat = new Stat { LargeFileThresholdBytes = largeFileThresholdBytes };
         if (!Directory.Exists(root)) { stat.Incomplete = true; return stat; }
@@ -88,6 +91,17 @@ public static class DirStat
                     if (e is FileInfo fi)
                     {
                         if (fileMatch != null && fileMatch(fi.Name)) continue;
+                        // ★ v0.5.4 Preview.2 进度真值修复（2026-10-15）★
+                        //   「强制覆盖」会把目标侧同名旧文件**改名为 <原名>.pcmig-old-<时间戳>**
+                        //   留在**同一个目录**里（见 RepairQuarantine）。它不是本轮传输的产物，
+                        //   却会被全递归统计当成"已落盘字节"计入对象结算量。
+                        //   真机证据（JOB-20261014-143502-b5dc / object-000004）：
+                        //     计划 66.089 GB 的对象，结算实测 111.536 GB；
+                        //     同一 robocopy 末块的「其他」列恰为 55.777 GB（= 被隔离的旧副本），
+                        //     而 55.758 GB(新副本) + 55.777 GB(旧副本) = 111.535 GB ≈ 实测值。
+                        //   ⇒ 旧副本被重复计入一次，使 TargetBytes 虚高约一倍。
+                        //   默认 false：其它调用方（扫描/预检/验证）口径不变，只有进度结算显式打开。
+                        if (skipQuarantineOldCopies && RepairQuarantine.IsQuarantinedOldCopy(fi.Name)) continue;
                         var attr = fi.Attributes;
                         // 云占位符：RECALL_ON_DATA_ACCESS 或 OFFLINE（OneDrive Files-On-Demand 两者兼有）
                         var isPlaceholder = (attr & CloudPlaceholderAttr) == CloudPlaceholderAttr

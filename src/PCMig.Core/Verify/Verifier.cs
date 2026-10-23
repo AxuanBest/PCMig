@@ -3,6 +3,7 @@ using PCMig.Core.Diagnostics;
 using PCMig.Core.Jobs;
 using PCMig.Core.Matrix;
 using PCMig.Core.Models;
+using PCMig.Core.Transfer;   // ★ v0.5.4 Preview.2 ★ RepairQuarantine.IsQuarantinedOldCopy：校验侧排除隔离旧副本
 using PCMig.Core.Util;
 using PCMig.Diagnostics.Abstractions;
 using PCMig.Diagnostics.Abstractions.Events;
@@ -497,6 +498,12 @@ public sealed class Verifier
 
         _ctx.SaveVerify(report);
 
+        // ★ R2 接手修复 · 缺陷 A ★ 校验结论回流 job-state：
+        //   在此之前 MissingObjects 从未被生产代码赋值，导致
+        //   "迁移报成功、校验发现目标少文件" 依然会被判成可信完成。
+        //   顺序必须在 SaveVerify 之后 —— 先有落盘证据，再有状态变更。
+        VerifyReconciliation.Apply(_ctx, report);
+
         PublishVerify(VerifyEvents.StatsCompletenessObserved,
             new VrfStatsCompletenessPayload(statsCompleteness, evidenceEnumerationErrors, evidenceAnyOverflow, note),
             statsCompleteness == "Complete" ? DiagnosticLevel.Information : DiagnosticLevel.Warning,
@@ -707,6 +714,13 @@ public sealed class Verifier
                     if (e is FileInfo fi)
                     {
                         if (exclFileMatch(fi.Name)) continue;
+                        // ★ v0.5.4 Preview.2（2026-10-16 真机 JOB-20261016-150319-e738）★
+                        //   「强制覆盖」隔离出来的旧副本 <原名>.pcmig-old-<时间戳> 留在**原目录**里，
+                        //   它既不是源侧数据、也不是目标侧"多出来的用户文件"。若不排除，校验会把
+                        //   PCMig 自己产生的隔离物报成 "extra-on-target 多余文件"，制造"目标有脏数据"
+                        //   的假象（真机 object-000010 的两趟 attempt 恰好各有 9 个这样的副本）。
+                        //   两侧都排除：源侧理论上不会出现这种名字，但口径必须对称，不留单侧漏洞。
+                        if (RepairQuarantine.IsQuarantinedOldCopy(fi.Name)) continue;
                         if (skipPlaceholders && ((fi.Attributes & DirStat.CloudPlaceholderAttr) == DirStat.CloudPlaceholderAttr
                             || (fi.Attributes & FileAttributes.Offline) == FileAttributes.Offline)) continue;
                         // RootFiles 对象只统计根层文件（★ P0-01：统一经 PathNorm 比较，卷根 D:\ 不再被裁成 D:）
@@ -782,6 +796,13 @@ public sealed class Verifier
                     if (e is FileInfo fi)
                     {
                         if (exclFileMatch(fi.Name)) continue;
+                        // ★ v0.5.4 Preview.2（2026-10-16 真机 JOB-20261016-150319-e738）★
+                        //   「强制覆盖」隔离出来的旧副本 <原名>.pcmig-old-<时间戳> 留在**原目录**里，
+                        //   它既不是源侧数据、也不是目标侧"多出来的用户文件"。若不排除，校验会把
+                        //   PCMig 自己产生的隔离物报成 "extra-on-target 多余文件"，制造"目标有脏数据"
+                        //   的假象（真机 object-000010 的两趟 attempt 恰好各有 9 个这样的副本）。
+                        //   两侧都排除：源侧理论上不会出现这种名字，但口径必须对称，不留单侧漏洞。
+                        if (RepairQuarantine.IsQuarantinedOldCopy(fi.Name)) continue;
                         if (skipPlaceholders && ((fi.Attributes & DirStat.CloudPlaceholderAttr) == DirStat.CloudPlaceholderAttr
                             || (fi.Attributes & FileAttributes.Offline) == FileAttributes.Offline)) continue;
                         if (!PathNorm.BelongsToObjectRoot(obj, obj.SourcePath, fi.FullName))

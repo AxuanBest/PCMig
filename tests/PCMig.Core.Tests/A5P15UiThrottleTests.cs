@@ -643,12 +643,22 @@ public void A12d_StopUiRefresh_StopsPumpAndPreventsRestart()
         Assert.Contains("DispatcherQueueTimer", ReadWinUi("Presentation", "UiFlushPump.cs"), StringComparison.Ordinal);
     }
 
-    /// <summary>去掉 C# 注释（// 与 /* */），只留代码 —— 供"不得出现某类型名"的断言使用。</summary>
-    private static string StripComments(string source)
-    {
-        var noBlock = Regex.Replace(source, @"/\*.*?\*/", string.Empty, RegexOptions.Singleline);
-        return Regex.Replace(noBlock, @"//[^\n]*", string.Empty);
-    }
+    /// <summary>
+    /// 剥掉注释，只留代码 —— 供"不得出现某类型名"这类断言使用。
+    ///
+    /// 【实现已统一到 <see cref="SourceStripper"/> —— 不要在本文件里另写一份】
+    /// 这里曾经是每个测试文件各写一份的块注释正则，而块注释正则会**失控**：
+    /// 文档注释里出现字面量 `/*` 极其常见（例如「禁止定义任何 *Orchestrator/*Runner 类型」
+    /// 这句注释里就有 `/*Runner`），正则把它当成块注释开头后会一路吃到下一个 `*/`，
+    /// 把中间的**全部可执行代码**静默删掉。实测事故：`MigrationSessionViewModel.cs`
+    /// 原文 240,758 B 被吞到只剩 90,929 B（丢 62.2%），而本文件的禁词断言当时之所以"通过"，
+    /// 正是因为被吞掉的那 107 KB 里含有它要找的名字 —— 断言看着在守，其实全瞎。
+    /// 现在统一走状态机实现，并有 <see cref="R2SourceStripperTests"/> 直接盯着它。
+    /// </summary>
+    private static string StripComments(string text) => SourceStripper.StripComments(text);
+
+    /// <summary>单块注释允许的最大跨度（字符）；超过即视为匹配失控。</summary>
+    private const int MaxBlockCommentChars = 4000;
 
     // ────────────────────────── L0：D1 失败清单容量（诚实计数 + 方案 P）──────────────────────────
 

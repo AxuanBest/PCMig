@@ -15,7 +15,13 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!-- ★ v0.5.0 起 ★ 发版脚本 tools\release.ps1 会按 <Version> 写入版本号并做声明式自查，
          因此该节点**必须存在**。v0.5.0 首次发版时此节点缺失，正则匹配不到 ⇒ 被误判为
-         "已是目标版本"跳过 ⇒ 自查失败中止发版。 -->
+         "已是目标版本"跳过 ⇒ 自查失败中止发版。
+         ★ 2026-10-15 修复 R7 ★ 本节点**只表示正式版本基线**，不得写本地实验版本号。
+         本地预览（如 0.5.4-preview.2）一律经构建参数注入：
+           dotnet publish ... -p:Version=0.5.4-preview.2 -p:InformationalVersion=0.5.4-preview.2
+         原因：release.ps1（L114-115 / L132-135）会读这两个节点做正式发版自查；若这里常驻
+         Preview 号，正式版的版本身份会被带偏。Preview 构建脚本见
+         tools\preview-build.ps1（隔离参数，不写仓库默认配置）。 -->
     <Version>0.5.3</Version>
     <InformationalVersion>0.5.3</InformationalVersion>
     <!-- ★ v0.5.0 修复 ★ 应用图标：WinUI 工程此前**没有** <ApplicationIcon>，
@@ -40,6 +46,30 @@
       unpackaged/self-contained 组合；restore/build 一旦失败立即停下报告，不允许退化成 XAML 元素堆。
     -->
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
+  </ItemGroup>
+  <!--
+    ★ 2026-10-22（Preview.6 本机 UI 动画实测）★ 开发者 UI Harness 闸门：
+
+    隔离是**编译期**的，不是运行期开关：
+    - Harness\**\*.cs（含 UiHarness.cs）在 Release 下不参与编译；只有 Debug 才 Include。
+      必须先 Remove 再按条件 Include，否则默认通配会把它们带进 Release。
+    - MainWindow.Harness.cs **两种配置都参与编译**，但整个文件体被 #if DEBUG 包住，
+      因此 Release 下它是空文件，不产生任何类型/方法/字段。
+      之所以不能直接 Remove：它所在的文件是 Release 侧编译单元的一部分时，
+      XAML 生成代码对 MainWindow 的分部类成员解析更稳定；摘除整文件曾尝试过，
+      会让 Release 下 MainWindow 分部类缺少该文件声明的 using 区域，反而更难维护。
+    - 结果：Release 产物中不存在 HarnessRequested / PCMIG_UI_HARNESS / UiHarness /
+      HarnessProjectIndicator / SourceBreathStartCountForHarness / FakeCounterProbe 等全部符号
+      （已用 dll 字节级检索核验，见 RELEASE-ISOLATION-REPORT.md）。
+    - 原先 MainWindow.xaml 里的 HarnessBanner TextBlock 已整体删除，正式界面 XAML 树不再含任何
+      调试元素，也就不再需要运行期的 DropMeasurementBanner() 兜底。
+  -->
+  <!-- 全量剔除后按 Debug 条件加回：顺序不可颠倒 -->
+  <ItemGroup>
+    <Compile Remove="Harness\**\*.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+    <Compile Include="Harness\**\*.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\PCMig.Core\PCMig.Core.csproj" />

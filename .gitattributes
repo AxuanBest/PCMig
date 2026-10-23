@@ -1,0 +1,40 @@
+# PCMig 行尾与二进制归一（2026-10-24 · R1-6D 新增）
+#
+# 为什么需要这个文件：
+#   本仓库此前**没有** .gitattributes，行尾行为完全依赖每个克隆本地的 core.autocrlf。
+#   实测本机 core.autocrlf=true、core.safecrlf=true，于是同一份源码在不同人/不同克隆上
+#   是否被归一化取决于其本地配置 —— 提交出来的 blob 因此不可复现。
+#   接管审计里 61 个已跟踪改动文件中：13 个纯 CRLF、45 个纯 LF、3 个 CRLF/LF 混排。
+#   "混排"文件最危险：它让 diff 里出现无法解释的整行改动，也让收口时按 hunk 甄别变得不可靠。
+#
+# 选型依据（临时副本实测，见 R1 第二阶段复验包）：
+#   · `* text=auto`（本文件的选择）：61 个已改文件 diff 规模 4962+/621-，
+#     与**不加** .gitattributes 时完全一致 ⇒ 零行尾噪声，只是把"归一化"从本地配置
+#     变成仓库内可复现的规则。
+#   · `*.* text eol=lf`（已否决）：会让 11 个文件的 blob 被重写（0 插 0 删但对象变了），
+#     属于典型的"整文件行尾噪声"，且会让 Windows 侧用记事本打开源码时显示异常。
+#
+# 纪律：这里只做**归一化规则**，不做缩进/编码策略；BOM 由各文件自己的字节决定，不在 git 层处理。
+* text=auto
+
+# 真正的二进制：显式声明，避免任何文本归一化（否则 diff 与 SHA256 会漂移）。
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.bmp  binary
+*.ico  binary
+*.exe  binary
+*.dll  binary
+*.pdb  binary
+*.zip  binary
+*.7z   binary
+*.gz   binary
+*.pfx  binary
+*.snk  binary
+*.pri  binary
+*.ttf  binary
+*.otf  binary
+*.woff binary
+*.woff2 binary
+*.pdf  binary

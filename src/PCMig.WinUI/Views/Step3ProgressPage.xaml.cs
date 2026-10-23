@@ -485,18 +485,46 @@ public sealed partial class Step3ProgressPage : UserControl
         // ── 对象明细提示行：运行中给“正在做什么”，非运行态给**阶段**（四态在此彼此可区分）──
         ObjectPaneHintText.Text = DescribePhaseOrActivity(session);
 
-        // ── 文件流提示行：停滞提示优先，否则给真实“最近一条已复制文件” ──
+        // ── 文件流提示行 + 空状态 ──
         //
         // ★ A6（F4，2026-09-30 巡检修复）★ 没有**真实文件流**时这一行必须留空并折叠。
         //   缺陷：复位路径会把 CurrentFileText 置为占位符「—」（MigrationSessionViewModel.cs:2501），
         //   改前它被无条件当作提示行显示，于是空状态卡里出现「当前没有正在复制的文件。」+
         //   一条孤立「—」，两行自相矛盾（巡检截图 2× 实证）。
-        //   语义边界：HasStallHint（停滞提示）是**运行中真实产生的结论**，任何情况下都照实显示；
-        //   只有"还没跑过任何文件、又要拿占位符充数"这一种情况才留空。
+        //
+        // ★ 真机问题 3（2026-10-21）★ 大文件 /J 通道下的核心修正：
+        //   <see cref="MigrationSessionViewModel.LiveFiles"/> 只由**文件复制完成**事件追加，
+        //   而一个 17~20 GB 的 PST 传几十分钟——此期间列表恒空。旧实现只看 hasFiles，
+        //   于是右侧明明在传 103 GiB 的对象，却显示「当前没有正在复制的文件。」
+        //   现在：有**真实对象在传**（引擎快照带 CurrentObjectPath 且 Phase=Running）时，
+        //   空状态位改为诚实的对象级展示——对象名与字节进度都来自引擎真值，不是猜的、不是从历史日志挑的。
+        //   任务令 §6.1 明确禁止为了显示文件名而改动 /MT /J /重试 语义，这里一个字都没动传输参数。
         var hasFiles = session.LiveFiles.Count > 0;
-        var hintText = session.HasStallHint
-            ? session.StallHintText
-            : (hasFiles ? session.CurrentFileText : string.Empty);
+        var objectLevelActive = !hasFiles && session.IsRunning && session.HasCurrentObjectDetail;
+
+        string hintText;
+        if (hasFiles)
+        {
+            hintText = session.HasStallHint ? session.StallHintText : session.CurrentFileText;
+        }
+        else if (objectLevelActive)
+        {
+            var progress = string.IsNullOrWhiteSpace(session.ActiveObjectProgressText)
+                ? string.Empty
+                : $"　·　{session.ActiveObjectProgressText}";
+            hintText = "文件级进度暂不可用：大文件通道按整个文件回报，完成一个文件后才会逐条列出" + progress;
+        }
+        else
+        {
+            hintText = session.HasStallHint ? session.StallHintText : string.Empty;
+        }
+
+        LiveFilesEmptyTitle.Text = objectLevelActive
+            ? $"正在传输对象：{session.ActiveObjectName}"
+            : "当前没有正在复制的文件。";
+        // 图标同步：活动态用"传输中"图标，空闲态用"空文件"图标——避免"没有文件"的图标配"正在传输"的标题。
+        LiveFilesEmptyIcon.Glyph = objectLevelActive ? "\uE8B7" : "\uE8A5";
+
         LiveFilesHintText.Text = hintText;
         LiveFilesHintText.Visibility = string.IsNullOrWhiteSpace(hintText) ? Visibility.Collapsed : Visibility.Visible;
 

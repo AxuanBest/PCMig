@@ -204,6 +204,22 @@ public sealed class TransferOrchestrator
     private string? _stormCode;       // 触发风暴终止的错误码（null=未触发）
     private string? _spaceCode;       // 目标盘空间不足的错误码（T07 熔断：null=未触发）
 
+    // ── ★ Preview.4 真机问题 3（2026-10-22）★ 源共享断链熔断 ──────────────────
+    //   现场证据 JOB-20261022-102929-ab97：`\\192.0.2.12\e\临时` 用 /MT:128 跑 23 分 32 秒，
+    //   15,143 个文件里 7,753 个失败（错误码分布 67×378、6×120，robocopy 统计口径），
+    //   实际只搬了 13.985 GB ⇒ 9.9 MB/s。而原生 robocopy（/MT:32）同一共享 36.259 GB / 15:19 = 39.5 MB/s、0 文件失败。
+    //   差别不在参数，而在**断链之后没有任何人止损**：每个失败文件都要走满 /R:2 /W:5（约 10 秒等待），
+    //   7,753 个文件就是在空转上烧掉的时间。
+    //   既有的"错误风暴"熔断要求错误率 ≥90%，共享断开时仍有一半文件能成功（命中缓存/短路径），
+    //   所以这条熔断永远不会触发 —— 必须用"共享级错误连续出现"这条独立判据。
+    /// <summary>当前 pass 内连续命中的共享级错误数（中间夹非共享级错误即清零）。</summary>
+    private long _shareLossStreak;
+    /// <summary>触发断链熔断的错误码（null=未触发）。</summary>
+    private string? _shareLossCode;
+    /// <summary>连续多少个共享级错误判定为"整条链路断了"。24 ≈ 两分钟空转，足以排除个别坏文件。</summary>
+    internal const int ShareLossAbortAfter = 24;
+
+
     // ---- ★ 缺陷 B12b4（数据完整性）★ 传输**过程中**的源身份守护 ----
     // 只在开跑前校验挡住的是"点续传时源已被换底"这一段；B12b4 的真实链路还有另一段：
     // 换底发生在**首轮传输飞行中**，那时 robocopy 仍在按 UNC 路径取数——共享名没变，
@@ -217,9 +233,43 @@ public sealed class TransferOrchestrator
     private string? _identityLostDetail;
     private static readonly TimeSpan IdentityGuardInterval = TimeSpan.FromSeconds(2);
 
+    // ★ 2026-10-23（真机 P0-06 / 性能专项）★ 身份守护改为**后台单飞、不阻塞调用者**。
+    //
+    // 改前：OnRunnerFileCopied（robocopy 的 stdout 泵线程上的同步回调）第一件事就是
+    //   SourceIdentity.Capture → TcpClient.ConnectAsync(...).Wait(1200) + 共享路径探测(3000)
+    //   ⇒ 单次最坏阻塞 4.2 秒；/TEE 让每一条文件行都走这条路径。
+    //   robocopy 的 stdout 一旦不被读走，它的进度输出就积压、卷帘窗口卡住 ——
+    //   这直接解释了现场"速度看着掉下去又窜上来"的锯齿（B 会话 105 次 job-state 写入间隔里
+    //   出现过 4 秒级空洞）。
+    //
+    // 改后：回调只置一个"该查了"的标志，真正的探测在后台线程跑；同一时刻只允许一个探测在飞。
+    //   判据、基线、KillCurrent 行为一字未改 —— 变的只是"谁来跑"，不是"怎么判"。
+    private int _identityGuardInFlight;       // 0/1，单飞闸门
+    private int _identityGuardPending;        // 0/1，回调请愿位
+
+    // ★ 2026-10-23（Preview.7 收口 P1）★ 后台守护的**运行纪元**，堵住异步化引入的两类竞态：
+    //
+    //   竞态 A（误杀）：后台循环捕获的是**启动那一刻**对象的 path/expected。对象 11 结束后
+    //     进入对象 12（`_guardObjectPath` 已被改写），而对象 11 的那次后台探测才刚返回。
+    //     若不区分，它会把"对象 11 的身份变了"判成当前运行失效 —— 但 `_runner.KillCurrent()`
+    //     杀的是**当前正在跑的对象 12**。这是把上一对象的结论错误施加到下一对象上。
+    //
+    //   竞态 B（跨运行）：RunAsync 返回后（用户暂停/停止/完成），后台循环可能还在 Delay 里。
+    //     此时再调一次 KillCurrent 会命中**下一次运行**刚拉起的 robocopy，属于跨运行污染。
+    //
+    //   解法：每次运行开始和每个对象开始都 +1；后台任务在**判定前**与**杀进程前**各比对一次，
+    //   任何一个不等 ⇒ 这份结论已过期，直接丢弃（不判定、不杀）。
+    private int _identityGuardEpoch;
+
+    /// <summary>当前后台身份守护运行的纪元快照（只读，供测试断言竞态保护存在）。</summary>
+    internal int IdentityGuardEpoch => Volatile.Read(ref _identityGuardEpoch);
+
     /// <summary>
     /// 复验当前受守护对象的源身份。不一致 ⇒ 立即 kill 当前 robocopy 并中止本次运行。
     /// 取不到当前身份时**不判定**（网络抖动/权限瞬变不能当成"身份变了"）。
+    ///
+    /// ★ 2026-10-23 ★ 强制调用（对象边界）仍同步执行——那里没有 stdout 泵在等；
+    /// 非强制调用（robocopy 每文件回调）只登记请愿，探测转后台。<b>判据本身完全没变。</b>
     /// </summary>
     private void GuardActiveObjectIdentity(bool force = false)
     {
@@ -232,17 +282,67 @@ public sealed class TransferOrchestrator
         if (!force && now < _guardNextCheckUtc) return;
         _guardNextCheckUtc = now + IdentityGuardInterval;
 
+        if (force)
+        {
+            EvaluateActiveObjectIdentity(path, expected, verbose: true);
+            return;
+        }
+
+        // 非强制：调用者正站在 robocopy 的 stdout 泵上，绝不能在这里做同步 TCP/UNC 探测。
+        Volatile.Write(ref _identityGuardPending, 1);
+        if (Interlocked.CompareExchange(ref _identityGuardInFlight, 1, 0) != 0) return;   // 已有探测在飞
+        var epochAtStart = Volatile.Read(ref _identityGuardEpoch);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (Volatile.Read(ref _identityGuardPending) == 1 && !_identityLost)
+                {
+                    // 每次迭代都重新取纪元：循环可能在对象边界跨过去。
+                    if (epochAtStart != Volatile.Read(ref _identityGuardEpoch)) return;
+                    Volatile.Write(ref _identityGuardPending, 0);
+                    EvaluateActiveObjectIdentity(path, expected, verbose: false, epochAtStart);
+                    // 主动让出，避免与 robocopy 抢同一批源盘 IO（这也是原来最大的代价之一）。
+                    await Task.Delay(50).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                // 守护自身的异常绝不影响传输结论 —— 只留痕。
+                _log.Debug(ex, "源身份守护后台复验异常（不影响传输）");
+            }
+            finally
+            {
+                Volatile.Write(ref _identityGuardInFlight, 0);
+            }
+        });
+    }
+
+    /// <summary>真正取一次指纹并比对（可能阻塞至多数秒 —— 只允许在对象边界或后台线程调用）。</summary>
+    private void EvaluateActiveObjectIdentity(string path, string expected, bool verbose, int? epoch = null)
+    {
+        if (_identityLost) return;
         var actual = SourceIdentity.Capture(path, _log);
         if (string.IsNullOrEmpty(actual))
         {
             // 取不到一律"不判定"（不误伤正常续传），但必须**可见**——否则事后无法区分
             // "守护没生效"与"当前指纹取不到"（TV-B12b4 tv2 就吃过这个哑巴亏）。
-            if (force) _log.Information("源身份守护：对象 {Path} 本次取不到当前指纹，保持不判定", path);
+            if (verbose) _log.Information("源身份守护：对象 {Path} 本次取不到当前指纹，保持不判定", path);
             return;
         }
         if (!SourceIdentity.IdentityChanged(expected, actual))
         {
-            if (force) _log.Information("源身份守护：{Path} 与基线一致（基线={Expected}）", path, expected);
+            if (verbose) _log.Information("源身份守护：{Path} 与基线一致（基线={Expected}）", path, expected);
+            return;
+        }
+
+        // ★ Preview.7 收口 P1 ★ 判定结果指向的必须是**当前**这个对象/这次运行。
+        //   Capture 可能阻塞数秒，期间对象边界或整轮运行已经换人 —— 那时这条结论说的是
+        //   上一份数据，拿它去 KillCurrent 就会误杀（竞态 A/B）。过期结论只留痕、不判定。
+        if (epoch is { } e && e != Volatile.Read(ref _identityGuardEpoch))
+        {
+            _log.Information("源身份守护：{Path} 的指纹差异属于已过期的对象/运行（纪元 {Epoch} ≠ {Now}），不判定、不终止",
+                path, e, Volatile.Read(ref _identityGuardEpoch));
             return;
         }
 
@@ -355,6 +455,33 @@ public sealed class TransferOrchestrator
             _stormCode = code;
             _log.Error("检测到错误风暴：{Errors}/{Attempts} 个文件失败（最后错误码 {Code}），主动终止当前对象", errs, attempts, code);
             _runner.KillCurrent();
+        }
+
+        // ②.5 ★ Preview.4 真机问题 3 ★ 源共享断链熔断（与"错误风暴"是两条独立判据）：
+        //     · 风暴要求错误率 ≥90%，共享断开时往往只有一半文件失败 ⇒ 那条永远不响；
+        //     · 这里只看"**连续**出现共享级错误"：中间一旦夹了非共享级错误（文件锁/权限/同名冲突），
+        //       连续计数清零 —— 说明不是整条链路没了，而是个别文件有问题，不该误杀整轮。
+        //   命中后主动终止当前 robocopy，避免对后续几千个文件逐个走满 /R 的重试等待。
+        if (_shareLossCode == null)
+        {
+            var isShareLoss = int.TryParse(code, out var codeNum) && ShareLossSignal.IsShareLossWin32(codeNum);
+            if (isShareLoss)
+            {
+                var streak = Interlocked.Increment(ref _shareLossStreak);
+                if (streak >= ShareLossAbortAfter)
+                {
+                    _shareLossCode = code;
+                    _log.Error("检测到源共享连接中断：连续 {Streak} 个文件报 Win32 {Code}（{Reason}）。" +
+                               "主动终止当前对象 —— 继续跑只会把剩余文件逐个重试一遍，既搬不动数据又拖垮吞吐。" +
+                               "稍后将重新启动复制（Windows 会重建到该共享的树连接，已复制的文件自动跳过）。",
+                        streak, code, PCMig.Core.Util.ErrorTranslator.ReasonForCode(codeNum));
+                    _runner.KillCurrent();
+                }
+            }
+            else
+            {
+                Interlocked.Exchange(ref _shareLossStreak, 0);
+            }
         }
     }
 
@@ -491,29 +618,60 @@ public sealed class TransferOrchestrator
             .Where(r => r.Status == ObjectStatus.Completed)
             .GroupBy(r => r.ObjectId)
             .ToDictionary(g => g.Key, g => g.OrderBy(r => r.CompletedUtc).Last(), StringComparer.OrdinalIgnoreCase);
-        long baseBytes = completedIds.Values.Sum(r => r.TargetBytes);
+        // ★ v0.5.4 Preview.1 进度真值修复（2026-10-15）★
+        //   先按**对象计划量**夹取每个已完成对象的 TargetBytes，再求和。
+        //   理由：单对象"已落定字节"在物理上不可能超过该对象自己的计划量；真机
+        //   JOB-20261014-143502-b5dc 的 object-000004 回执携带 119,761,272,988 B
+        //   （> 其计划量 70,962,278,984 B），直接求和会把兄弟对象的字节算进分子。
+        //   计划量未知（<= 0）时保持原值，不引入新的猜测。
+        var plannedById = plan.Objects
+            .GroupBy(o => o.ObjectId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().EstimatedBytes, StringComparer.OrdinalIgnoreCase);
+        long ClampToPlanned(string objectId, long bytes)
+        {
+            if (bytes <= 0) return 0;
+            if (!plannedById.TryGetValue(objectId, out var planned) || planned <= 0) return bytes;
+            return bytes > planned ? planned : bytes;
+        }
+
+        long baseBytes = completedIds.Sum(kv => ClampToPlanned(kv.Key, kv.Value.TargetBytes));
+        // 分子是"已完成对象的实测落盘量"，其可计上界就是计划总量本身。
+        var settledUpperBound = plan.TotalBytes > 0 ? plan.TotalBytes : long.MaxValue;
 
         state.TotalObjects = plan.Objects.Count;
         state.CompletedObjects = completedIds.Count;
         state.TotalBytes = plan.TotalBytes;
-        state.CompletedBytes = Math.Min(baseBytes, plan.TotalBytes > 0 ? plan.TotalBytes : long.MaxValue);
+        state.CompletedBytes = Math.Min(baseBytes, settledUpperBound);
         state.Phase = JobPhase.Running;
         state.LastError = null;
+        // ★ R2 接手修复 · 缺陷 A ★ 上一轮的**校验期**结论（确证缺失数）描述的是上一轮现场，
+        //   本轮开跑即作废；否则补完文件再跑一次，旧计数会把它永久钉在"不算完成"。
+        //   新的结论由 VerifyReconciliation 在下次校验落盘后写回。
+        state.MissingObjects = 0;
         // 恢复运行：已经没有暂停请求时，上一轮的暂停真值必须清掉（否则"已暂停"会残留成假绿）
         if (!File.Exists(_ctx.PauseRequestPath)) ResetPauseTruth(state);
-        _ctx.SaveState(state);
+        // ★ R2 接手修复 · 缺陷 K ★ 必须走**校验结论所有者**的写入口：
+        //   普通 SaveState 会把磁盘上的旧值原样带回来（它不负责改这个字段），
+        //   于是"开跑即作废旧结论"这件事在落盘层面会被回滚掉，旧计数永久钉住"不算完成"。
+        _ctx.SaveStateWithVerifyConclusion(state);
 
         PublishTransfer(TransferEvents.JobRunStarted, null, DiagnosticLevel.Information, DiagnosticOutcome.Started,
             phase: nameof(JobPhase.Running));
 
         // ---- 本次运行的速率口径与熔断状态复位 ----
         _spaceCode = null;
+        // ★ Preview.4 真机问题 3 ★ 断链熔断状态同样按"每次运行"复位（否则上一轮中断链标记会让本轮首个对象直接判死）
+        _shareLossCode = null;
+        Interlocked.Exchange(ref _shareLossStreak, 0);
         // ★ 缺陷 B12b4 ★ 每次运行的飞行中源身份守护状态必须复位（run/resume/repair 各自独立判定）
         _identityLost = false;
         _identityLostDetail = null;
         _guardObjectPath = null;
         _guardExpectedIdentity = null;
         _guardNextCheckUtc = DateTime.MinValue;
+        // ★ Preview.7 收口 P1 ★ 新一轮运行 ⇒ 纪元 +1，让上一轮还在 Delay 里的后台守护彻底作废。
+        Interlocked.Increment(ref _identityGuardEpoch);
+        Interlocked.Exchange(ref _identityGuardPending, 0);
         _runStartCompletedBytes = state.CompletedBytes;
         Interlocked.Exchange(ref _pausedTicks, 0);
         _runSw.Restart();
@@ -555,6 +713,10 @@ public sealed class TransferOrchestrator
             // 之后的传输期间由 OnRunnerFileCopied 里的周期性复验持续守护。
             _guardObjectPath = obj.SourcePath;
             _guardExpectedIdentity = obj.SourceIdentity;
+            // ★ Preview.7 收口 P1 ★ 进入新对象 ⇒ 纪元 +1。
+            //   上一个对象在后台跑的指纹比对无论结果如何，都不能作用到这个对象身上
+            //   （否则 KillCurrent 会杀掉刚拉起的这一个）。判据本身未改，只是让结论有归属。
+            Interlocked.Increment(ref _identityGuardEpoch);
             GuardActiveObjectIdentity(force: true);
             if (_identityLost)
             {
@@ -568,8 +730,16 @@ public sealed class TransferOrchestrator
             PublishTransfer(TransferEvents.ObjectStarted, null, DiagnosticLevel.Information, DiagnosticOutcome.Started,
                 objectId: obj.ObjectId, phase: nameof(JobPhase.Running));
 
+            // ★ C-01 清理（R2 · 2026-10-17）★ 这里原本有一句
+            //     `if (receipt == null) { interrupted = true; break; }  // 取消/Immediate 暂停导致中断`
+            //   经核对是**不可达死分支**，现已删除：
+            //     · `RunOneObjectAsync` 的所有出口（三处 `Mark*` 分支 + bulk 通道失败 + large 通道失败
+            //       + 成功收尾）**全部返回 receipt**，方法体内不存在任何 `return null`（实测 grep 计数为 0）；
+            //     · 取消/Immediate 暂停在 `RunPassWithRetryAsync` 里被吸收（被杀即收工返回 null），到 `RunOneObjectAsync` 这一层
+            //       已经被 `MarkInterrupted(...)` 转成 `ObjectStatus.Interrupted` 的回执。
+            //   ⇒ **真实的中断路径是下面那句 `if (receipt.Status == ObjectStatus.Interrupted)`**，
+            //     不是这里。保留一句误导性的注释比删掉更危险（会让后来人以为存在另一条中断通道）。
             var receipt = await RunOneObjectAsync(obj, job, state, baseBytes, progress, ct);
-            if (receipt == null) { interrupted = true; break; }  // 取消/Immediate 暂停导致中断
 
             _ctx.SaveReceipt(receipt);
 
@@ -600,9 +770,44 @@ public sealed class TransferOrchestrator
                 objectId: obj.ObjectId,
                 exitCode: receipt.RobocopyExitCodeBulk);
             // 复拷已完成对象：先扣掉上一次计入的字节，避免同一对象被累计两次
-            if (wasCompleted) baseBytes -= prevReceipt!.TargetBytes;
-            baseBytes += receipt.TargetBytes;
-            var settledBytes = Math.Min(baseBytes, Math.Max(plan.TotalBytes, baseBytes));
+            // ★ v0.5.4 Preview.1 进度真值修复（2026-10-15）★
+            //   扣减与累加都必须与 baseBytes 的构建口径**逐字一致**（同样按对象计划量夹取）。
+            //   旧实现只扣 prevReceipt.TargetBytes 的原始值、却按未夹取的值累加，一旦回执被污染
+            //   （实测 > 计划量）就会在复拷同一对象时把分子算歪。
+            if (wasCompleted) baseBytes -= ClampToPlanned(obj.ObjectId, prevReceipt!.TargetBytes);
+            // ★ v0.5.4 Preview.2 进度真值修复（2026-10-16，真机 JOB-20261016-150319-e738）★
+            //   只有 Status==Completed 的对象，其可信落盘字节才允许进入分子。
+            //   真机事实：object-000010 有 9/10 文件复制成功（1,990,998,416 B），但该对象整体
+            //   Status=Failed（robocopy 退出码 9/11，DumpStack.log 被源侧拒读），旧实现仍把这
+            //   1,990,998,416 B 加进 baseBytes ⇒ completedBytes 只比 totalBytes 少 8,192 B ⇒
+            //   Percent() 被 Math.Min(100.0, …) 夹成 100 ⇒ 用户在「已完成 9/10、有 1 个失败对象、
+            //   报告里 MISMATCH」的同时看到 100%。这是本轮最先要消灭的自相矛盾。
+            //   语义定义（用户任务令 §一 B）：completedBytes = **已经完整结算成功的计划字节**。
+            //   失败/中断/部分对象已复制的部分字节仍然保留在回执里（receipt.TargetBytes 是
+            //   "已落盘多少"的实测事实，用于失败清单与报告），但**不进入** completedBytes。
+            //   注意：不能在此处 `continue` 跳过后续逻辑——回执已经落盘、计数已回退，
+            //   只有"分子"这一项按状态判定。
+            if (receipt.Status == ObjectStatus.Completed)
+                baseBytes += ClampToPlanned(obj.ObjectId, receipt.TargetBytes);
+            else if (receipt.Status == ObjectStatus.Interrupted)
+                baseBytes += ClampToPlanned(obj.ObjectId, receipt.TargetBytes);
+            // ★ 为什么 Interrupted 仍然进分子（与 Failed 区别对待）★
+            //   Interrupted 的产生路径是**暂停 / 取消打断**：对象是被强制终止的，其 TargetBytes 来自
+            //   "已经确认落盘"的可信 checkpoint（见 ResolveTrustedInterruptedBytes 的不变量说明），
+            //   下方 :652-654 也用 Math.Max 维持单调不回退。用户指令 UI-02（2026-10-05，人工验收项）
+            //   明确要求「暂停必须保留已传字节」——旧口径把暂停归零，真机表现为
+            //   「暂停后 0.0% / 0 B / 剩余 100% 未传」的假归零。若在此连 Interrupted 一起排除，
+            //   就等于把 UI-02 的修复撤销（PauseCoreSemanticsTests.P04 会立刻抓住）。
+            //   而 Failed 不同：它是 robocopy 明确报告失败（退出码含 8/16、错误分类 permanent/transient），
+            //   对象整体**没有完成**，其部分字节不是"已结算成功"，因此不进 completedBytes；
+            //   它仍然如实保存在 receipt.TargetBytes 里，供失败清单、报告与恢复基线使用。
+            // ★ 这里是 C 类缺陷的第二个注射点：旧代码写的是
+            //     Math.Min(baseBytes, Math.Max(plan.TotalBytes, baseBytes))
+            //   它在 baseBytes > plan.TotalBytes 时返回 baseBytes 本身 ⇒ Math.Min(x, x) = x，
+            //   **封顶恒等于不封顶**（"看着在 clamp、实际什么都没做"的假保护）。真机上正是这一步
+            //   让 188,773,387,733 B 越过 totalBytes=139,974,393,729 B 写进了 state.CompletedBytes。
+            //   现在按实际可计上界（= 计划总量）夹取；上界未知时才退化为不封顶。
+            var settledBytes = Math.Min(baseBytes, settledUpperBound);
             // ★ 进度真值单调性（UI Closure 2026-10-05，用户人工验收项）★
             // 被判为 Interrupted 的回执（暂停/取消打断）即使实测不到落盘量，也**绝不能把已经确认传完的字节往下改**：
             // 中断只表示"这个对象没完成"，不表示"之前传的都不算数"。
@@ -706,6 +911,17 @@ public sealed class TransferOrchestrator
             // 失败数 = 未完全完成的对象数（跨多次 resume 精确收敛，不重复计尝试次数）
             state.FailedObjects = state.TotalObjects - state.CompletedObjects;
             state.Phase = state.FailedObjects > 0 ? JobPhase.CompletedWithErrors : JobPhase.Completed;
+            // ★ v0.5.4 Preview.2（2026-10-16 真机修复）★ 失败对象的已复制字节**不进 completedBytes**，
+            //   分母仍是计划总量 ⇒ 有失败时 raw 必然 < 100（真机差 8,192 B），再叠加 Percent() 的
+            //   "非 Completed 一律封顶 99.9" 规则，用户不可能再看到"9/10 完成 + 100%"。
+            //   这里把不变量写成可诊断的日志：completedBytes 只可能 ≤ totalBytes 且
+            //   在 FailedObjects > 0 时严格 < totalBytes（除非失败对象计划量为 0）。
+            if (state.FailedObjects > 0 && state.CompletedBytes >= state.TotalBytes && state.TotalBytes > 0)
+            {
+                _log.Warning("进度真值不变量异常：有 {Failed} 个失败对象却 completedBytes({Done}) >= totalBytes({Total})，已按计划量封顶",
+                    state.FailedObjects, state.CompletedBytes, state.TotalBytes);
+                state.CompletedBytes = Math.Max(0, state.TotalBytes - 1);
+            }
         }
         TargetRootGuard.EnsureVisible(job.TargetRoot, _log);   // 收尾再兜一次，杜绝"数据在但看不见"
 
@@ -791,8 +1007,19 @@ public sealed class TransferOrchestrator
         }
     }
 
-    /// <summary>执行单个对象：Bulk 通道（/MT）→ 可选 Large 通道（/Z），含 Transient 重试。</summary>
-    private async Task<ObjectReceipt?> RunOneObjectAsync(PlannedObject obj, JobDefinition job, JobState state,
+    /// <summary>
+    /// 执行单个对象：Bulk 通道（/MT）→ 可选 Large 通道（/Z），含 Transient 重试。
+    /// <para>
+    /// ★ C-01 清理（R2 · 2026-10-17）★ 返回类型原为 <c>ObjectReceipt?</c>，但方法体内 6 个出口
+    /// 全部 <c>return receipt</c>（失败 / 错误风暴 / 空间不足 / 中断各有 <c>Mark*</c> 辅助把状态
+    /// 写进回执），不存在任何 <c>return null</c>（已实测 grep 计数为 0）。可空标注只让调用方
+    /// 写出了一句永远不成立的 <c>if (receipt == null)</c> 死分支。
+    /// 取消与 Immediate 暂停在这一层已被 <see cref="MarkInterrupted"/> 转换成
+    /// <c>ObjectStatus.Interrupted</c> 的回执 —— <b>中断是回执的状态，不是 null</b>。
+    /// ⇒ 类型改为非空，让编译器继续替我们守这条契约。
+    /// </para>
+    /// </summary>
+    private async Task<ObjectReceipt> RunOneObjectAsync(PlannedObject obj, JobDefinition job, JobState state,
         long baseBytes, IProgress<ProgressSnapshot>? progress, CancellationToken ct)
     {
         var receipt = new ObjectReceipt
@@ -1008,6 +1235,11 @@ public sealed class TransferOrchestrator
         {
             receipt.Attempt = attemptBase + attempt;   // F2：跨趟累计，作业记录里能区分"第几趟尝试"
 
+            // ★ Preview.4 真机问题 3 ★ 每一趟尝试都是**新的 robocopy 进程**（会重新建立到源共享的树连接），
+            //   因此断链标记与连续计数都必须按趟复位：上一趟的断链结论不能把本趟直接判死。
+            _shareLossCode = null;
+            Interlocked.Exchange(ref _shareLossStreak, 0);
+
             // ── F4：每一趟尝试都从"本对象已确认的落盘基线"重新累计 ──
             //   旧实现只在对象开始时清一次：磁盘满那一趟里记进去的字节会一直留在分子上，
             //   重试三次就出现底栏 4.02 GB / 1.02 GB（分子大于计划）这种"看起来快完成"的假进度。
@@ -1050,7 +1282,31 @@ public sealed class TransferOrchestrator
 
             var result = await _runner.RunPassAsync(obj.SourcePath, obj.TargetPath, _ctx.Definition.Options,
                 _matrix, pass, roboLog, ct, obj.FileList, restartable);
-            if (result.Killed) return null;
+            if (result.Killed)
+            {
+                // ★ Preview.4 真机问题 3（2026-10-22）★ 必须区分两种"被杀"：
+                //   · 用户暂停 / 停止 ⇒ 立刻收工（收工后返回 null，交给暂停链路）；
+                //   · 我们因**源共享断链**主动 KillCurrent ⇒ 不能当成用户操作，
+                //     否则一个只要重连就能继续的对象会被记成"用户中断"而停在那里。
+                if (_shareLossCode == null) return null;
+
+                var lossDetail =
+                    $"源共享连接中断（Win32 {_shareLossCode}）：连续 {Interlocked.Read(ref _shareLossStreak)} 个文件报网络错误，" +
+                    "已主动中止本轮以避免逐个文件空转重试；已复制的文件不会重传。";
+                _log.Warning("对象 {Id} [{Pass}] 第 {A}/{Max} 次尝试因源共享断链主动中止，准备重建连接后重试：{Detail}",
+                    obj.ObjectId, pass, attempt, maxAttempts, lossDetail);
+
+                if (attempt < maxAttempts)
+                {
+                    // 退避后再起一个**新进程**：Windows 会重建到 \\host\share 的树连接，
+                    // robocopy 的增量语义让已复制的文件自动跳过（这就是不依赖密码的"重连"）。
+                    await Task.Delay(TimeSpan.FromSeconds(10.0 * attempt), ct);
+                    continue;
+                }
+
+                return new RobocopyRunResult(result.ExitCode, false, false, result.Duration,
+                    lossDetail + $"已重试 {attempt} 次仍失败。", result.ErrorLines);
+            }
             if (result.Success) return result;
 
             var cls = Classify(result);
@@ -1096,6 +1352,10 @@ public sealed class TransferOrchestrator
                 {
                     try
                     {
+                        // ★ v0.5.4 Preview.2 ★ 同一口径：清单里若出现隔离旧副本名（理论上不该有，
+                        //   但 FileList 来自计划、而计划可能被旧存档喂进带后缀的名字），一律排除，
+                        //   避免"按清单统计"也把 PCMig 自己产生的旧副本算成目标文件。
+                        if (RepairQuarantine.IsQuarantinedOldCopy(name)) continue;
                         var p = Path.Combine(obj.TargetPath, name);
                         if (!File.Exists(p)) continue;
                         bytes += new FileInfo(p).Length; files++;
@@ -1109,13 +1369,51 @@ public sealed class TransferOrchestrator
                 long bytes = 0, files = 0;
                 foreach (var f in Directory.EnumerateFiles(obj.TargetPath))
                 {
+                    // ★ v0.5.4 Preview.2（2026-10-16 真机 JOB-20261016-150319-e738）★
+                    //   RootFiles 通道的目标就是**目标盘根目录**，而「强制覆盖」把旧副本
+                    //   <原名>.pcmig-old-<时间戳> 留在**原目录**（同名目录 File.Move 改名）。
+                    //   旧实现这里无条件 EnumerateFiles 全部计入 ⇒ 第 2 趟 attempt 把第 1 趟
+                    //   隔离出来的 9 个旧副本当成"本轮目标文件"再数一遍：
+                    //     真机 object-000010 attempt1 = 9 文件 / 1,990,998,416 B
+                    //                 attempt2 = 18 文件 / 3,981,996,832 B（恰好 ×2）
+                    //   这个双倍指纹污染了 Receipt → job-state → 进度 → 报告全链路。
+                    //   旧副本是 PCMig 自己产生的隔离物，不是用户目标数据，必须排除。
+                    //   注意：目录对象分支早已用 skipQuarantineOldCopies:true，此处补齐的是
+                    //   **同一口径在另外两个分支上的缺失**（不是新造口径）。
+                    if (RepairQuarantine.IsQuarantinedOldCopy(Path.GetFileName(f))) continue;
                     try { var fi = new FileInfo(f); bytes += fi.Length; files++; } catch { }
                 }
                 receipt.TargetBytes = bytes; receipt.TargetFiles = files;
             }
             else
             {
-                var stat = DirStat.Measure(obj.TargetPath, long.MaxValue);
+                var stat = DirStat.Measure(obj.TargetPath, long.MaxValue, skipQuarantineOldCopies: true);
+                // ★ v0.5.4 Preview.2 进度真值修复（2026-10-15）★ 真正的重复计入源
+                //   「强制覆盖」隔离出来的旧副本是 <原名>.pcmig-old-<时间戳>，留在**原目录**里
+                //   （见 RepairQuarantine.TryQuarantine：同目录 File.Move 改名）。它既不是本轮传输的
+                //   产物，也不该算进"本对象已落定字节"，但 DirStat.Measure 是全递归统计 ⇒ 会被计入。
+                //   真机证据（JOB-20261014-143502-b5dc / object-000004，attempt=16）：
+                //     · 计划量 70,962,278,984 B（3016 文件）
+                //     · CompletedWithErrors 回执实测 119,761,272,988 B（6035 文件）
+                //     · 同一时刻 robocopy 末块：复制 51.380 g / 跳过 4.378 g / 其他 55.777 g
+                //       其中「其他」= 被隔离的旧副本（`.pcmig-old-20261014070527` 等）
+                //     · 55.758 g（本轮新副本=复制+跳过）+ 55.777 g（旧副本）= 111.535 g ≈ 实测 111.536 g
+                //   ⇒ 旧副本被**重复计入一次**，TargetBytes 因而虚高到计划量的 1.69 倍。
+                //   承接 Preview.1 的按计划量夹取（下方）：夹取把越界挡住了，但没有消除"多算了什么"；
+                //   这里从来源上排除旧副本，之后夹取只作为兜底（父目录被兄弟对象共享时仍可能需要）。
+                // ---- Preview.1 保留的说明（仍然成立）----
+                //   目录对象的 TargetPath 可能是一个**被多个对象共享的父目录**（或本对象只承担其中
+                //   一部分文件）。`DirStat.Measure` 是父目录 + 全递归、没有任何隔离 —— 与上面两个分支
+                //   （FileList 按清单隔离、RootFiles 只枚举根一层）不同。
+                //   本对象"已落定"的字节在物理上不可能超过本对象的计划量，故按计划量夹取。
+                //   计划量未知（<= 0）时保持原值，不引入新的猜测。
+                if (obj.EstimatedBytes > 0 && stat.Bytes > obj.EstimatedBytes)
+                {
+                    _log.Debug(
+                        "目标实测超过对象计划量，按计划量夹取（目录可能被多个对象共享）: {Object} 实测 {Measured} > 计划 {Planned}",
+                        obj.ObjectId, stat.Bytes, obj.EstimatedBytes);
+                    stat.Bytes = obj.EstimatedBytes;
+                }
                 receipt.TargetBytes = stat.Bytes; receipt.TargetFiles = stat.Files;
             }
         }
@@ -1305,20 +1603,50 @@ public sealed class TransferOrchestrator
     /// <list type="number">
     /// <item>只看**最新一次尝试**的状态：先比 <c>CompletedUtc</c>，同刻再比 <c>Attempt</c>；</item>
     /// <item>最新一次是 <c>Interrupted</c> ⇒ 可信字节取该对象**所有 Interrupted 回执的最大值**（已确认的字节只许变大），再按计划字节夹取；</item>
-    /// <item>最新一次不是 <c>Interrupted</c>（Completed / Failed）或无回执 ⇒ 返回 0，本趟从零起算，显示不倒退由呈现层高水位负责。</item>
+    /// <item>最新一次是 <c>CompletedWithErrors</c> ⇒ 见下方 ★ Preview.2 ★ 补充：取同一对象**所有**回执
+    ///       （含 CompletedWithErrors）里 TargetBytes 的最大值并按计划量夹取；</item>
+    /// <item>其它（<c>Completed</c> / <c>Failed</c>）或无回执 ⇒ 返回 0，本趟从零起算，显示不倒退由呈现层高水位负责。</item>
     /// </list>
     /// </summary>
+    /// <remarks>
+    /// ★ v0.5.4 Preview.2（2026-10-15）★ <c>CompletedWithErrors</c> 的续传基线。
+    /// <para>
+    /// 旧口径把 <c>CompletedWithErrors</c> 与 <c>Completed</c>、<c>Failed</c> 一视同仁地当成"结束态"返回 0。
+    /// 但三者的语义并不相同：<c>Completed</c> 表示对象已完整结束（其 TargetBytes 会进 completedIds 结算，
+    /// 恢复时不需要基线）；<c>Failed</c> 表示这一趟**没有可信落盘量**；而 <c>CompletedWithErrors</c> 表示
+    /// "大部分文件确实已落盘，只有个别文件失败" —— 它的 TargetBytes 是**实测落盘量**，是可信的。
+    /// </para>
+    /// <para>
+    /// 真机证据（JOB-20261014-143502-b5dc / object-000004）：该对象连续多趟都以
+    /// <c>completedWithErrors</c> 收尾（1 个 PST 因错误 23 循环冗余读不出，其余 3015 个文件正常落盘）。
+    /// 旧口径下每次 Resume 都解析出可信字节 **0**（日志 15:05:29.600「解析出可信字节 0」），
+    /// 于是恢复后分子从 0 重新爬 —— 而目标盘上明明已有几十 GB 的可信数据。
+    /// 用户看到的"停止再恢复后总进度突然跳变/长期不动"，一半来自这里。
+    /// </para>
+    /// <para>
+    /// 为什么取"所有回执的最大值"而不是最新一份：回执里的 TargetBytes 语义是"截至该次收尾时
+    /// 目标侧的可信落盘量"，同一个目标目录只会单调增长（除非用户手动删除）。取最大值可以避免
+    /// 目录枚举顺序或某趟提前中断造成读数倒退。仍按 <paramref name="plannedBytes"/> 夹取上界。
+    /// </para>
+    /// <para>
+    /// <b>不变量</b>：只有存在"确实落过盘的结束态"才返回非 0；<c>Failed</c> 仍返回 0
+    /// （失败对象可能是完全没拷进去），不因本次放宽而把"没传"说成"传了"。
+    /// </para>
+    /// </remarks>
     internal static long ResolveTrustedInterruptedBytes(
         IEnumerable<ObjectReceipt> receipts, string objectId, long plannedBytes)
     {
         ObjectReceipt? latest = null;
         var highestInterrupted = 0L;
+        var highestSettledWithErrors = 0L;
         var seen = 0;
         foreach (var r in receipts)
         {
             if (!string.Equals(r.ObjectId, objectId, StringComparison.OrdinalIgnoreCase)) continue;
             seen++;
             if (r.Status == ObjectStatus.Interrupted && r.TargetBytes > highestInterrupted) highestInterrupted = r.TargetBytes;
+            if (r.Status == ObjectStatus.CompletedWithErrors && r.TargetBytes > highestSettledWithErrors)
+                highestSettledWithErrors = r.TargetBytes;
             if (latest is null
                 || r.CompletedUtc > latest.CompletedUtc
                 || (r.CompletedUtc == latest.CompletedUtc && r.Attempt > latest.Attempt))
@@ -1328,9 +1656,22 @@ public sealed class TransferOrchestrator
         }
 
         if (seen == 0 || latest is null) return 0;
-        if (latest.Status != ObjectStatus.Interrupted) return 0;
 
-        var trusted = highestInterrupted > 0 ? highestInterrupted : latest.TargetBytes;
+        long trusted;
+        if (latest.Status == ObjectStatus.Interrupted)
+        {
+            trusted = highestInterrupted > 0 ? highestInterrupted : latest.TargetBytes;
+        }
+        else if (latest.Status == ObjectStatus.CompletedWithErrors)
+        {
+            // ★ Preview.2 ★ 同上：部分成功也是可信落盘量，取最大值（含更早的 Interrupted 读数）
+            trusted = Math.Max(highestSettledWithErrors, highestInterrupted);
+        }
+        else
+        {
+            return 0;
+        }
+
         if (trusted <= 0) return 0;
         if (plannedBytes > 0 && trusted > plannedBytes) trusted = plannedBytes;
         return trusted;
@@ -1728,6 +2069,10 @@ public sealed class TransferOrchestrator
             // FIX BATCH 4（§7.1）：先把这一步的结果写成**唯一真值**，再由真值反写 JobState 与 UI 快照——
             // 顺序反了就又会出现"持久化 47.29% vs 界面 49.6%"这种两套口径。
             var cumSpeed = CumulativeSpeed(baseBytes + Math.Max(0, effBytes));
+            // 口径说明（v0.5.4 Preview.1 复核 2026-10-15）：inFlightConfirmedBytes 传**含 baseline 的全量**，
+            //   这是必须的、不是重复结算 —— Interrupted 回执永不进入 completedIds（skip 权威集合只取
+            //   ObjectStatus.Completed），所以被打断对象已确认的那部分字节**不在** baseBytes 里，
+            //   只能经由这里进入分子，否则"停止后恢复"会让进度倒退一整份续传基线。
             var truth = ProgressTruthSnapshot.Create(
                 plannedBytes: state.TotalBytes,
                 committedBytes: baseBytes,
@@ -1857,31 +2202,81 @@ public sealed class TransferOrchestrator
                 long bytes = 0;
                 foreach (var name in obj.FileList)
                 {
-                    try { var p = Path.Combine(obj.TargetPath, name); if (File.Exists(p)) bytes += new FileInfo(p).Length; }
+                    // ★ v0.5.4 Preview.2（2026-10-16 真机修复）★ 口径与 MeasureSettledTarget 逐字一致：
+                    //   隔离旧副本 .pcmig-old-* 不是用户目标数据，任何目标侧统计都不得计入。
+                    try
+                    {
+                        if (RepairQuarantine.IsQuarantinedOldCopy(name)) continue;
+                        var p = Path.Combine(obj.TargetPath, name); if (File.Exists(p)) bytes += new FileInfo(p).Length;
+                    }
                     catch { }
                 }
                 return bytes;
             }
             if (obj.Kind == ObjectKind.RootFiles)
-                return Directory.EnumerateFiles(obj.TargetPath).Sum(f => { try { return new FileInfo(f).Length; } catch { return 0L; } });
-            return DirStat.Measure(obj.TargetPath, long.MaxValue).Bytes;
+                return Directory.EnumerateFiles(obj.TargetPath)
+                    .Where(f => !RepairQuarantine.IsQuarantinedOldCopy(Path.GetFileName(f)))
+                    .Sum(f => { try { return new FileInfo(f).Length; } catch { return 0L; } });
+            return DirStat.Measure(obj.TargetPath, long.MaxValue, skipQuarantineOldCopies: true).Bytes;
         }
         catch { return 0; }
     }
 
     /// <summary>
-    /// 进度百分比。两条硬规则（GROUP D F4）：
+    /// 进度百分比。三条硬规则（GROUP D F4 + v0.5.4 Preview.2 真机修复）：
     /// ① 字节记账可能**领先**真实落盘（重试/预分配/解析行已到而未确认），所以**运行中绝不显示 100%**——
     ///    迁移失败时底栏却显示 100.0%，用户会以为已经完成；
-    /// ② 只有任务真的收尾（Completed / CompletedWithErrors）才允许 100%。
+    /// ② 只有任务真的收尾才允许 100%；
+    /// ③ ★ v0.5.4 Preview.2（2026-10-16 真机 JOB-20261016-150319-e738）★
+    ///    **只有 <see cref="JobPhase.Completed"/> 才允许 100%**；<see cref="JobPhase.CompletedWithErrors"/>
+    ///    一律封顶 <see cref="SettledPercentCap"/>（99.9）。
+    ///    旧实现把 CompletedWithErrors 也算 settled ⇒ 真机上「10 个对象完成 9 个、object-000010
+    ///    因 DumpStack.log 被拒读而 Failed、报告里 MISMATCH」的任务显示 100%，用户据此以为全传完了。
+    ///    这是本轮最严重的呈现自相矛盾：**有失败就不可能 100%**。
     /// </summary>
+    private const double SettledPercentCap = 99.9;
+
+    /// <summary>
+    /// 收尾封顶值（对外暴露同一常量）。外壳显示进度时必须用同一个数：
+    /// 各自写 99.9 迟早会漂移，而这类漂移的表现就是"某处显示 100%、某处判不可信"。
+    /// </summary>
+    public const double SettledPercentCapPublic = SettledPercentCap;
+
     internal static double Percent(JobState s)
     {
         var raw = s.TotalBytes > 0 ? Math.Min(100.0, s.CompletedBytes * 100.0 / s.TotalBytes)
            : s.TotalObjects > 0 ? Math.Min(100.0, s.CompletedObjects * 100.0 / s.TotalObjects) : 0;
-        var settled = s.Phase is JobPhase.Completed or JobPhase.CompletedWithErrors;
-        return settled ? raw : Math.Min(99.9, raw);
+        // ★ R2 接手修复 · 缺陷 B ★ 放行 100% 的条件必须与 IsTrustworthyCompletion **同一个判据**。
+        //   旧写法只看「Phase=Completed ∧ 无失败对象 ∧ 对象计数做完」三项，比可信完成宽：
+        //   于是「字节没闭环」（重试/预分配/解析领先）与「校验确证目标少文件」
+        //   这两种情况都能显示 100%，而界面同时又判为不可信 ⇒ 用户看到
+        //   「进度条 100% + 已完成 + 不跳 Step4」的自相矛盾，也违反
+        //   「有文件缺失但进度 100% 不得出现」这条硬约束。
+        //   直接复用唯一出口，两套口径结构上不可能再漂移。
+        if (IsTrustworthyCompletion(s))
+            return raw;
+        return Math.Min(SettledPercentCap, raw);
     }
+
+    /// <summary>
+    /// 可信完成判据（唯一出口，UI 自动跳转与报告都用它，绝不各自拼条件）。
+    ///
+    /// 为什么必须是一个方法而不是散落的 <c>percent &gt;= 100</c>：真机上正是"100% 字符串/数值即完成"
+    /// 的口径掩盖了失败对象。本判据要求**六项同时成立**：
+    ///   Phase == Completed（不是 CompletedWithErrors）
+    ///   ∧ FailedObjects == 0
+    ///   ∧ MissingObjects == 0
+    ///   ∧ CompletedObjects == TotalObjects（计划对象全部结算成功）
+    ///   ∧ CompletedBytes == TotalBytes（字节也闭环）
+    ///   ∧ TotalObjects &gt; 0（空计划不是完成）
+    /// </summary>
+    public static bool IsTrustworthyCompletion(JobState s)
+        => s.Phase == JobPhase.Completed
+           && s.TotalObjects > 0
+           && s.FailedObjects == 0
+           && s.MissingObjects == 0
+           && s.CompletedObjects >= s.TotalObjects
+           && s.CompletedBytes == s.TotalBytes;
 
     /// <summary>
     /// 失败对象的人话原因：优先"多少文件失败 + 主因 + 举例"的汇总；F1 起"不匹配位"由退出码直接给结论，
@@ -1889,7 +2284,10 @@ public sealed class TransferOrchestrator
     /// </summary>
     internal static string? DetailFor(RobocopyRunResult r)
     {
-        var summary = RobocopyRunner.SummarizeFailures(r.ExitCode, r.ErrorLines);
+        // ★ Preview.4 真机问题 3 ★ 错误行达到采样上限时必须说明"这个数字不是全部"，
+        //   否则「498 个文件复制失败」会被当成精确结论（真实 7,753 个）。
+        var truncated = r.ErrorLines is not null && r.ErrorLines.Count >= RobocopyRunner.MaxErrorLines;
+        var summary = RobocopyRunner.SummarizeFailures(r.ExitCode, r.ErrorLines, truncated);
         if (!RobocopyRunner.HasMismatch(r.ExitCode))
             return summary ?? r.LastErrorLine;
         var mismatch = RobocopyRunner.MismatchDetail(r.ExitCode);

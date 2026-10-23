@@ -1,4 +1,4 @@
-using PCMig.Core.Diagnostics;
+﻿using PCMig.Core.Diagnostics;
 using PCMig.Core.Models;
 using PCMig.Core.State;
 using PCMig.Diagnostics.Abstractions;
@@ -72,7 +72,58 @@ public sealed class JobContext
         return new JobState { JobId = JobId, Phase = JobPhase.Created };
     }
 
+    /// <summary>
+    /// 把状态写回 job-state.json（**视图类字段**的唯一出口）。
+    ///
+    /// ★ R2 接手修复 · 缺陷 K（专家 🔴-3 核实后的真实机制）★
+    /// <para>
+    /// 本方法**不负责**改写校验期结论 <see cref="JobState.MissingObjects"/>：
+    /// 无论调用方内存里那份快照带着什么值，落盘前都会被磁盘上的**当前**值覆盖回来。
+    /// </para>
+    /// <para>
+    /// 为什么必须这样：<c>TransferOrchestrator</c> 在 <c>RunAsync</c> 开头 <c>LoadStateOrNew()</c>
+    /// **只读一次**，之后整轮运行（含 <c>PollProgressAsync</c> 的周期性落盘）传给
+    /// <c>SaveState</c> 的都是**同一个内存引用**。那份快照里 <c>MissingObjects</c> 永远是开跑时
+    /// 清成的 0；只要校验在它生命周期内写过一次非零（校验确证目标少文件），
+    /// 引擎下一次周期性落盘就会把这条结论整体抹回去 —— 界面随即回到
+    /// 「100% + 已完成」，而目标实际缺文件。这条结论因此**只能**由
+    /// <see cref="SaveStateWithVerifyConclusion"/> 写（校验结论所有者 + 新一轮开跑的作废动作）。
+    /// </para>
+    /// <para>
+    /// 代价是每次落盘多读一次 job-state.json（几百字节 ~ 数 KB）。相对每 2 秒一拍、
+    /// 且本来就要整份写盘的既有节奏，这点读放大可以接受；换来的是"任何视图写入都偷不走校验结论"。
+    /// </para>
+    /// </summary>
     public void SaveState(JobState state)
+    {
+        var onDisk = LoadStateOrNew();
+        state.MissingObjects = onDisk.MissingObjects;
+        SaveStateCore(state);
+    }
+
+    /// <summary>
+    /// 写入状态并**连带写入** <see cref="JobState.MissingObjects"/>。
+    ///
+    /// <para>
+    /// 只允许两类调用方（"校验结论的所有者"）：
+    /// </para>
+    /// <list type="number">
+    ///   <item><description>
+    ///     <c>VerifyReconciliation.Apply</c> —— 本轮校验刚刚产出的对账结论；
+    ///   </description></item>
+    ///   <item><description>
+    ///     <c>TransferOrchestrator.RunAsync</c> 的开跑段 —— 上一轮结论描述的是上一轮现场，
+    ///     本轮开跑即作废（含清成 0），新结论由下一次校验落盘。
+    ///   </description></item>
+    /// </list>
+    /// <para>
+    /// 除这两处外**不得**调用本方法：其它任何地方写这个字段，都会让"校验发现目标少文件"
+    /// 与"迁移报成功"重新变成互不校验的两套真相。
+    /// </para>
+    /// </summary>
+    public void SaveStateWithVerifyConclusion(JobState state) => SaveStateCore(state);
+
+    private void SaveStateCore(JobState state)
     {
         state.LastUpdateUtc = DateTime.UtcNow;
         JsonStateStore.WriteAtomic(StatePath, state, "JobState", Diagnostics);
@@ -251,6 +302,11 @@ public sealed class JobSummary
 /// <summary>
 /// Job 管理器：创建/打开/枚举 Job。
 /// Job 目录默认位于 %ProgramData%\PCMig\Jobs\JOB-*，可用环境变量 PCMIG_JOBS 覆盖（便携场景）。
+///
+/// ★ 2026-10-15（Preview.2 隔离整改）★ 预览产物的作业根改由随产物分发的
+/// <c>preview-isolation.json</c> 指定（见 <see cref="PCMig.Core.Util.PreviewIsolation"/>），
+/// 优先级**高于**环境变量 —— 否则账户级环境变量又能改写预览版行为，等于没隔离。
+/// 正式产物下这一支完全不参与，语义与改动前逐位一致。
 /// </summary>
 public sealed class JobManager
 {
@@ -258,9 +314,24 @@ public sealed class JobManager
 
     public JobManager(ILogger log) { _log = log.ForContext<JobManager>(); }
 
-    public static string JobsRoot =>
-        Environment.GetEnvironmentVariable("PCMIG_JOBS")
-        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PCMig", "Jobs");
+    public static string JobsRoot
+    {
+        get
+        {
+            // ① 预览隔离：有效则用隔离根；★ 预览身份但隔离失败则**抛异常**，绝不回退到正式根 ★
+            //    第二道防线：即使某个入口漏了启动检查，作业库也不可能落进 %ProgramData%\PCMig\Jobs。
+            if (PCMig.Core.Util.PreviewIsolation
+                    .TryResolveForPersistence("Jobs", "JobManager.JobsRoot") is { } isolated)
+            {
+                return isolated;
+            }
+
+            // ② 显式环境变量覆盖（便携/测量场景，语义保持不变）
+            // ③ 生产默认：%ProgramData%\PCMig\Jobs —— 只有**正式身份**才会走到这里
+            return Environment.GetEnvironmentVariable("PCMIG_JOBS")
+                ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PCMig", "Jobs");
+        }
+    }
 
     public static string NewJobId()
         => $"JOB-{DateTime.Now:yyyyMMdd}-{DateTime.Now:HHmmss}-{Guid.NewGuid().ToString("N")[..4]}";

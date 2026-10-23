@@ -57,11 +57,15 @@
   <Duration x:Key="PCMigMotionHintLineDuration">0:0:0.17</Duration>
   <x:Double x:Key="PCMigMotionHintLineOffset">6</x:Double>
 
-  <!-- ★ 2026-10-08（真机问题 4）★ 底栏「源连接」指示器"正在连接"的柔和呼吸：
+  <!-- ★ 2026-10-08（真机问题 4）★ 底栏「源连接」指示器柔和呼吸：
        周期与最低透明度在这里定；调用点（MotionDirector.PlaySourceBreathing）不写死数值。
-       周期取用户建议区间 900~1200 ms 的中值 —— 慢到看不出闪、快到一眼能看出"在办"。 -->
-  <Duration x:Key="PCMigMotionSourceBreathDuration">0:0:1.05</Duration>
-  <x:Double x:Key="PCMigMotionSourceBreathMinOpacity">0.35</x:Double>
+       ★ Preview.6（2026-10-22 真机视频）★ 周期由 1.05 s 提到 **2.0 s**（用户指定 1.8~2.4 s 区间）：
+         旧的 1.05 s 只是"显得碎"的次要原因，真正导致定频闪灭的是每次刷新都重置相位
+         （见 MotionDirector 里 ActiveBreaths 幂等闸门的注释）；两处一起修才是完整修复。
+       最低不透明度由 0.35 提到 **0.45**：用户要求"指示灯本体不得明显消失、不得看着像灰灯"——
+         0.35 在深色底上已经接近熄灭。呼吸曲线是正弦型（sin²），谷底停留短、肉眼更接近"呼吸"。 -->
+  <Duration x:Key="PCMigMotionSourceBreathDuration">0:0:2.0</Duration>
+  <x:Double x:Key="PCMigMotionSourceBreathMinOpacity">0.45</x:Double>
 
   <!-- ★ 2026-10-08（真机问题 3）★ ShellHintCard 自适应展开 / 缩回：
        高度本身**一次到位**（没有逐帧 Layout 动画），视觉上的展开与收起由 Composition 完成；

@@ -23,9 +23,16 @@ namespace PCMig.Core.Transfer;
 public static class ShareLossSignal
 {
     /// <summary>Win32 错误码是否属于"共享/网络级不可用"（⇒ 可点亮源失效）。</summary>
+    /// <remarks>
+    /// ★ Preview.4 真机（2026-10-22）★ 补入 <c>6</c>（ERROR_INVALID_HANDLE）：
+    /// 现场 <c>JOB-20261022-102929-ab97</c> 的失败构成是「错误码分布 67×378、6×120」，
+    /// 6 与 67 成对出现、描述的是同一件事（SMB 会话失效后 robocopy 拿到无效句柄继续访问树连接），
+    /// 都属于"整条共享读不到"，不是单文件问题。个别真·句柄错误不会连续出现 24 次，
+    /// 因此不会误触发断链熔断（熔断判据见 <c>TransferOrchestrator.ShareLossAbortAfter</c>）。
+    /// </remarks>
     public static bool IsShareLossWin32(int code) => code switch
     {
-        53 or 55 or 59 or 64 or 67 or 1219 or 1231 or 1236 or 1326 => true,
+        6 or 53 or 55 or 59 or 64 or 67 or 1219 or 1231 or 1236 or 1326 => true,
         _ => false,
     };
 

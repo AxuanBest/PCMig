@@ -1,4 +1,4 @@
-<UserControl
+﻿<UserControl
     x:Class="PCMig.WinUI.Views.Step2SelectDataPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -11,7 +11,9 @@
         结构（自上而下 / 左右两栏）照参考图落位：
           页标题区（步骤徽章 2 + 大标题 + 说明句）
           左栏：内容目录（卡）— 目录树 / 空状态 + 超大数据模式开关
-          右栏：存放位置（新电脑）卡 → 执行卡（预检并生成计划 / 开始迁移 / 暂停·停止·恢复）→ 连接与安全提示卡
+          右栏：存放位置（新电脑）卡 → 执行卡（预检并生成计划 ‖ 开始迁移 并排 / 暂停·停止·恢复）
+                （★ Issue 6，2026-10-14：原第三张「连接与安全提示」卡已按用户指示移除，
+                  详见文件内 SelectRightStack 处注释）
         业务接线（阶段 A 包 2）：8 个业务控件 + 目标框补 x:Name 并由代码后置（PushState + 事件处理器）
         驱动；目录区改为「空状态 / TreeView 目录树」二选一（Visibility 由代码互斥切换）。
     -->
@@ -266,7 +268,7 @@
                             </StackPanel>
                         </Grid>
 
-                        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10">
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
                             <!-- ★ A.5（第 7 条 · 产品诚实性）★ 搜索框已置 IsEnabled="False"：
                              改前用户能正常输入但**完全无效果**（筛选逻辑未接入）——"能输入却无反应"是假交互。
                              本阶段不为它实现筛选逻辑（不在本包范围），只如实标注"暂未启用"；
@@ -274,7 +276,7 @@
                         <TextBox x:Name="SearchBox" Style="{StaticResource PCMigTextBoxCentered}" Width="230" Padding="40,8,12,8"
                                  IsEnabled="False"
                                      PlaceholderText="搜索目录或文件名（暂未启用）"
-                                     ToolTipService.ToolTip="搜索/筛选暂未启用（筛选逻辑尚未接入）：请直接在下面目录树里勾选内容。"/>
+                                     AutomationProperties.HelpText="搜索/筛选暂未启用（筛选逻辑尚未接入）：请直接在下面目录树里勾选内容。"/>
                             <FontIcon Glyph="&#xE721;" FontSize="15" Margin="14,0,0,0" Translation="0,-0.5,0"
                                       HorizontalAlignment="Left" VerticalAlignment="Center"
                                       IsHitTestVisible="False" Foreground="{StaticResource TextSecondaryBrush}"/>
@@ -293,9 +295,15 @@
                                           IsEnabled="False"
                                           ToolTipService.ToolTip="超大数据模式：暂未启用，当前迁移范围以目录选择为准。"/>
                             <TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="超大数据模式" VerticalAlignment="Center"/>
-                            <FontIcon Glyph="&#xE946;" FontSize="14" VerticalAlignment="Center"
-                                  Foreground="{StaticResource TextMutedBrush}"
-                                  ToolTipService.ToolTip="超大数据模式：暂未启用，当前迁移范围以目录选择为准。"/>
+                            <Grid x:Name="ExpertModeInfoText" Style="{StaticResource PCMigInfoIconText}"
+                                  AutomationProperties.AutomationId="Step2.ExpertModeInfoIcon"
+                                  AutomationProperties.Name="超大数据模式的说明"
+                                  AutomationProperties.HelpText="超大数据模式：暂未启用，当前迁移范围以目录选择为准。">
+                                <ToolTipService.ToolTip>
+                                  <ToolTip Content="超大数据模式：暂未启用，当前迁移范围以目录选择为准。" Placement="Top"/>
+                                </ToolTipService.ToolTip>
+                                <FontIcon Style="{StaticResource PCMigInfoIcon}"/>
+                            </Grid>
                         </StackPanel>
 
                         <!-- 目录区：**空状态 / 目录树 二选一**（Visibility 由代码后置 PushState 互斥切换，
@@ -337,20 +345,42 @@
                 </Border>
 
                 <!-- 右栏：Compact 下整栏下沉到第 2 行，形成单栏堆叠 -->
-                <!-- 右栏卡组（A51：**撤掉**上一轮临时加的 ScrollViewer —— 用户否决"用 ScrollViewer 掩盖布局问题"，
-                     固定三卡必须在默认窗口下一次完整显示）。改为把冗余空白收干净后让它自然放下：
-                       · SelectColumns 的 0 高行已删 ⇒ 其 RowSpacing="12" 失效（+12）
-                       · 页根 Margin 顶部 12 已归零（+12）
-                       · Footer 行上间距 12 → 4（+8）
-                       · 本行 Card 间距 12 → 10（与左卡内部 RowSpacing="10" 同一节奏；两组间距共 +4）
+                <!-- 右栏卡组（两卡版）。★ Issue 6 修复（2026-10-14，真机验收）★
+                     右栏原为**三张卡**（存放位置 / 执行 / 连接与安全提示）。
+                     真机 200% DPI 实测：右栏内容总高 515 DIP，而 Shell 给右栏的可用高
+                     只有 452.5 DIP（NavFooter 顶 y=1427px=713.5 DIP 为硬边界）
+                     ⇒ **缺口 62.5 DIP**。第三张「连接与安全提示」卡必然被推出视口，
+                     只露出顶部一小条圆角边框，并被 Shell 的页面导航 Footer 覆盖
+                     （用户报告「被底部栏遮挡」；截图可见「执行」卡下方那条被切掉的边框）。
+
+                     修复决策（用户 2026-10-14 明确指示）：**直接去掉第三张卡**。
+                     理由：该卡是「SecurityHint」通道在 Step2 的落点，内容是静态凭据说明，
+                     在 Step1 连接段已有等价提示；它造成的溢出代价远大于信息收益。
+                     去掉后右栏只剩两卡，需求高 ≈ 454.5 DIP，可用 452.5 DIP ⇒ 基本贴合。
+
+                     ⚠ 为什么**不加 ScrollViewer**（A51 决议，仍然有效）：
+                       既有设计决议是"页内滚动交给内部列表，TreeView 自带滚动，
+                       刻意不额外包 ScrollViewer（用户否决用 ScrollViewer 掩盖布局问题）"，
+                       见本文件 :303 与 :188-193 注释。本修复遵循该决议 —— 减少内容，
+                       而不是用滚动条掩盖溢出。
+
                      容器名仍是 SelectRightStack：代码后置 ApplyLayoutMode 在 Compact 下对它做
                      Grid.SetRow / Grid.SetColumn 重排（Step2SelectDataPage.xaml.cs:47-62），
                      名字必须留在 SelectColumns 的直接子元素上，重排路径才不会失效。 -->
-                <StackPanel x:Name="SelectRightStack" Grid.Row="0" Grid.Column="1" Spacing="10">
+                <Grid x:Name="SelectRightStack" Grid.Row="0" Grid.Column="1" RowSpacing="8" VerticalAlignment="Stretch">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <!-- ★ Issue 6b ★ 执行行改为星号行：去掉第三卡后余量为正（可用 ≈452.5 DIP −
+                             存放位置卡 ≈212.5 DIP − RowSpacing 8 = 余量 ≈232 DIP > 执行卡需求 ≈196.5 DIP），
+                             故星号行**不会**像 v3 那样塌成 0 高（v3 的塌陷是因为当时还有第三张 Auto 卡
+                             抢走全部高度）。`Grid.Row="1"` 的执行卡配 `VerticalAlignment="Stretch"`
+                             ⇒ 其底边与左栏 SelectLeftCard 的底边落在同一水平线（用户要求）。 -->
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
 
                     <!-- 存放位置（新电脑） -->
-                    <Border Translation="0,0,10" Style="{StaticResource ElevatedSurface}" Padding="14">
-                        <StackPanel Spacing="10">
+                    <Border Grid.Row="0" Translation="0,0,10" Style="{StaticResource ElevatedSurface}" Padding="14">
+                        <StackPanel Spacing="8">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon Glyph="&#xE8B7;" FontSize="16" Foreground="{StaticResource AccentBrush}"
                                           VerticalAlignment="Center"/>
@@ -463,31 +493,64 @@
                                  默认「复制所选文件夹的内容」——选 \\host\Users\d970 就让内容直接落到 C:\Users\D970 根，
                                  不再额外套一层同名目录 d970（现场 a632/be58 的错层来源）。
                                  选「保留所选文件夹本身」= 旧行为（内容落在 …\d970）。恢复既有任务时以旧 job.json 为准。 -->
+                            <!-- ★ Issue 5 修复（2026-10-14，真机验收）★
+                                 「目录映射」提示原本与标签、下拉同处**一行三列**（Auto / Auto / *）：
+                                   · 卡内可用宽 330 DIP（真机 200% DPI 实测 660 px）；
+                                   · 标签「目录映射」53.5 DIP + 下拉 MinWidth 212 DIP（实测渲染 254 DIP）
+                                     + 两处 ColumnSpacing 8 DIP = 已占 323.5 DIP；
+                                   · 留给提示的 * 列仅剩 14.5 DIP —— 46 个汉字的说明句被
+                                     TextTrimming="CharacterEllipsis" 裁成 1~2 字 + 省略号（用户报告的裁切）。
+                                 修复方式 = **改行布局，不改字号**（任务令明令禁止靠缩小字体解决）：
+                                   把提示从同一行移到**独立整行**，让它拿到卡片完整内容宽 330 DIP；
+                                   上一行只留「标签 + 下拉」，并把下拉的最小宽度收敛为 Auto —— 
+                                   MinWidth 212 是当年为「与线程数下拉对齐」设的，但本行本就
+                                   没有第二个下拉要与它对齐，保留它只会白白吃掉提示的位置。
+                                 提示自身改为可换行（去 TextTrimming）：文本是**会随选择变化的动态说明**
+                                   （见 Step2SelectDataPage.xaml.cs:591-593 / 600-602，两种文案分别 33 / 46 字），
+                                   任何固定宽度都无法保证两种文案都完整 ⇒ 按真值换行是唯一诚实解。
+                                   行高由 RowHeight Token 承接，符合硬性规范 R18（行高 ≥ 自然行高 + 余量）。 -->
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Style="{StaticResource PCMigTextFieldLabel}" Text="目录映射" VerticalAlignment="Center"/>
-                                <ComboBox x:Name="FolderMappingCombo" Grid.Column="1" MinWidth="212"
+                                <ComboBox x:Name="FolderMappingCombo" Grid.Column="1"
                                           Style="{StaticResource PcmigComboBoxRollStyle}"
                                           SelectedIndex="0" SelectionChanged="FolderMappingCombo_SelectionChanged">
                                     <ComboBoxItem Content="复制所选文件夹的内容（推荐）"/>
                                     <ComboBoxItem Content="保留所选文件夹本身"/>
                                 </ComboBox>
-                                <TextBlock x:Name="FolderMappingHint" Grid.Column="2" TextWrapping="NoWrap"
-                                           Style="{StaticResource PCMigTextHintBody}" TextTrimming="CharacterEllipsis"
-                                           VerticalAlignment="Center"/>
                             </Grid>
+                            <TextBlock x:Name="FolderMappingHint" TextWrapping="Wrap"
+                                       Style="{StaticResource PCMigTextHintBody}"
+                                       HorizontalAlignment="Left"/>
                         </StackPanel>
                     </Border>
 
                     <!-- 执行 -->
-                    <Border Translation="0,0,14" Style="{StaticResource ElevatedSurface}" Padding="14">
-                        <StackPanel Spacing="10">
-                            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="执行"/>
-                            <Button x:Name="PrepareButton" AutomationProperties.AutomationId="Step2.Prepare" Style="{StaticResource PCMigSecondaryButton}" IsEnabled="True"
+                    <!-- ★ v0.5.4 Preview.2 真机修复（2026-10-16，用户任务令 §四）★
+                         本块曾在 Issue 6b（2026-10-14）把「预检并生成计划」与「开始迁移」并排成
+                         两列（2 列 * / *），当时的前提是下方还有一段提示文本，并排后能腾出空间。
+                         现在那段提示已被删除 ⇒ 两个按钮横排会在卡片里留下大面积空白，且
+                         「预检 → 开始迁移」本身是**有先后依赖的前进动作**，并排会让用户以为可以
+                         随便先点哪个。按用户令恢复**原始纵向布局**：两个按钮各占一整行、上下排列，
+                         宽度拉伸、内容居中，间距沿用同一 StackPanel 的 Spacing=8（与下方
+                         暂停/停止/恢复 行同一节奏）。
+                         这是**恢复原布局**，不改字号、不改颜色、不删按钮、不动其他 Step2 UI。 -->
+                    <!-- ★ v0.5.4-preview.3 高度预算（实测数据，不是估算）★
+                         在 1766×939 窗口（默认布局 0.92×0.91 @1920×1040 工作区）下用 UIA 实测：
+                           执行卡内容从「执行」标题 Y=561 起，到页脚导航按钮上沿 Y=839 止 ⇒ 可用 ≈276 DIP； 
+                         加入「不预检开始迁移」按钮(41) + 常驻风险提示(2 行 ≈28) 后，按原来的
+                         Spacing=8 / Padding=14 实测**溢出**：风险提示整块的 BoundingRectangle 为
+                         ∞（IsOffscreen=true，即完全没被布局出来）—— 用户任务令 §一 明确禁止这种情况。
+                         因此只把执行卡的间距收紧：Spacing 8→6（7 个间隔 −14 DIP）、Padding 14→12（−4 DIP），
+                         共省 18 DIP，字号 / 颜色 / 圆角 / 对齐方式 / 控件顺序全部不动。 -->
+                    <Border Grid.Row="1" Translation="0,0,14" Style="{StaticResource ElevatedSurface}" Padding="12" VerticalAlignment="Stretch"
+                            AutomationProperties.Name="执行">
+                        <StackPanel Spacing="4">
+                            <Button x:Name="PrepareButton" AutomationProperties.AutomationId="Step2.Prepare"
+                                    Style="{StaticResource PCMigSecondaryButton}" IsEnabled="True"
                                     HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                     Click="Prepare_Click">
                                 <StackPanel Orientation="Horizontal" Spacing="7">
@@ -495,9 +558,25 @@
                                     <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="预检并生成计划"/>
                                 </StackPanel>
                             </Button>
+                            <!-- ★ v0.5.4-preview.3 ★「不预检开始迁移」：位置固定在
+                                 「预检并生成计划」与「开始迁移」之间（用户任务令指定的顺序）。
+                                 跳过的是 PreflightChecker 那一段检查；Job 创建 / 源扫描 /
+                                 扫描残缺闸门 / Planner / 回执与 Step4 验证全部照旧走同一条引擎。
+                                 视觉沿用 PCMigSecondaryButton（与预检按钮同级），不新增样式、不改圆角。 -->
+                            <Button x:Name="SkipPreflightButton" AutomationProperties.AutomationId="Step2.SkipPreflight"
+                                    Style="{StaticResource PCMigSecondaryButton}" IsEnabled="True"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                    Click="SkipPreflight_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <FontIcon Glyph="&#xE7BA;" FontSize="14"/>
+                                    <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="不预检开始迁移"/>
+                                </StackPanel>
+                            </Button>
                             <!-- 恒由真实计划驱动：HasPlan（plan.Objects.Count > 0）为假时**保持不可点**。 -->
-                            <Button x:Name="StartButton" AutomationProperties.AutomationId="Step2.Start" Style="{StaticResource PCMigPrimaryButton}" IsEnabled="False"
-                                    HorizontalAlignment="Stretch" Click="Start_Click">
+                            <Button x:Name="StartButton" AutomationProperties.AutomationId="Step2.Start"
+                                    Style="{StaticResource PCMigPrimaryButton}" IsEnabled="False"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                    Click="Start_Click">
                                 <StackPanel Orientation="Horizontal" Spacing="9">
                                     <FontIcon Glyph="&#xE768;" FontSize="15"/>
                                     <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="开始迁移"/>
@@ -529,29 +608,34 @@
                             <!-- ★ FIX BATCH 6（§9）★ 右侧执行卡只承载**短句**：MaxLines=2 + 字符省略，
                                  长状态句归左侧提示面板；完整文本在 ToolTip 上。
                                  底栏与页面的其它几何保持 BATCH 5 已收口的状态，本批不再动。 -->
-                            <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" TextWrapping="Wrap"
-                                       MaxLines="2" TextTrimming="CharacterEllipsis"
-                                       x:Name="StateMessageText"
-                                       Text="开始迁移前会先做预检（目标空间 / 权限 / 同名冲突），任一项不通过会给出可执行的修复建议。"/>
+                            <StackPanel Spacing="4">
+                                <TextBlock Style="{StaticResource PCMigTextStepSubtitle}" TextWrapping="Wrap"
+                                           MaxLines="2" TextTrimming="CharacterEllipsis"
+                                           x:Name="StateMessageText"
+                                           Text="开始迁移前会先做预检（目标空间 / 权限 / 同名冲突），任一项不通过会给出可执行的修复建议。"/>
+                                <!-- ★ v0.5.4-preview.3 ★「不预检」的常驻风险提示（用户任务令 §三 指定的原句）。
+                                     独立于 StateMessageText：那条是随状态变化的短句、会被 SetOperational 覆盖；
+                                     这一句不随状态消失，始终提醒代价与推荐做法。
+                                     提醒**不代替**真实失败检测——实际错误仍由失败清单 / 回执 / Step4 报告记录。
+                                     与状态句同处一个 Spacing=4 的提示组：两者都是"提示文字"，按一组排布
+                                     比各占一行（8 DIP 间距）再省 2 DIP，是高度预算里的必要取舍。 -->
+                                <TextBlock x:Name="SkipPreflightRiskText" Style="{StaticResource PCMigTextStepSubtitle}"
+                                           TextWrapping="Wrap"
+                                           Text="不预检开始迁移可能导致文件传输失败、文件遗漏或迁移后需要重新处理，建议优先执行预检。"/>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
 
-                    <!-- 连接与安全提示 -->
-                    <Border Translation="0,0,8" Style="{StaticResource SecondarySurface}" Padding="14">
-                        <StackPanel Spacing="8">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon Glyph="&#xE72E;" FontSize="15" Foreground="{StaticResource TextSecondaryBrush}"
-                                          VerticalAlignment="Center"/>
-                                <TextBlock Style="{StaticResource PCMigTextHintTitle}" Text="连接与安全提示" VerticalAlignment="Center"/>
-                            </StackPanel>
-                            <!-- ★ FIX BATCH 6（§9）★ 安全提示通道（SecurityHint）唯一落点：
-                                 凭据/账号/共享可用性相关的状态句在这里显示，不与业务运行状态混在一起。 -->
-                            <TextBlock Style="{StaticResource PCMigTextHintBody}" TextWrapping="Wrap"
-                                       x:Name="SecurityHintText"
-                                       Text="凭据只在建立连接时使用，不写入任务存档；迁移走 SMB 直拉，不经过中转服务器。"/>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
+                    <!-- ★ Issue 6（2026-10-14）★ 「连接与安全提示」卡已按用户指示**移除**。
+                         原卡（Grid.Row="2"，SecondarySurface，内含 SecurityHintText）是
+                         SecurityHint 通道在 Step2 的唯一落点，但它是造成右栏溢出 62.5 DIP
+                         的直接原因，且内容是静态凭据说明（Step1 连接段已有等价提示）。
+                         ★ R2 接手修复 · 缺陷 G（2026-10-17）★ 移卡时这条通道**没有重新落点**，
+                         于是「未提供密码」这类安全提示有值、用户永远看不到。现已收回左侧
+                         四页共用的提示卡（ShellHintCard.HintSecurityText）—— 那里可滚动、
+                         自适应高度，多一行不会撑破布局，右栏高度预算无需变动。
+                         若日后需要在本页恢复该卡，请连同右栏高度预算一起重新核算（勿直接加回）。 -->
+                </Grid>
             </Grid>
     </Grid>
 </UserControl>

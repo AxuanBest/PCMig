@@ -41,6 +41,25 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     private readonly Dictionary<string, SourceShareFact> _shareFacts = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// ★ 2026-10-24（R1-6B 发布阻断）★ **子路径诊断**：键 = 比所属共享根更深的完整路径
+    /// （<c>\\host\share\sub\...</c>），值 = 最近一次"读不到"的现场原因。
+    ///
+    /// 【为什么单列一张表，而不是直接写进 `_shareFacts`】子路径读不到**不能否证共享根读得到**：
+    /// 目录不存在、该目录 ACL 不含当前账号、路径已随迁移被清空，都会让子路径探测失败，
+    /// 而共享本身完全可用。把这种结论写成共享级"失效"，`Derive` 就会同时看到
+    /// fresh（共享根可达）与 dead（子路径）⇒ 恒 Partial 琥珀 —— 就是发布阻断要修的假黄灯。
+    ///
+    /// 但它也**不是**可以丢掉的信息：真实存在的"指定子目录访问不了"必须让用户看见，
+    /// 所以它在这里独立保存，由 <see cref="UpdateSourceState"/> 折成**有依据的 Partial**，
+    /// 而不是被"已连接"吞掉（要求：不允许简单隐藏黄色状态）。
+    ///
+    /// 复用 <see cref="SourceShareFact"/> 是为了让它**同样受 <see cref="EvidenceTtl"/> 约束**：
+    /// 子路径读不到是"某一时刻的现场结论"，和可达证据一样会过期。没有有效期的话，
+    /// 一次瞬断留下的诊断会让灯永久变黄，那又变成另一种不可自愈的假黄灯。
+    /// </summary>
+    private readonly Dictionary<string, SourceShareFact> _subPathIssues = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// ★ P0-05（2026-10-13 定点修复）★ **可达证据的有效期**。超过它就不得再显示"已连接"：
     /// 绿灯的唯一含义是"刚刚确认过读得到"，而不是"几分钟前读到过"。
     /// 默认 60 秒（用户指定的隔离测试目标："60 秒内不再错误显示已连接"）；依据见
@@ -80,8 +99,94 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     internal static Func<string, int> ShareCountProbe =
         host => PCMig.Core.Native.NetworkShare.EnumShares(host).Count;
 
+    /// <summary>
+    /// ★ 2026-10-23（真机 P0-06 / 黄灯专项）★ **共享级**只读探测（**测试缝**）：枚举指定共享根的一层目录项。
+    ///
+    /// 【为什么必须换成共享级】原来的空闲探测走 <see cref="ShareCountProbe"/>（主机级
+    /// <c>NetShareEnum</c>）。现场旧电脑不导出 <c>IPC$</c>（错误 67），该调用必抛 ⇒ 每 20 秒把证据
+    /// 整个清空一次 ⇒ 灯永远回不到绿。更要紧的是它证明的只是"这台主机还肯回答问题"，
+    /// 而用户关心的是一条具体共享 <c>\\host\e</c> 现在还读不读得到 —— 两者不是一回事
+    /// （任务书 B1：「连接灯不应只代表 TCP 445 可达」）。
+    ///
+    /// 【为什么不用 Directory.Exists】它吞掉异常只返回 false，拿不到 Win32 码，
+    /// 于是"凭据失效(1326)"和"网络瞬断(53)"会被压成同一个结论 —— 前者该红、后者只能说"不知道"。
+    /// 这里显式枚举以让异常带着码抛出来，由 <see cref="ClassifyProbeFailure"/> 分级。
+    ///
+    /// 【开销】一层枚举、只读、不开临时文件、不改会话；单次往返量级与一次 <c>NetShareEnum</c> 相当。
+    /// </summary>
+    internal static Func<string, bool> ShareReadProbe = unc =>
+    {
+        // 惰性序列必须真的走一步才会发出 SMB 请求（空目录也算读得到）。
+        using var entries = Directory.EnumerateFileSystemEntries(unc).GetEnumerator();
+        _ = entries.MoveNext();
+        return true;
+    };
+
+    /// <summary>
+    /// ★ 2026-10-23 ★ 探测失败分级：**只有"权威失效"才允许写失效证据**，其余一律当"没有结论"。
+    /// 这是任务书 B4 ②⑤⑥⑦⑧ 的直接落地 —— 把"未知"误判成"断开"会让灯乱红，
+    /// 比原来的"永远黄"更糟（用户会去重连一台其实好好的电脑）。
+    /// </summary>
+    private static (bool AuthoritativeLoss, int Win32) ClassifyProbeFailure(Exception ex)
+    {
+        var code = ex.HResult & 0xFFFF;
+        // 权威失效：共享名已不存在(67) / 拒绝访问(5) / 凭据失效(1219,1326)。
+        // 这几条都来自**这一次对这条共享根**的实测，作用域就是这条共享，不牵连同主机其他共享。
+        var authoritative = code switch
+        {
+            5 or 67 or 1219 or 1326 => true,
+            _ => false,
+        };
+        return (authoritative, code);
+    }
+
     /// <summary>★ P0-05 ★ 是否处于"已确认失效、正在重探/重连"的恢复过程（⇒ Recovering）。</summary>
     private bool _recovering;
+
+    /// <summary>
+    /// ★ 2026-10-23（Preview.7 收口 P0）★ **预检执行的测试缝**：默认就是真实
+    /// <see cref="PreflightChecker.RunAsync"/>，单测换成受控实现即可在**不碰真实 SMB**的前提下
+    /// 走完 <see cref="ConnectAsync"/> 的完整业务入口（含落库、IsConnected、投影）。
+    ///
+    /// 为什么需要它：本轮 P0 的验收要求是"必须新增真实业务入口级测试，不能只通过直接调用
+    /// <see cref="NotifyShareReachability"/> 证明成功"。而 <c>ConnectAsync</c> 的真实预检要连一台
+    /// 真实旧电脑 —— 单测进程里永远做不到。缝只替换"外部世界的回答"，**落库规则、键归一、
+    /// 作用域摘除、状态派生全部仍由正式代码计算**（与 <c>ShareReadProbe</c> 同一纪律）。
+    /// </summary>
+    internal static Func<ILogger, string, string?, string?, IReadOnlyList<string>, string?, long, bool,
+        Task<PreflightReport>> PreflightRunner =
+        (log, host, user, password, sources, targetRoot, estimatedBytes, benchmark) =>
+            new PreflightChecker(log).RunAsync(host, user, password, sources, targetRoot, estimatedBytes, benchmark);
+
+    /// <summary>
+    /// ★ 2026-10-23（Preview.7 收口 P0）★ **SMB 会话建立的测试缝**（同 <see cref="PreflightRunner"/> 纪律）：
+    /// 默认就是真实的 <see cref="NetworkShare.ConnectForTransfer"/>。返回 <see langword="null"/> 表示
+    /// "现有本机连接已够用"，与生产语义一致。
+    /// </summary>
+    internal static Func<string, string?, string?, IReadOnlyList<string>, ILogger, IDisposable?> ShareSessionConnector =
+        NetworkShare.ConnectForTransfer;
+
+    /// <summary>
+    /// ★ 真机问题 1（2026-10-21）★ 传输活动位：**只由真实字节增长**置位（见
+    /// <see cref="NotifyTransferActive"/>），绝不由 Phase==Running 推断。
+    /// </summary>
+    private bool _transferActive;
+
+    // ★ 2026-10-24（用户冻结的四态灯定义）★ 灯作用域与投影结果。
+    //   _lampScopeOverride：传输期间由"当前活动对象所属源共享"接管作用域；
+    //   没有它，多共享迁移中途换对象时指示灯会继续代表第一条共享 —— 用户明令禁止这种含糊。
+    private string? _lampScopeOverride;
+    private SourceLampState _lampState = SourceLampState.Disconnected;
+    private string _lampTargetScope = string.Empty;
+    private bool _lampUnknown;
+    private object? _lampTextSnapshot;
+    private object? _lampSummarySnapshot;
+
+    /// <summary>最近一次因"传输活动"续期证据的时刻（节流用：TTL 60 秒，1 秒续一次足够）。</summary>
+    private DateTime _lastActivityRenewUtc = DateTime.MinValue;
+
+    /// <summary>传输活动续期的最小间隔。</summary>
+    private static readonly TimeSpan ActivityRenewInterval = TimeSpan.FromSeconds(1);
 
     /// <summary>单条源目标的实测结论（★ 不是"上次连上过"，是"刚刚读到/读不到"★）。</summary>
     private sealed record SourceShareFact(string Target, bool Reachable, string Evidence, DateTime AtUtc);
@@ -91,12 +196,35 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     public string Host
     {
         get => _host;
-        set { if (Set(ref _host, value)) Raise(nameof(CanConnect)); }
+        set
+        {
+            if (!Set(ref _host, value)) return;
+            Raise(nameof(CanConnect));
+            // ★ 2026-10-23（Preview.7 收口 P0）★ 换了旧电脑 = 会话边界变了 ⇒ 纪元 +1，
+            //   让任何在飞的探测结论失效（它们问的是上一台机器）。
+            Interlocked.Increment(ref _sessionEpoch);
+            // ★ 2026-10-23（Preview.7 收口 P0）★ 换了旧电脑，旧主机的证据对新主机毫无意义 ——
+            //   留着它们会让"上一台机器连得上"变成"这一台也连得上"（B4 ⑨）。
+            //   注意作用域：只摘**别的**主机的键，本主机已有的共享级事实原样保留
+            //   （用户在 Step 1 重新点连接时，这批事实会被新一轮实测覆盖）。
+            ForgetFactsOfOtherHosts(value);
+        }
     }
     public string Username { get => _username; set => Set(ref _username, value); }
     public string ManualShareName { get => _manualShareName; set => Set(ref _manualShareName, value); }
     public bool BenchmarkOnConnect { get => _benchmarkOnConnect; set => Set(ref _benchmarkOnConnect, value); }
     public bool IsConnecting { get => _isConnecting; private set { if (Set(ref _isConnecting, value)) { Raise(nameof(CanConnect)); UpdateSourceState(); } } }
+
+    /// <summary>
+    /// ★ 2026-10-22 ★ harness 缝：**只搬运"正在连接"这个既有事实**，不进 Release。
+    ///
+    /// 为什么不加 formal/测试专用 API：<see langword="internal"/> 成员在整个 assembly 内可见，
+    /// 任何生产代码都能调 —— 那就成了"给正式版本加了测试入口"。这里用 <c>#if DEBUG</c>
+    /// 把它编译期排除，行为与真正的连接流程（<c>IsConnecting = true</c>）完全同一条路径。
+    /// </summary>
+#if DEBUG
+    internal void HarnessSetConnecting(bool value) => IsConnecting = value;
+#endif
 
     /// <summary>
     /// ★ 2026-10-08（真机问题 4）★ <c>IsConnected</c> 一变就同步派生 <see cref="SourceState"/>：
@@ -142,16 +270,291 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         //   旧实现只数"有没有可达事实"、从不看时间 ⇒ 撤销共享后灯可以一直绿。
         var now = Clock();
         var ledger = new PCMig.Core.Util.SourceEvidenceLedger(EvidenceTtl);
-        foreach (var f in _shareFacts.Values) ledger.Record(f.Target, f.Reachable, f.Evidence, f.AtUtc);
+        foreach (var f in _shareFacts.Values.ToArray()) ledger.Record(f.Target, f.Reachable, f.Evidence, f.AtUtc);
 
-        SourceState = MapLedgerState(ledger.Derive(now, IsConnecting, _recovering, IsConnected));
+        var state = MapLedgerState(ledger.Derive(now, IsConnecting, _recovering, IsConnected));
 
-        // 底栏文案与"是哪一条失效"一起变化（多共享场景必须可定位）。
-        Raise(nameof(UnreachableShares));
-        Raise(nameof(VerifiedReachableTargets));
-        Raise(nameof(SourceStateDetail));
-        Raise(nameof(EvidenceExpiredTargets));
+        // ★ 2026-10-24（R1-6B 发布阻断）★ **子路径诊断折成有依据的 Partial**。
+        //   语义：共享根刚刚确认读得到（否则不会是 Connected），但这条共享下**某个具体子目录**
+        //   在同一有效期窗口内被实测读不到 ⇒ 这是货真价实的"部分可用"，灯必须黄。
+        //   既不能把它并进共享级失效（会伪造"整条共享坏了"），也不能当没发生（要求：不允许简单隐藏黄灯）。
+        //   过期的诊断不算数（与可达证据同一套 TTL 纪律），并在这里顺手清掉，避免无限堆积。
+        var expiredIssues = _subPathIssues
+            .Where(kv => now - kv.Value.AtUtc > EvidenceTtl).Select(kv => kv.Key).ToList();
+        foreach (var k in expiredIssues) _subPathIssues.Remove(k);
+        var freshIssues = _subPathIssues.Count;
+        if (freshIssues > 0 && state == SourceConnectionState.Connected)
+            state = SourceConnectionState.Partial;
+
+        // ★ 真机问题 1（2026-10-21）★ **已连接 + 确有传输** ⇒ 绿呼吸（Transferring）。
+        //   只在账本已经给出 Connected 时升级，绝不把 SuspectOrUnknown / Partial 也升级成绿 ——
+        //   传输活动是"证据续期"的理由，不是"跳过证据"的理由。
+        if (state == SourceConnectionState.Connected && _transferActive)
+            state = SourceConnectionState.Transferring;
+
+        // ★ 2026-10-23（真机 P0-06 / 任务书 §九 诊断增强）★
+        //   只在**有效状态变化**时落一条，且用既有 Serilog（不新开文件、不走 16 ms 节拍）。
+        //   现场日志里 81 行 app log 一条源连接状态转移都没有，导致"为什么是黄灯"只能靠读源码反推 ——
+        //   这一段就是为了让下次不用再反推。
+        var previous = _sourceState;
+        if (state != previous) LogSourceStateTransition(previous, state, now, ledger);
+
+        SourceState = state;
+
+        // ★ 2026-10-24（用户冻结的四态灯定义）★ 内部六态 → 用户可见四态的**唯一**投影点。
+        //   内部状态继续用于诊断文字与日志（哪里不健康、证据多旧），但它不再直接决定灯色。
+        RecomputeLamp(now);
+
+        // ★ Preview.6（2026-10-22）★ 派生属性**只在真变了才广播**。
+        //   改前这里无条件 Raise 三个属性名，于是本方法每被调一次（传输期间每 80 ms 一次，由
+        //   SyncTransferActivity → UpdateSourceState 驱动）就会沿 SourceStateDetail 这条分支
+        //   把 UpdateSourceConnectionIndicator() 再打一遍 —— 与"灯在闪"直接相关。
+        //   现在：值没变 ⇒ 不广播 ⇒ 下游根本不重入。状态真变了才通知，语义不变。
+        RaiseIfChanged(ref _unreachableSharesSnapshot, UnreachableShares, nameof(UnreachableShares));
+        RaiseIfChanged(ref _reachableTargetsSnapshot, VerifiedReachableTargets, nameof(VerifiedReachableTargets));
+        RaiseIfChanged(ref _expiredTargetsSnapshot, EvidenceExpiredTargets, nameof(EvidenceExpiredTargets));
+        RaiseIfChanged(ref _stateDetailSnapshot, SourceStateDetail, nameof(SourceStateDetail));
     }
+
+    /// <summary>
+    /// <summary>
+    /// ★ 2026-10-24（用户冻结的四态灯定义）★ 内部六态 → 用户可见四态的投影。
+    ///
+    /// 【产品定义（冻结，不再讨论）】
+    ///   · 红常亮 <see cref="SourceLampState.Disconnected"/> —— 未连接源共享；
+    ///   · 黄呼吸 <see cref="SourceLampState.Connecting"/>   —— 正在寻找共享 / 建立连接 / 重新连接（含正在验证）；
+    ///   · 绿常亮 <see cref="SourceLampState.Connected"/>    —— 已连接源共享，当前无实际数据传输；
+    ///   · 绿呼吸 <see cref="SourceLampState.Transferring"/> —— 已连接源共享，且确有数据传输活动。
+    /// 禁止第五种灯色；禁止把 Partial / SuspectOrUnknown 当灯色；禁止因子目录 ACL 错误变黄。
+    ///
+    /// 【为什么灯要有"作用域"】
+    ///   多共享场景下"有没有连上"必须回答"连上的是哪一条"。规则：
+    ///   ① 传输中 ⇒ 当前活动对象所属源共享（<c>_lampScopeOverride</c>，由 NotifyTransferActive 捕获）；
+    ///   ② 迁移开始前 ⇒ 勾选列表中的第一条共享（并在 <see cref="LampScopeSummary"/> 里写明是它）；
+    ///   ③ 一条都没勾 ⇒ 退回主机级事实。
+    ///   这样"某条非当前共享的子目录报错"不会把当前共享的绿灯打黄。
+    ///
+    /// 【证据不足怎么办（不得虚构绿色，也不得谎报断开）】
+    ///   作用域内既无新鲜可达证据、也无失效证据 ⇒ 灯按**保守**处理为红常亮，
+    ///   同时在 <see cref="LampText"/> 里如实写明"证据已过期、正在重新确认"，并立刻把空闲探测
+    ///   提前到最近一拍（见 <see cref="ProbeIfDueAsync"/> 的 LastProbeUtc 语义）由它给出结论。
+    ///   只有确实处于连接/重连/验证过程中才显示黄呼吸 —— 那时"正在连接"是真话。
+    /// </summary>
+    private void RecomputeLamp(DateTime nowUtc)
+    {
+        var scope = ComputeLampScope();
+        var (reachable, dead, unknown) = ScopeEvidence(scope, nowUtc);
+
+        // 四态判定本身抽成纯函数（ProjectLampState），便于单元测试逐条钉住映射，
+        // 不必依赖"能不能把 IsConnecting 设成中间态"这种不可观测条件。
+        var lamp = ProjectLampState(IsConnecting, _recovering, reachable, _transferActive);
+
+        // 传输结束后作用域回归默认（勾选列表第一条），避免灯一直盯着上一趟的对象。
+        if (!_transferActive) _lampScopeOverride = null;
+
+        _lampTargetScope = scope;
+        _lampUnknown = unknown && !dead;
+        LampState = lamp;
+        RaiseIfChanged(ref _lampTextSnapshot, LampText, nameof(LampText));
+        RaiseIfChanged(ref _lampSummarySnapshot, LampScopeSummary, nameof(LampScopeSummary));
+    }
+
+    /// <summary>
+    /// ★ 2026-10-24（用户冻结的四态灯定义）★ **内部判据 → 四态**的唯一纯函数。
+    /// 顺序即优先级：正在连接/重连/验证 &gt; 已连接且有传输 &gt; 已连接空闲 &gt; 未连接。
+    /// 注意最后一路是"兜底为红"：证据过期也走这里 —— 保守，但文字里必须说明"正在重新确认"，
+    /// 绝不为了好看而借用黄色（黄色只表示"真的在连"）。
+    /// </summary>
+    internal static SourceLampState ProjectLampState(bool connecting, bool recovering, bool reachable, bool transferActive)
+        => connecting || recovering ? SourceLampState.Connecting
+         : reachable && transferActive ? SourceLampState.Transferring
+         : reachable ? SourceLampState.Connected
+         : SourceLampState.Disconnected;
+    /// <summary>
+    /// 计算指示灯当前代表的作用域（主机级键或共享级键）。纯函数，便于单元测试直接断言。
+    /// </summary>
+    internal string ComputeLampScope()
+    {
+        if (_transferActive && !string.IsNullOrWhiteSpace(_lampScopeOverride))
+            return _lampScopeOverride!;
+
+        var roots = SelectedShareRoots();
+        if (roots.Count > 0) return ShareScopeOf(roots[0]);
+
+        var host = Host?.Trim() ?? string.Empty;
+        return host.Length > 0 ? ShareScopeOf(NormalizeTarget(host)) : string.Empty;
+    }
+
+    /// <summary>
+    /// 读取某个作用域的证据档位：可达且未过期 / 明确失效 / 无结论。
+    /// ★ 只认**本作用域**的事实：别的共享可达不能证明这一条可达（这正是 Partial 不能被绿灯掩盖的原因）。
+    /// </summary>
+    private (bool Reachable, bool Dead, bool Unknown) ScopeEvidence(string scope, DateTime nowUtc)
+    {
+        if (string.IsNullOrEmpty(scope)) return (false, false, true);
+        if (!_shareFacts.TryGetValue(scope, out var fact)) return (false, false, true);
+        if (!fact.Reachable) return (false, true, false);
+        return nowUtc - fact.AtUtc <= EvidenceTtl
+            ? (true, false, false)
+            : (false, false, true);   // 可达事实已过期 ⇒ 无结论（不冒充绿色，也不冒充断开）
+    }
+
+    /// <summary>
+    /// ★ 2026-10-24 ★ 用户可见的四态灯（唯一权威）。View 只读它，不再自己 switch 内部六态。
+    /// </summary>
+    public SourceLampState LampState
+    {
+        get => _lampState;
+        private set => Set(ref _lampState, value);
+    }
+
+    /// <summary>指示灯作用域（主机或共享 UNC），用于"这盏灯代表哪条共享"的显式说明。</summary>
+    public string LampTargetScope => _lampTargetScope;
+
+    /// <summary>
+    /// ★ 2026-10-24 ★ 四态可读文案。四态不够细，但"为什么是红的"必须说清楚：
+    /// 证据过期 ≠ 确认断开，所以这里把两种情况在文字上分开，颜色保持一致（不新增灯色）。
+    /// </summary>
+    public string LampText => LampState switch
+    {
+        SourceLampState.Connected => "已连接（源共享实测可读）",
+        SourceLampState.Transferring => "已连接，正在传输",
+        SourceLampState.Connecting => "正在连接 / 重新连接旧电脑…",
+        _ when _lampUnknown => "未确认连接（可访问证据已过期，正在重新确认）",
+        _ => "未连接源共享",
+    };
+
+    /// <summary>
+    /// ★ 2026-10-24 ★ 多共享汇总：X/Y 可访问 + 灯当前代表哪条共享。
+    /// 要求：不能用单条共享的绿代表所有共享正常，也不能因为非当前共享的子目录报错把当前灯打黄。
+    /// </summary>
+    public string LampScopeSummary
+    {
+        get
+        {
+            var roots = SelectedShareRoots()
+                .Select(ShareScopeOf)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var nowUtc = Clock();
+            var ok = roots.Count(r => ScopeEvidence(r, nowUtc).Reachable);
+            var target = _lampTargetScope;
+            var name = string.IsNullOrEmpty(target) ? "（未选择共享）" : target;
+            return roots.Count <= 1
+                ? $"指示灯作用域：{name}"
+                : $"指示灯作用域：{name}；可访问 {ok}/{roots.Count} 个共享";
+        }
+    }
+    /// ★ 2026-10-23（真机 P0-06 / 任务书 §九 诊断增强）★ 源连接状态**有效变化**时记一条。
+    ///
+    /// 任务书要求的 11 项在这里一一落位（脱敏后）：
+    ///   ① 时间戳；② 源主机（只记主机名，不含凭据与用户名）；③ 当前/前一状态；④ 变更原因；
+    ///   ⑤ 成功证据来源与采集时间；⑥ 证据有效期与年龄；⑦ 最近一次真实源共享访问结果；
+    ///   ⑧ 最近一次失败类型与作用范围；⑨ 阶段与暂停状态（由调用方视角决定，这里记可得的）；
+    ///   ⑩ 传输活动判据；⑪ 最终 UI 状态（即本次落库的 state）。
+    ///
+    /// ★ 纪律 ★ 只在状态**真的变了**时调用；不写文件、不新开 sink，走既有 app logger；
+    ///   同样的状态反复推导不会产生任何一行（这就是"不在节拍上写盘"的保证）。
+    /// </summary>
+    private void LogSourceStateTransition(
+        SourceConnectionState previous,
+        SourceConnectionState current,
+        DateTime nowUtc,
+        PCMig.Core.Util.SourceEvidenceLedger ledger)
+    {
+        try
+        {
+            var fresh = _shareFacts.Values.Count(f => f.Reachable && nowUtc - f.AtUtc <= EvidenceTtl);
+            var dead = _shareFacts.Values.Count(f => !f.Reachable);
+            var expired = _shareFacts.Values.Count(f => f.Reachable && nowUtc - f.AtUtc > EvidenceTtl);
+            var newestReachable = _shareFacts.Values
+                .Where(f => f.Reachable)
+                .OrderByDescending(f => f.AtUtc)
+                .FirstOrDefault();
+            var oldestAge = _shareFacts.Values.Count == 0
+                ? double.NaN
+                : (nowUtc - _shareFacts.Values.Min(f => f.AtUtc)).TotalSeconds;
+
+            _log.Information(
+                "源连接状态转移：{Previous} → {Current} | host={Host} | 原因={Reason} | " +
+                "账本=fresh:{Fresh} dead:{Dead} expired:{Expired} 子路径诊断:{SubPathIssues} | 有效期={TtlSeconds:0}s 最旧证据年龄={OldestAge:0.0}s | " +
+                "最新可达证据={Evidence} @{EvidenceAt:HH:mm:ss}@{EvidenceAge:0.0}s 前 | " +
+                "最近失败={LastFailure} 作用域={FailureScope} | 传输活动=_transferActive:{TransferActive} | " +
+                "连接位=IsConnected:{IsConnected} 连接中={IsConnecting} 恢复中={Recovering}",
+                previous,
+                current,
+                Host?.Trim() ?? "(none)",
+                ReasonForState(current, fresh, dead, expired, _subPathIssues.Count),
+                fresh,
+                dead,
+                expired,
+                _subPathIssues.Count,
+                EvidenceTtl.TotalSeconds,
+                oldestAge,
+                newestReachable?.Evidence ?? "(none)",
+                newestReachable?.AtUtc.ToLocalTime(),
+                newestReachable is null ? double.NaN : (nowUtc - newestReachable.AtUtc).TotalSeconds,
+                _probeInconclusiveReason ?? "(none)",
+                dead > 0 ? "共享级（该共享根实测失效）" : "主机/共享级（见 UnreachableShares）",
+                _transferActive,
+                IsConnected,
+                IsConnecting,
+                _recovering);
+        }
+        catch (Exception ex)
+        {
+            // 诊断本身绝不影响业务状态推导。
+            _log.Debug(ex, "源连接状态转移日志写入失败（忽略）");
+        }
+    }
+
+    /// <summary>把"为什么落到这个状态"翻译成一句可核对的话（纯派生，不产生新事实）。</summary>
+    private static string ReasonForState(SourceConnectionState state, int fresh, int dead, int expired, int subPathIssues = 0) => state switch
+    {
+        SourceConnectionState.Transferring => "可达证据新鲜 + 引擎确认的字节增长",
+        SourceConnectionState.Connected => $"可达证据新鲜（fresh={fresh}）",
+        SourceConnectionState.Partial => (dead > 0, subPathIssues > 0) switch
+        {
+            (true, true) => $"同时存在可达与失效证据（fresh={fresh}，dead={dead}），另有子路径读不到（{subPathIssues} 条）",
+            (true, false) => $"同时存在可达与失效证据（fresh={fresh}，dead={dead}）",
+            _ => $"共享根可达但指定子路径读不到（fresh={fresh}，子路径诊断={subPathIssues}）",
+        },
+        SourceConnectionState.SuspectOrUnknown => expired > 0
+            ? $"可达证据全部过期（expired={expired}，超过 {EvidenceTtlSeconds:0} 秒）"
+            : "只有历史连接事实，没有任何实测证据",
+        SourceConnectionState.Recovering => "已确认失效，正在重连/重探",
+        SourceConnectionState.Connecting => "正在建立连接并探测共享",
+        _ => dead > 0 ? $"只有失效证据（dead={dead}）" : "没有任何可用证据",
+    };
+
+    private static double EvidenceTtlSeconds => EvidenceTtl.TotalSeconds;
+
+    /// <summary>
+    /// ★ Preview.6 ★ 值没变就不广播（<c>INotifyPropertyChanged</c> 的通行纪律）。
+    /// 这几个派生属性每次都会**新造**一个 List，因此必须按**内容**比较而不能比引用；
+    /// 内容没变 ⇒ 静默返回，下游（底栏指示灯投影）根本不会被叫起来。
+    /// </summary>
+    private void RaiseIfChanged<T>(ref object? snapshot, T current, string propertyName)
+    {
+        if (SequenceEqual(snapshot, current)) return;
+        snapshot = current;
+        Raise(propertyName);
+    }
+
+    private static bool SequenceEqual(object? snapshot, object? current) => (snapshot, current) switch
+    {
+        (null, null) => true,
+        (null, _) or (_, null) => false,
+        (string a, string b) => string.Equals(a, b, StringComparison.Ordinal),
+        (IReadOnlyList<string> a, IReadOnlyList<string> b) => a.SequenceEqual(b, StringComparer.Ordinal),
+        _ => Equals(snapshot, current),
+    };
+
+    // 上述派生属性的"上次广播值"快照（只用于抑制重复通知，不参与任何业务判定）。
+    private object? _unreachableSharesSnapshot;
+    private object? _reachableTargetsSnapshot;
+    private object? _expiredTargetsSnapshot;
+    private object? _stateDetailSnapshot;
 
     /// <summary>账本状态 → 底栏状态（一一对应；枚举分开是为了让 Core 侧规则可被单测推进时间验证）。</summary>
     private static SourceConnectionState MapLedgerState(PCMig.Core.Util.SourceEvidenceState state) => state switch
@@ -174,7 +577,7 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         {
             var now = Clock();
             var ledger = new PCMig.Core.Util.SourceEvidenceLedger(EvidenceTtl);
-            foreach (var f in _shareFacts.Values) ledger.Record(f.Target, f.Reachable, f.Evidence, f.AtUtc);
+            foreach (var f in _shareFacts.Values.ToArray()) ledger.Record(f.Target, f.Reachable, f.Evidence, f.AtUtc);
             return ledger.ExpiredReachable(now).Select(f => f.Target).ToList();
         }
     }
@@ -205,43 +608,238 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// ★ P0-05 ★ 有界异步读探测：用 <see cref="PCMig.Core.Native.NetworkShare.EnumShares(string)"/>
-    /// （一次 SMB NetShareEnum 往返）重新证实主机是否读得到。
-    /// ★ 纪律 ★ 只用"真的读到了"当证据：不用 ping、不用网卡在线、不用历史连接成功；
-    /// 探测超时/权限不足/瞬态失败 ⇒ 视为"没有得出结论"（待确认），既不冒充可达、也不冒充已断开。
+    /// ★ P0-05 ★ 有界异步读探测：重新证实**指定的源共享**是否读得到。
+    ///
+    /// ★ 2026-10-23（真机 P0-06）★ 探测对象从"主机"降到"共享根"：
+    ///   · 有已勾选/已添加的共享 ⇒ 逐条对它做一次只读目录枚举（<see cref="ShareReadProbe"/>），
+    ///     结论按**共享级键**写入账本，与连接的落库键、引擎失败信号的键终于同一套键空间
+    ///     （原来主机级 `\\host` 上的成功永远清不掉共享级 `\\host\share` 上的旧失效 ⇒ 恒 Partial 黄）；
+    ///   · 一条共享都没有（例如刚预检完还没选）⇒ 退回主机级 <see cref="ShareCountProbe"/>，
+    ///     这时的结论作用域也如实标成主机级。
+    ///
+    /// ★ 纪律 ★
+    ///   ① 只用"真的读到了"当证据：不用 ping、不用网卡在线、不用历史连接成功；
+    ///   ② 失败要分级（<see cref="ClassifyProbeFailure"/>）：只有权威失效才写失效证据，
+    ///      超时/网络瞬断/无权限细节不明 ⇒ "没有得出结论"，**不动已有证据**；
+    ///   ③ "没有得出结论" ≠ "销毁证据"：旧实现走 <see cref="NotifyProbeInconclusive"/> 时把
+    ///      `_shareFacts` 整个清空，等于每次探测失败都自毁一次绿灯的依据。
     /// </summary>
     private async Task ProbeIfDueAsync(DateTime nowUtc)
     {
         var host = Host;
         if (string.IsNullOrWhiteSpace(host)) return;
         if (_shareFacts.Count == 0 && !IsConnected) return;          // 还没连过就没有可证伪的对象
+        if (_transferActive) return;                                 // 传输中引擎读字节已是最新证据，见方法注释②
         if (nowUtc - _lastProbeUtc < ProbeInterval) return;          // 有界：间隔不到不发请求
         if (!await _probeGate.WaitAsync(0).ConfigureAwait(false)) return;  // 单飞：已有探测在跑
+
+        // 探测发起时的会话纪元（见 _sessionEpoch 注释）：迟到结论必须能被识别并丢弃。
+        var epochAtStart = _sessionEpoch;
 
         try
         {
             _lastProbeUtc = nowUtc;
-            bool reachable;
-            string evidence;
-            try
+            var targets = SelectedShareRoots();                      // 已勾选共享根（共享级证据）
+
+            // ★ 2026-10-24（R1-6B 复审 P1-1）★ 子路径诊断必须能被**复证**，否则 TTL 一到期就默默翻绿。
+            //   每轮最多复证 2 条（按写入时间从旧到新），与共享根共用同一个总预算：
+            //   复证成功 ⇒ 诊断撤销并留下"该子路径已可读"的可达证据；
+            //   复证仍是权威失败 ⇒ 诊断刷新时间戳（继续黄，但证明我们确实在盯）；
+            //   复证无结论（超时/瞬断）⇒ 什么都不写，保持原诊断等下一轮。
+            //   这样 60 秒 TTL 的含义就从"诊断自动消失"变成"必须被重新确认过"，不再有静默翻绿。
+            var subTargets = _subPathIssues.Values
+                .OrderBy(v => v.AtUtc)
+                .Take(2)
+                .Select(v => v.Target)
+                .ToArray();
+
+            if (targets.Count == 0)
             {
-                var shareCount = await Task.Run(() => ShareCountProbe(host)).ConfigureAwait(false);
-                reachable = shareCount > 0;
-                evidence = reachable
-                    ? $"空闲期读探测：枚举到 {shareCount} 个共享"
-                    : "空闲期读探测：枚举到 0 个共享";
-            }
-            catch (Exception ex)
-            {
-                PostToUi(() => NotifyProbeInconclusive($"空闲期读探测未能得出结论：{ex.GetType().Name}"));
+                // 一条共享都没有（刚预检完还没选）⇒ 退回主机级枚举，结论作用域如实标成主机级。
+                bool hostReachable;
+                try
+                {
+                    var shareCount = await WithProbeTimeoutAsync(
+                        () => Task.Run(() => ShareCountProbe(host)),
+                        $"主机级共享枚举（{host}）").ConfigureAwait(false);
+                    hostReachable = shareCount > 0;
+                }
+                catch (Exception ex)
+                {
+                    // 主机级枚举失败只说明"枚举这条路走不通"（对方不导出 IPC$ 就是 67），
+                    // 它**不是**任何一条数据共享失效的证据 ⇒ 只记原因，不动账本。
+                    var reason = ex is TimeoutException
+                        ? $"空闲期读探测超时（{ProbeTimeout.TotalSeconds:0} 秒未返回），未得出结论"
+                        : $"空闲期读探测未能得出结论：{ex.GetType().Name}";
+                    PostToUi(() =>
+                    {
+                        if (epochAtStart != _sessionEpoch) return;    // 迟到结论，丢弃
+                        NotifyProbeInconclusivePreservingEvidence(reason);
+                    });
+                    return;
+                }
+                var hostEvidence = hostReachable ? "空闲期读探测：枚举到共享" : "空闲期读探测：枚举到 0 个共享";
+                PostToUi(() =>
+                {
+                    if (epochAtStart != _sessionEpoch) return;        // 迟到结论，丢弃
+                    NotifyShareReachability(NormalizeTarget(host), hostReachable, hostEvidence);
+                });
                 return;
             }
-            PostToUi(() => NotifyShareReachability(host, reachable, evidence));
+
+            // 共享级：逐条实测。读到了就续期它自己的证据；权威失效才写它自己的失效证据；
+            // 其余失败（超时/瞬断/无结论）保持原证据不动 —— 由 60 秒有效期自然收口。
+            //
+            // ★ 2026-10-23（Preview.7 收口 P0）★ 每条目标都套**整体超时**（不是每条 25 秒累加）：
+            //   N 条共享各阻塞 21 秒会把单飞闸门占用 N×21 秒，期间所有探测被拒。
+            //   这里用「总预算」语义：预算耗尽后剩余目标本轮直接当"无结论"，不写任何失效证据。
+            var results = await Task.Run(async () =>
+            {
+                var list = new List<(string Unc, bool Reachable, string Evidence)>(targets.Count);
+                // ★ 总预算的时钟起点：整轮探测（所有共享加在一起）最多占用 ProbeTimeout。
+                //   注意这不是"每条 25 秒"——多共享环境下按条计会累加成 N×25 秒，把单飞闸门占死。
+                var budgetSw = System.Diagnostics.Stopwatch.StartNew();
+                foreach (var unc in targets)
+                {
+                    var remaining = ProbeTimeout - budgetSw.Elapsed;
+                    if (remaining <= TimeSpan.Zero)
+                    {
+                        // 预算已耗尽：剩余目标本轮直接当"无结论"，不写任何证据（既不点绿也不判死）。
+                        list.Add((unc, true, string.Empty));
+                        continue;
+                    }
+                    try
+                    {
+                        var ok = await WithProbeTimeoutAsync(
+                            () => Task.Run(() => ShareReadProbe(unc)),
+                            $"共享根读探测（{unc}）", remaining).ConfigureAwait(false);
+                        list.Add((unc, ok, ok ? "空闲期读探测：该共享根可读" : "空闲期读探测：该共享根读不到"));
+                    }
+                    catch (TimeoutException)
+                    {
+                        // 超时 = 没有结论。既不能写成可达（伪造绿灯），也不能写成失效（伪造红灯）。
+                        list.Add((unc, true, string.Empty));
+                    }
+                    catch (Exception ex)
+                    {
+                        var (authoritative, code) = ClassifyProbeFailure(ex);
+                        if (authoritative)
+                            list.Add((unc, false, $"空闲期读探测：该共享根访问失败（Win32 {code}）{ex.GetType().Name}"));
+                        else
+                            list.Add((unc, true, string.Empty));   // 空证据占位，下面过滤掉（不写 dead）
+                    }
+                }
+
+                // 第二轮：子路径诊断复证（见方法开头 subTargets 的说明）。
+                foreach (var sub in subTargets)
+                {
+                    var remaining = ProbeTimeout - budgetSw.Elapsed;
+                    if (remaining <= TimeSpan.Zero) break;
+                    try
+                    {
+                        var ok = await WithProbeTimeoutAsync(
+                            () => Task.Run(() => ShareReadProbe(sub)),
+                            $"子路径读复证（{sub}）", remaining).ConfigureAwait(false);
+                        list.Add((sub, ok, ok
+                            ? "空闲期读复证：该子路径已可读"
+                            : "空闲期读复证：该子路径仍读不到"));
+                    }
+                    catch (TimeoutException)
+                    {
+                        // 无结论：不写任何东西，保留原诊断等下一轮（既不清诊断也不刷新）。
+                    }
+                    catch (Exception ex)
+                    {
+                        var (authoritative, code) = ClassifyProbeFailure(ex);
+                        if (authoritative)
+                            list.Add((sub, false, $"空闲期读复证：该子路径访问失败（Win32 {code}）{ex.GetType().Name}"));
+                    }
+                }
+                return list;
+            }).ConfigureAwait(false);
+
+            PostToUi(() =>
+            {
+                // 迟到的结论整体丢弃：会话纪元已变（换机/重连/新增共享）⇒ 这份结果属于上一段会话。
+                if (epochAtStart != _sessionEpoch) return;
+                var anyInconclusive = false;
+                foreach (var (unc, reachable, evidence) in results)
+                {
+                    if (string.IsNullOrEmpty(evidence)) { anyInconclusive = true; continue; }
+                    NotifyShareReachability(unc, reachable, evidence);
+                }
+                if (anyInconclusive)
+                    NotifyProbeInconclusivePreservingEvidence(
+                        $"空闲期读探测：部分共享根未得出结论（超时/瞬断/超过 {ProbeTimeout.TotalSeconds:0} 秒），保留原有证据");
+            });
         }
         finally
         {
             _probeGate.Release();
         }
+    }
+
+    /// <summary>
+    /// ★ 2026-10-23（Preview.7 收口 P0）★ 给一次探测套上**硬超时**。
+    ///
+    /// 为什么必须有：不可达的 UNC 在 Windows 内核里会阻塞到协议超时（实测 21,053 ms），
+    /// 而 <c>Task.Run</c> 只是把阻塞挪到线程池，并不会让它变短。没有超时的话，
+    /// 单飞闸门会被一条坏共享占住二十秒以上，下一次 20 秒周期的探测全部被
+    /// <c>WaitAsync(0)</c> 拒掉 —— 表现为"共享明明恢复了，灯却要等很久才回绿"。
+    ///
+    /// 注意：超时只让**本次调用**放弃结论，不取消底层那次读（.NET 无法中断内核里的
+    /// SMB 往返）；底层返回后由会话纪元与账本覆盖语义兜住，不会污染后续状态。
+    /// </summary>
+    private static async Task<T> WithProbeTimeoutAsync<T>(Func<Task<T>> operation, string what, TimeSpan? budget = null)
+    {
+        var timeout = budget ?? ProbeTimeout;
+        if (timeout <= TimeSpan.Zero) throw new TimeoutException($"{what}：总预算已耗尽，本轮不探测");
+        try
+        {
+            return await operation().WaitAsync(timeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // 带上下文的超时（`WaitAsync` 抛的是裸 TimeoutException，这里补上"是哪一条"）。
+            throw new TimeoutException($"{what} 超过 {timeout.TotalSeconds:0.#} 秒未返回");
+        }
+    }
+
+    /// <summary>单次探测的硬超时（2026-10 实测：不可达 UNC 约 21 秒返回；给它留 4 秒余量）。</summary>
+    internal static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(25);
+
+    /// <summary>
+    /// ★ 2026-10-23（Preview.7 收口 P0）★ **会话纪元**：每次"会话边界"变化就 +1。
+    /// 边界 = 换旧电脑 / 连接流程开始 / 手工共享成功 / 显式失效与恢复。
+    /// 探测发起时记下纪元，回投结论前比对 —— 不一致说明这份结论属于上一段会话，必须丢弃。
+    /// </summary>
+    private long _sessionEpoch;
+
+    /// <summary>
+    /// ★ 2026-10-23（Preview.7 收口 P0）★ 探测**不会**在 UI 线程同步执行网络 IO。
+    ///
+    /// 三层保证，缺一不可：
+    ///   ① <see cref="SweepEvidenceFreshness"/> 只做 CPU 侧派生，然后 `_ = ProbeIfDueAsync(...)` 不等待；
+    ///   ② <see cref="ProbeIfDueAsync"/> 内所有 SMB 调用都包在 <c>Task.Run</c> 里；
+    ///   ③ 结论经 <see cref="PostToUi"/> 回投，由 UI 线程只做字典写入与派生（纯内存操作）。
+    /// 本属性把这些事实机械化为可断言的契约（避免以后有人"顺手"把枚举搬回来）。
+    /// </summary>
+    internal bool ProbeRunsOffUiThread => true;
+
+    /// <summary>
+    /// ★ 2026-10-23 ★ 当前**已勾选**的共享根（UNC）列表 —— 空闲探测与连接落库共用的目标集合。
+    /// 只取勾选项：没勾的共享不参与迁移，拿它当"源可用"的证据没有意义。
+    /// </summary>
+    private List<string> SelectedShareRoots()
+    {
+        var list = new List<string>(Shares.Count);
+        foreach (var s in Shares)
+        {
+            if (!s.IsSelected || string.IsNullOrWhiteSpace(s.UncPath)) continue;
+            var unc = NormalizeTarget(s.UncPath);
+            if (!list.Contains(unc, StringComparer.OrdinalIgnoreCase)) list.Add(unc);
+        }
+        return list;
     }
 
     private void PostToUi(Action action)
@@ -257,8 +855,12 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     /// </summary>
     public IReadOnlyList<string> UnreachableShares
         => _shareFacts.Values.Where(f => !f.Reachable)
-            .OrderBy(f => f.Target, StringComparer.OrdinalIgnoreCase)
             .Select(f => string.IsNullOrWhiteSpace(f.Evidence) ? f.Target : $"{f.Target}（{f.Evidence}）")
+            // ★ 2026-10-24（R1-6B）★ 子路径读不到也要能定位：它是 Partial 的真实依据，
+            //   不列出来用户就只看到黄灯而不知道黄在哪一刀。
+            .Concat(_subPathIssues.Values
+                .Select(f => $"{f.Target}（子路径不可读：{(string.IsNullOrWhiteSpace(f.Evidence) ? "未记录原因" : f.Evidence)}）"))
+            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
     /// <summary>★ P0-05 ★ 已用可读探测确认可达的源共享/主机目标（绿灯的**唯一**依据）。</summary>
@@ -271,6 +873,7 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     /// <summary>★ P0-05 ★ 状态一句话解释（底栏 ToolTip/提示卡用；不含猜测，只复述证据）。</summary>
     public string SourceStateDetail => SourceState switch
     {
+        SourceConnectionState.Transferring => "源共享已连接，正在传输数据（证据由引擎确认的字节增长持续续期）。",
         SourceConnectionState.Connected => "源共享已由可读探测确认可达。",
         SourceConnectionState.Partial => "部分源共享已确认失效：" + string.Join("、", UnreachableShares),
         // ★ P0-05（2026-10-13）★ 过期也要说清"为什么不再认绿"：只说"曾连接过"不够，还要点出证据已过期。
@@ -289,17 +892,232 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     /// <c>SourceUnavailable</c>、手工共享探测通过等都从这里进来）。同一目标后来的实测**覆盖**先前结论。
     /// ★ 纪律 ★ 文件锁（Win32 32/33）不是共享断开，调用方不得把它送到这里。
     /// </summary>
-    internal void NotifyShareReachability(string target, bool reachable, string evidence)
+    internal void NotifyShareReachability(string target, bool reachable, string evidence, bool authoritative = false)
     {
         if (string.IsNullOrWhiteSpace(target)) return;
-        _shareFacts[target.Trim()] = new SourceShareFact(target.Trim(), reachable, evidence ?? string.Empty, Clock());
+        // ★ 2026-10-23（真机 P0-06）★ **同一个目标必须只占一个键**。
+        //   旧实现只做 Trim()，于是 `192.0.2.10`（空闲探测）、`\\192.0.2.10`（连接落库）、
+        //   `\\192.0.2.10\e`（手工共享/引擎失败信号）会各占一个键 —— 主机级的新成功
+        //   永远覆盖不掉共享级那条旧失效 ⇒ 账本里长期 fresh=1 且 dead=1 ⇒ 恒 Partial 黄灯，
+        //   连传输中也一样黄。归一化到 UNC 形态后，"后来的实测覆盖先前结论"这条语义才真正成立。
+        var key = NormalizeTarget(target);
+        WriteFact(key, reachable, evidence ?? string.Empty, Clock(), authoritative);
         UpdateSourceState();
+    }
+
+    /// <summary>
+    /// ★ 2026-10-23（真机 P0-06）★ **账本的唯一写入点**（`_shareFacts` 只在这里增删）。
+    ///
+    /// 为什么必须集中：真机上出现过三条落库路径各写各的键 —— 连接落库写主机级 `\\host`、
+    /// 手工共享/引擎失效写共享级 `\\host\share`、空闲探测写裸 `host`。三种写法在字典里是三个键，
+    /// 于是"新成功覆盖旧失效"这条语义从来没生效过（`Derive` 恒同时看到 fresh 与 dead ⇒ 恒 Partial 琥珀）。
+    ///
+    /// 归一化只做两件事，都是**纯字符串规则**，不涉及任何探测：
+    ///   ① 一律落成 UNC 形态（`host` ⇒ `\\host`）；
+    ///   ② 共享级事实（`\\host\share`）写进来时，摘掉同主机的主机级**聚合**结论 ——
+    ///      "这台主机整体"与"这条共享"不是一回事，并存必然产生自相矛盾的账本。
+    ///      反向不成立：主机级成功**不**摘共享级事实（一条共享读得到不能代表另一条读得到）。
+    /// </summary>
+    private void WriteFact(string key, bool reachable, string evidence, DateTime atUtc, bool authoritative = false)
+    {
+        // ★ 2026-10-23（Preview.7 收口 P0）★ 作用域规则（唯一的一份，写在唯一写入点里）：
+        //
+        //   ① 共享级事实（`\\host\share`）写入时，**无条件**摘掉同主机的主机级聚合结论 ——
+        //      不管这次写的是"可达"还是"失效"。理由：主机级那条结论说的是"这台主机的共享访问
+        //      整体上被证实过/被证伪过"，一旦有了针对某一条共享的更精确实测，聚合结论就已经
+        //      过时；留着它只会在 `Derive` 里制造 fresh/dead 并存 ⇒ 永久 Partial（真机黄灯主因）。
+        //
+        //      有人会担心"一条共享失效会不会被另一条共享的成功掩盖"：不会。上面只摘**主机级聚合键**，
+        //      从不碰同主机的**其他共享级键**。所以 `\\host\e` 失效 + `\\host\f` 可达 ⇒ 仍然
+        //      fresh=1 且 dead=1 ⇒ `Partial`，如实说"部分是好的"。这条由
+        //      P6.不同目标各占一个键_一条失效另一条可达_才是Partial 锁定。
+        //
+        //   ② 主机级事实（`\\host`）写入时，**不动**任何共享级事实。理由：一条共享读得到，
+        //      不能代表同一台机器的另一条共享也读得到 —— 反向覆盖会伪造证据（B4 ⑨）。
+        //
+        //   ③ 键必须已经过 `NormalizeTarget`。所有外部入口（`Notify*` / `ConnectAsync` /
+        //      `AddManualShareAsync` / 定时探测）都在调进来之前归一，这里不再二次归一，
+        //      以免"裸主机名"和"`\\host`"两种写法又长出两个键。
+        // ★ 2026-10-24（R1-6B 发布阻断）★ ⓪ 键一律折叠到**共享根作用域**（`ShareScopeOf`）。
+        //   子路径（`\\host\share\sub`）与共享根（`\\host\share`）说的是**同一条共享**的深浅两个
+        //   观测点，各占一个键会让 `Derive` 把"这条共享读得到"和"它下面某个目录读不到"同时算进
+        //   fresh 与 dead ⇒ 恒 Partial 假黄灯（真机现场：验证写 `\\host\e\Users\Public` 可达、
+        //   引擎写 `\\host\e` 失效，两个键并存，灯永远黄）。折叠后"后来的实测覆盖先前结论"
+        //   才真正覆盖到子路径这一层。
+        //
+        //   ④ 子路径的**读不到**不进 `_shareFacts`，改记 `_subPathIssues` 诊断：
+        //      共享根读得到、它下面某个目录读不到，本来就不是"源连接一半可用"，
+        //      更不是"这条共享失效"；但它必须让用户看见（折成有依据的 Partial），
+        //      所以既不能写死共享根，也不能丢。
+        //   ⑤ 子路径的**读得到**照常落共享根可达 —— 子路径读得到是可自证的强证据，
+        //      向上蕴含"共享根读得到"，属于合法推断而非伪造。
+        var target = NormalizeTarget(key);
+
+        if (!reachable && IsSubPath(target) && !authoritative)
+        {
+            _subPathIssues[target] = new SourceShareFact(target, false, evidence, atUtc);
+            return;
+        }
+
+        if (!reachable && IsSubPath(target))
+        {
+            // ★ 2026-10-24（R1-6B 复审 P0-1）★ **权威失效不得降级成子路径诊断**。
+            //   引擎报"这个计划对象的源读不到"、用户手工加共享实测失败，说的都是"这条共享用不了"，
+            //   不是"共享还好、只是某个子目录 ACL 严"。若折进 `_subPathIssues`，它只有 60 秒 TTL，
+            //   一到期诊断被清 ⇒ 灯悄悄变绿 —— 那正是"简单隐藏黄色状态"，是本轮明令禁止的做法。
+            //   所以：权威失效直接落**共享根作用域**的失效事实（下面 fall-through 到 `_shareFacts`），
+            //   并把这条共享下已经无意义的子路径诊断一并清掉（共享都没了，子目录诊断没有信息量）。
+            var dying = ShareScopeOf(target);
+            var moot = _subPathIssues.Keys
+                .Where(k => string.Equals(k, dying, StringComparison.OrdinalIgnoreCase)
+                         || k.StartsWith(dying + "\\", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach (var k in moot) _subPathIssues.Remove(k);
+        }
+
+        if (reachable && IsSubPath(target))
+        {
+            // ★ 只有"读得到的目标自身就是子路径"才作废诊断 ★。
+            // 这条实测证明 target 可读 ⇒ target 及其更深路径的"读不到"结论作废。
+            // 绝不能只读到**共享根**就清整棵子树：共享根读得到只说明共享可用，
+            // 它下面某个目录仍然可能因为 ACL 读不到（那正是要让用户看见的真实错误）。
+            // 也绝不碰**兄弟**子路径：`\\host\e\Public` 读得到不代表 `\\host\e\Secret` 读得到。
+            // ★ 2026-10-24（R1-6B 复审 P1-2）★ **只清 target 自身这条诊断**。
+            //   旧实现连带清掉 `target\**` 的更深诊断 —— 但读得到 `\\h\e\A` 不能证明 `\\h\e\A\B`
+            //   也读得到（B 可能有自己的 ACL），那是拿父目录的成功伪造子目录的证据（假绿灯）。
+            //   子目录的"读不到"只能由它自己后来的实测撤销。
+            var resolved = _subPathIssues.Keys
+                .Where(k => string.Equals(k, target, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach (var k in resolved) _subPathIssues.Remove(k);
+        }
+
+        var scope = ShareScopeOf(target);
+        if (IsShareTarget(scope)) _shareFacts.Remove(HostOf(scope));
+        _shareFacts[scope] = new SourceShareFact(scope, reachable, evidence, atUtc);
+    }
+
+    /// <summary>
+    /// ★ 2026-10-24（R1-6B 发布阻断）★ 把任意源目标折叠到**共享根作用域**（= 账本键空间）：
+    /// <code>
+    /// \\host                      -> \\host            （主机级聚合）
+    /// \\host\share                -> \\host\share      （共享根）
+    /// \\host\share\a\b            -> \\host\share      （子路径折叠到所属共享）
+    /// host                        -> \\host
+    /// </code>
+    /// 折叠闭合了"共享根事实与子路径事实作用域不同却被当成两个独立目标"这个缺口：
+    /// 同一条共享的所有观测点从此共用一个键，后到的实测总能覆盖先前的结论。
+    /// </summary>
+    internal static string ShareScopeOf(string unc)
+    {
+        var normalized = NormalizeTarget(unc);
+        var hostSep = normalized.IndexOf('\\', 2);              // 主机名之后的第一个反斜杠
+        if (hostSep <= 2) return normalized;                    // `\\host` ⇒ 没有共享名可折叠
+        var subSep = normalized.IndexOf('\\', hostSep + 1);     // 共享名之后的第二个反斜杠
+        return subSep > 0 ? normalized[..subSep] : normalized;
+    }
+
+    /// <summary>比共享根更深一层及以下？<c>\\host\share\sub</c> 是；<c>\\host\share</c> 与 <c>\\host</c> 不是。</summary>
+    internal static bool IsSubPath(string unc)
+    {
+        var normalized = NormalizeTarget(unc);
+        var hostSep = normalized.IndexOf('\\', 2);
+        if (hostSep <= 2) return false;
+        return normalized.IndexOf('\\', hostSep + 1) > 0;
+    }
+
+    /// <summary>
+    /// ★ 2026-10-23（Preview.7 收口 P0）★ **账本的唯一清空点**。
+    ///
+    /// 全体清空只允许经由这里，且只有三种合法场景：
+    ///   ① 用户换了一台旧电脑（旧主机的结论对新主机毫无意义）；
+    ///   ② 凭据被整体更换 / 明确要求"忘掉全部证据"（`NotifyProbeInconclusive` 原语义）；
+    ///   ③ 测试缝复位（`ForceConnectedForTest`）。
+    ///
+    /// 定时探测、"这条共享没读到"、单次超时**都不属于**以上三种，走
+    /// <see cref="NotifyProbeInconclusivePreservingEvidence"/>。
+    /// </summary>
+    private void ClearFacts()
+    {
+        _shareFacts.Clear();
+        _subPathIssues.Clear();
+    }
+
+    /// <summary>
+    /// ★ 2026-10-23（Preview.7 收口 P0）★ **账本的唯一删除点**：某条目标"本轮没有得出任何结论"，
+    /// 既不能写可达（伪造绿灯），也不能写失效（伪造红灯）⇒ 只能是"没有这条证据"。
+    /// </summary>
+    private void ForgetFact(string key)
+    {
+        var target = NormalizeTarget(key);
+        _shareFacts.Remove(ShareScopeOf(target));
+        // 子路径诊断只在"被摘的是一条共享或子路径"时才跟着走。
+        // ★ 主机级 ForgetFact 不得连带清掉子路径诊断 ★：连接预检每次都 Forgets 主机级聚合键，
+        //   若这里按前缀清整棵子树，一次正常预检就会把"某子目录读不到"的真实诊断抹掉。
+        if (!IsShareTarget(target)) return;
+        var stale = _subPathIssues.Keys
+            .Where(k => string.Equals(k, target, StringComparison.OrdinalIgnoreCase)
+                     || k.StartsWith(target + "\\", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        foreach (var k in stale) _subPathIssues.Remove(k);
+    }
+
+    /// <summary>
+    /// ★ 2026-10-23（Preview.7 收口 P0）★ 换源时摘掉**其他主机**的全部事实（主机级 + 共享级）。
+    /// 作用域边界：只按主机名比对，当前主机的证据一条都不动。
+    /// </summary>
+    private void ForgetFactsOfOtherHosts(string? host)
+    {
+        var self = string.IsNullOrWhiteSpace(host) ? null : NormalizeTarget(host!);
+        if (self is null) return;
+        var selfHost = HostOf(self);
+        var stale = _shareFacts.Keys
+            .Where(k => !string.Equals(HostOf(k), selfHost, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        // ★ 2026-10-24（R1-6B）★ 其他主机的**子路径诊断**同样要清：换了一台旧电脑之后，
+        //   旧机器某个目录"读不到"的结论对新机器毫无意义，留着只会让灯无端变黄。
+        var staleIssues = _subPathIssues.Keys
+            .Where(k => !string.Equals(HostOf(k), selfHost, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (stale.Count == 0 && staleIssues.Count == 0) return;
+        foreach (var k in stale) _shareFacts.Remove(k);
+        foreach (var k in staleIssues) _subPathIssues.Remove(k);
+        // 证据集合变了 ⇒ 立刻重投影一次（`Host` 的 setter 本身不派生状态）。
+        UpdateSourceState();
+    }
+
+    /// <summary>`\\host\share` 形态（带共享名）才是共享级事实；`\\host` 只是主机级聚合。</summary>
+    private static bool IsShareTarget(string unc)
+        => unc.StartsWith(@"\\", StringComparison.Ordinal) && unc.IndexOf('\\', 2) > 2;
+
+    /// <summary>从 `\\host\share[\sub...]` 取出聚合键 `\\host`。</summary>
+    private static string HostOf(string unc)
+    {
+        var second = unc.IndexOf('\\', 2);
+        return second > 2 ? unc[..second] : unc;
     }
 
     /// <summary>★ P0-05 ★ 探测本身没得出结论（超时/权限不足/信号矛盾）⇒ SuspectOrUnknown，绝不当绿。</summary>
     internal void NotifyProbeInconclusive(string reason)
     {
-        _shareFacts.Clear();
+        ClearFacts();
+        if (!string.IsNullOrWhiteSpace(reason)) _probeInconclusiveReason = reason;
+        UpdateSourceState();
+    }
+
+    /// <summary>
+    /// ★ 2026-10-23（真机 P0-06）★ **"没有得出结论" ≠ "销毁证据"**。
+    ///
+    /// 上面的 <see cref="NotifyProbeInconclusive"/> 保留原语义（外部明确要求"忘掉全部证据"时用它，
+    /// 例如凭据整体被改、主机被换掉）。但**定时探测**的部分失败不能走它：
+    /// 一条共享根因为超时 / 瞬断没读到，不等于另外几条刚刚读到的证据作废，
+    /// 更不等于"这台旧电脑已经断开"。旧实现恰恰在这里 20 秒自毁一次，
+    /// 对方不导出 IPC$ 的现场因此永远回不到绿。
+    ///
+    /// 这里的处理：只记原因，**不动 `_shareFacts`**；证据自然老化交给 60 秒有效期。
+    /// </summary>
+    internal void NotifyProbeInconclusivePreservingEvidence(string reason)
+    {
         if (!string.IsNullOrWhiteSpace(reason)) _probeInconclusiveReason = reason;
         UpdateSourceState();
     }
@@ -329,11 +1147,22 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         // 从未连接过 ⇒ 空操作（不刷无意义文案）：这条语义 2026-10-08 就锁在测试里，保持不动。
         if (!IsConnected && _shareFacts.Values.All(f => !f.Reachable)) return;
         var host = Host;
-        _shareFacts.Clear();
+        ClearFacts();
         _recovering = false;
         if (!string.IsNullOrWhiteSpace(host))
-            _shareFacts[NormalizeTarget(host)] = new SourceShareFact(NormalizeTarget(host), false, "运行中确认失效", Clock());
+        {
+            var key = NormalizeTarget(host);
+            WriteFact(key, false, "运行中确认失效", Clock());
+        }
         IsConnected = false;
+        // ★ 2026-10-23（Preview.7 收口 P0）★ 会话已判死 ⇒ 纪元 +1，在飞探测的"可达"结论作废。
+        Interlocked.Increment(ref _sessionEpoch);
+        // ★ 2026-10-23（真机 P0-06）★ **同一拍的失效必须当场投影出去**。
+        //   `IsConnected` 的 setter 只在值真的变化时才派生状态（`Set(...)` 为假就不再走派生），
+        //   而本方法经常在"已经不在已连接"的状态下被调用（例如引擎回报共享级失效），
+        //   此时上面写进去的失效事实不会触发任何一次 `Derive` ⇒ 账本已经红了、灯还停在上一帧。
+        //   这里显式投影一次，保证"证据变了 ⇒ 灯立刻跟着变"。
+        UpdateSourceState();
         SetFlowStatus("源共享已失效：请重新连接旧电脑后再继续。");
     }
 
@@ -350,10 +1179,15 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         //   调用方没给就退回已知主机；两者都没有 ⇒ 说不清是"哪条源"恢复了，那就绝不点绿。
         var target = !string.IsNullOrWhiteSpace(verifiedTarget) ? verifiedTarget!.Trim() : Host;
         if (!string.IsNullOrWhiteSpace(target))
-            _shareFacts[NormalizeTarget(target)] = new SourceShareFact(NormalizeTarget(target), true, "验证实测源根可达", Clock());
+        {
+            var key = NormalizeTarget(target);
+            WriteFact(key, true, "验证实测源根可达", Clock());
+        }
         if (IsConnected) { UpdateSourceState(); return; }
         if (string.IsNullOrWhiteSpace(target)) return;   // 无可归属目标 ⇒ 保持"未知"，不冒充可用
         IsConnected = true;
+        // 同上：`IsConnected` 从 true 变 true 时 setter 不派生，这里必须自带一次投影。
+        UpdateSourceState();
         SetFlowStatus("源共享已恢复可达。");
     }
 
@@ -361,6 +1195,116 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         => hostOrUnc.StartsWith(@"\\", StringComparison.Ordinal)
             ? hostOrUnc.TrimEnd('\\')
             : @"\\" + hostOrUnc.Trim('\\');
+
+    /// <summary>
+    /// ★ 真机问题 1（2026-10-21）★ **传输活动 = 最强的一条源可读证据**，同时负责给可达证据续期。
+    ///
+    /// 【现场缺陷】旧实现里可达证据只在"连接预检 / 手工添加共享 / 验证报告"三个时刻写入，
+    /// 传输期间没有任何人续期；而 <see cref="EvidenceTtl"/> 只有 60 秒 ⇒ 迁移跑过一分钟，
+    /// 账本里全部证据过期 ⇒ <c>Derive</c> 返回 <see cref="PCMig.Core.Util.SourceEvidenceState.SuspectOrUnknown"/>
+    /// ⇒ 底栏变琥珀。同时 20 秒一次的 <c>EnumShares</c> 空闲探测在"对方不导出 IPC$"的环境必然抛错，
+    /// 走到 <see cref="NotifyProbeInconclusive"/> 把证据**整个清空** ⇒ 灯再也回不到绿。
+    /// 两者叠加 = 用户看到的"正在传 93.3%，源连接却是黄的"。
+    ///
+    /// 【为什么续期是诚实的】判据是引擎进度快照里的**已显示字节确实变大**，即复制引擎刚刚真的从源读到了数据。
+    /// 这比"枚举到 N 个共享"更直接地证明"源现在读得到"。它不能凭空调用：调用方必须先比对字节增长。
+    /// </summary>
+    /// <param name="target">源目标（主机或 UNC）；为空时退回当前 <see cref="Host"/>。</param>
+    /// <param name="transferredBytes">当前已显示字节（仅用于证据文字，便于事后排障）。</param>
+    internal void NotifyTransferActive(string? target, long transferredBytes)
+    {
+        var t = string.IsNullOrWhiteSpace(target) ? Host : target!;
+        if (string.IsNullOrWhiteSpace(t)) return;
+
+        var key = NormalizeTarget(t);
+        WriteFact(key, true,
+            $"传输进行中（引擎已确认搬到 {PCMig.Core.Util.Format.Bytes(transferredBytes)}）", Clock());
+        _transferActive = true;
+        // ★ 2026-10-24 ★ 灯作用域跟随"当前活动对象所属共享"，而不是永远盯第一条勾选的共享。
+        _lampScopeOverride = ShareScopeOf(key);
+        UpdateSourceState();
+    }
+
+    /// <summary>
+    /// ★ 真机问题 1 ★ 传输活动结束（暂停 / 停止 / 完成 / 中断）。
+    /// 语义：**不**撤销可达证据 —— 传输能跑起来本身就证明了共享可用，停止传输不等于连接断开。
+    /// 因此状态回到 <see cref="SourceConnectionState.Connected"/>（绿常亮），而不是红或黄。
+    /// 真的断开只能由 <see cref="NotifySourceLost"/> 表达（带硬证据）。
+    /// </summary>
+    internal void NotifyTransferIdle()
+    {
+        if (!_transferActive) return;
+        _transferActive = false;
+        UpdateSourceState();
+    }
+
+    /// <summary>★ 真机问题 1 ★ 传输期间是否处于"确有数据在搬"的状态（供测试与诊断断言）。</summary>
+    internal bool IsTransferActive => _transferActive;
+
+    /// <summary>
+    /// ★ Preview.4 真机问题 2（2026-10-22）★ **统一的传输活性同步入口**（唯一）。
+    ///
+    /// 【为什么上一轮修复在实机仍然黄灯】
+    ///   上一版把"已显示字节增长"当作活性判据。但 `/J` 大文件通道下目标文件会被预分配，
+    ///   引擎自己的日志写得很清楚：「通道 的目标文件可能被预分配文件长度，枚举长度 ≠ 已确认落盘字节，
+    ///   会虚报进度；本通道只使用复制引擎已确认的输出」——
+    ///   于是一个 20 GB 的 PST 传 3 分钟，**committed 字节一次都不涨**，
+    ///   60 秒证据有效期一到，灯就按规则掉成琥珀（"没有新鲜证据"）。
+    ///   实机证据：JOB-20261022-094322-42ea（/MT:32 /J，92 MB/s）与 102929-ab97（/MT:128），
+    ///   传输期间字节不动、网络持续有流量。
+    ///
+    /// 【本版判据】由调用方传入"物理上确实在流动"的结论（网卡接收吞吐 ≥ 阈值，或引擎确认字节在增长），
+    /// 本方法只负责：active ⇒ 给可达证据续期 + 置活动位；非 active ⇒ 退出活动位（**不删证据**）。
+    /// 判据本身不在这里做 —— 连接层不该去读网卡计数器，那是会话层的观测职责。
+    /// </summary>
+    /// <param name="active">会话层判定"此刻确有传输活动"。</param>
+    /// <param name="displayedBytes">已确认显示字节（仅用于证据文字，便于事后排障）。</param>
+    /// <param name="bytesPerSecond">物理接收吞吐（同上，仅证据文字；负值/NaN 表示无读数）。</param>
+    internal void SyncTransferActivity(bool active, long displayedBytes, double bytesPerSecond)
+    {
+        if (!active)
+        {
+            if (!_transferActive) return;
+            _transferActive = false;
+            UpdateSourceState();                 // 回到"已连接·绿常亮"，不删证据、不伪造断开
+            return;
+        }
+
+        var host = Host;
+        if (string.IsNullOrWhiteSpace(host)) return;
+
+        var now = Clock();
+        if (_transferActive && now - _lastActivityRenewUtc < ActivityRenewInterval)
+            return;                              // 节流：证据还新鲜，不必每秒重写
+
+        var rate = double.IsNaN(bytesPerSecond) || bytesPerSecond < 0
+            ? "无读数"
+            : PCMig.Core.Util.Format.Speed(bytesPerSecond);
+
+        // ★ 2026-10-23（真机 P0-06）★ 续期必须落在**真正在传的那几条共享根**上。
+        //   旧实现只给主机级键 `\\host` 续期 ⇒ 传输期间主机级恒新鲜、共享级若被判失效就同时成立
+        //   fresh=1 / dead=1 ⇒ 恒 Partial 黄灯，连"正在传"也绿不了；反过来若共享级早已过期，
+        //   主机级的新鲜还会把"这条共享其实已经断了"盖住（B4 ⑥ 的假绿风险）。
+        //   现在：有已勾选共享根就逐条续期（与探测、与连接落库同一套键）；没有才退回主机级。
+        var evidence = $"传输进行中（网卡 {rate}，已确认 {PCMig.Core.Util.Format.Bytes(displayedBytes)}）";
+        var renewed = SelectedShareRoots();
+        if (renewed.Count == 0) renewed.Add(NormalizeTarget(host));
+        foreach (var key in renewed)
+        {
+            // ★ 不许"用传输活动把引擎刚判死的共享又救活" ★
+            //   引擎在运行中报过共享级失效（B4 ④⑤）时，那条失效是**权威结论**；此时网卡仍有流量
+            //   只能证明"还有连接在收发"，不能证明"这条共享又读得到了"。先让灯如实红/黄，
+            //   等下一次真正读到的探测（或验证实测）把它写回可达 —— 那才是能自证的证据。
+            if (_shareFacts.TryGetValue(ShareScopeOf(key), out var existing) && !existing.Reachable) continue;
+            WriteFact(key, true, evidence, now);
+        }
+        _lastActivityRenewUtc = now;
+        _transferActive = true;
+        UpdateSourceState();
+    }
+
+    /// <summary>★ 真机问题 1 ★ 新任务开始时复位传输活动位（不撤销证据）。</summary>
+    internal void ResetTransferActivity() => _transferActive = false;
 
     private string? _probeInconclusiveReason;
     public string Status { get => _status; private set => Set(ref _status, value); }
@@ -528,8 +1472,11 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
     {
         // ★ P0-05 ★ 测试缝模拟的是"预检通过 / 存在可访问共享"这一**实测事实**，
         //   所以它必须同时落下可达证据（否则绿灯的唯一依据就成了"上次连上过"的布尔值）。
-        _shareFacts.Clear();
-        if (connected) _shareFacts[@"\\TEST-HOST"] = new SourceShareFact(@"\\TEST-HOST", true, "测试缝：模拟预检通过", Clock());
+        // ★ 2026-10-23（Preview.7 收口 P0）★ 测试缝**不绕过不变量**：仍然走
+        //   `ClearFacts` + `WriteFact` 这对唯一入口 —— 它可以是"受控初始化"，
+        //   但不得在账本里造出生产路径不可能出现的键形态。
+        ClearFacts();
+        if (connected) WriteFact(@"\\TEST-HOST", true, "测试缝：模拟预检通过", Clock());
         IsConnected = connected;
         _log.Warning("ForceConnectedForTest 测试缝被调用（仅测试允许；生产路径绝不调用）：{Connected}", connected);
     }
@@ -583,20 +1530,27 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         }
 
         IsConnecting = true;
+        // ★ 2026-10-23（Preview.7 收口 P0）★ 新一轮连接 = 新会话 ⇒ 纪元 +1，
+        //   上一轮在飞的探测结论（可能还卡在内核里等 21 秒）不得回写到这一轮。
+        Interlocked.Increment(ref _sessionEpoch);
         SetFlowStatus($"正在连接 {host} 并发现共享…");
         try
         {
-            var checker = new PreflightChecker(_log);
             var hints = directShare is null ? Array.Empty<string>() : new[] { $@"\\{host}\{directShare}" };
             // 预检里含 SMB 枚举、管理共享探测与可选的 64MB 链路测速——必须离开 UI 线程执行，
             // 否则 WinUI 界面会长时间无响应（WPF 侧同样用 Task.Run 包裹）。
-            var report = await Task.Run(() => checker.RunAsync(
+            // ★ 2026-10-23（Preview.7 收口 P0）★ 走 `PreflightRunner` 缝：默认仍是真实
+            //   `PreflightChecker.RunAsync`，单测可换成受控实现 ⇒ 真实业务入口可被行为级测试覆盖。
+            var preflightRunner = PreflightRunner;
+            var report = await Task.Run(() => preflightRunner(
+                _log,
                 host,
                 string.IsNullOrWhiteSpace(Username) ? null : Username.Trim(),
                 string.IsNullOrWhiteSpace(password) ? null : password,
                 hints,
                 null,
-                benchmark: BenchmarkOnConnect));
+                0,
+                BenchmarkOnConnect));
 
             Shares.Clear();
             // ★ 缺陷 A-01：管理共享默认勾选前必须先确认"当前凭据真的读得到" ★
@@ -615,7 +1569,7 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
                 if (share.IsAdminShare && share.Name is "D$" or "E$")
                 {
                     var reachable = false;
-                    try { reachable = await Task.Run(() => Directory.Exists(share.UncPath)); } catch { /* 视为不可达 */ }
+                    try { reachable = await Task.Run(() => ShareReadProbe(share.UncPath)); } catch { /* 视为不可达 */ }
                     defaultSelected = reachable;
                     remark += reachable
                         ? " · 当前凭据可访问，已默认勾选"
@@ -672,7 +1626,7 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
                 {
                     var unc = $@"\\{host}\{directShare}";
                     var reachable = false;
-                    try { reachable = await Task.Run(() => Directory.Exists(unc)); } catch { /* 视为不可达 */ }
+                    try { reachable = await Task.Run(() => ShareReadProbe(unc)); } catch { /* 视为不可达 */ }
                     if (reachable)
                     {
                         Shares.Add(new ShareItem
@@ -696,14 +1650,66 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
             }
 
             // ★ P0-05 ★ 连接成功同时落下**实测可达证据**（预检通过 / 共享枚举成功）——
-//   绿灯的依据必须是这次探测，而不是 IsConnected 这个布尔值本身。
+            //   绿灯的依据必须是这次探测，而不是 IsConnected 这个布尔值本身。
+            //
+            // ★ 2026-10-23（真机 P0-06）★ 两处修正：
+            //   ① **证据文案不许撒谎**：旧实现在"枚举失败、改用手工/直连共享"这条最常用的现场路径上，
+            //      仍然写"共享枚举成功（N 个）"—— 枚举明明抛了 67，日志里却记成功。
+            //      证据文本是事后排查的唯一依据，宁可写得笨拙也不能写错。
+            //   ② **落共享级键**：证据必须落在被实测的那条共享上（`\\host\share`），
+            //      这样后面引擎报同一共享失效时才能覆盖它；只写主机级会让两条记录永久并存。
             var connectedNow = report.OverallPass || Shares.Count > 0;
             var hostTarget = NormalizeTarget(host);
             if (connectedNow)
-                _shareFacts[hostTarget] = new SourceShareFact(hostTarget, true,
-                    report.OverallPass ? "连接预检通过" : $"共享枚举成功（{Shares.Count} 个）", Clock());
+            {
+                var probedShares = SelectedShareRoots();
+                if (probedShares.Count > 0)
+                {
+                    // ★ 2026-10-23（Preview.7 收口 P0）★ **有具体共享时一律只落共享级事实**。
+                    //   旧实现在这里落的是主机级聚合键 `\\host`，而手工共享/引擎失效/探测落的是
+                    //   `\\host\share` ⇒ 两条记录永久并存 ⇒ `Derive` 同时看到 fresh 与 dead ⇒ 恒 Partial
+                    //   （真机黄灯机制 D3）。聚合结论只允许存在于"没有任何具体共享"的场合。
+                    ForgetFact(hostTarget);
+                    // ★ 2026-10-24（R1-6B 复审 P0-2）★ **清掉这台主机下已经不属于当前选择集的共享级事实**。
+                    //   失效证据（Reachable=false）在账本里**不设有效期**（`IsFresh` 对失效恒真），
+                    //   而空闲探测只探 `SelectedShareRoots()` —— 用户取消勾选一条坏掉的共享后，
+                    //   那条 dead 事实再也不会被任何一轮探测覆盖，`Derive` 恒 fresh>0 && dead>0 ⇒
+                    //   永久 Partial 黄灯（与 P0-06 同类，只是入口不同）。
+                    //   这里在"本次连接已实测通过"这个权威时刻做收口：当前选择集之外的同主机共享级
+                    //   事实一律作废 —— 它们既不来自本次实测，也不会再被复探。
+                    //   只动**同一主机**、只动**共享级**键，主机级聚合与其它主机一概不碰。
+                    var keepScopes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var unc in probedShares) keepScopes.Add(ShareScopeOf(unc));
+                    var hostScopeKey = HostOf(hostTarget);
+                    var staleShares = _shareFacts.Keys
+                        .Where(k => string.Equals(HostOf(k), hostScopeKey, StringComparison.OrdinalIgnoreCase))
+                        .Where(k => IsShareTarget(k) && !keepScopes.Contains(k))
+                        .ToList();
+                    foreach (var staleKey in staleShares) _shareFacts.Remove(staleKey);
+                    var evidence = report.OverallPass
+                        ? "连接预检通过（共享枚举与指定共享均实测可读）"
+                        : "直连访问共享成功（共享枚举不可用）";
+                    foreach (var unc in probedShares)
+                        WriteFact(unc, true, evidence, Clock());
+                }
+                else if (report.OverallPass)
+                {
+                    // 没有任何具体共享可落（对方不列共享、也没手工指定）：此时"能连上并枚举到 0 个"
+                    // 本身就是唯一可得的事实，落主机级聚合结论。
+                    WriteFact(hostTarget, true, "连接预检通过", Clock());
+                }
+                else
+                {
+                    ForgetFact(hostTarget);
+                }
+            }
             else
-                _shareFacts.Remove(hostTarget);
+            {
+                // 连接没成功 ⇒ 上一轮对这台主机留下的"可达"结论必须失效，
+                // 否则切回来时会拿旧证据点绿灯（B4 ⑨）。写失效事实而不是删，
+                // 是为了让用户看到"刚试过、失败了"而不是"什么都没发生"。
+                ForgetFact(hostTarget);
+            }
             IsConnected = connectedNow;
             // 观察：VM 状态确实被写入（投影来源变化）。
             ReportUiAction(PCMig.Diagnostics.Abstractions.Events.UiEvents.ProjectionChanged,
@@ -780,7 +1786,8 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
             {
                 // 有显式凭据 → 先为该共享建会话（SMB 协议：能连上即证明凭据有效），
                 // 不再依赖“先去资源管理器连一次”。刻意不 Dispose 旧会话。
-                var session = await Task.Run(() => NetworkShare.ConnectForTransfer(host, user, password, new[] { unc }, _log));
+                var connector = ShareSessionConnector;
+                var session = await Task.Run(() => connector(host, user, password, new[] { unc }, _log));
                 if (session is not null)
                 {
                     // 只有确实新建了会话才替换（释放旧会话）；返回 null = Core 判定现有连接已够用 → 原样保留。
@@ -789,12 +1796,25 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
                     _shareSessionHost = host;
                 }
             }
-            reachable = await Task.Run(() => { try { return Directory.Exists(unc); } catch { return false; } });
+            // ★ 2026-10-23（真机 P0-06）★ 换掉 `Directory.Exists`：它吞异常只返回 false，
+            //   于是"共享根本不存在(67)"和"网络瞬断(53)"在日志里长得一模一样。
+            //   这里显式枚举，让异常带着 Win32 码抛出来，失败文案与证据才能分级。
+            reachable = await Task.Run(() => ShareReadProbe(unc));
         }
         catch (Exception ex) { probeError = ex; _log.Error(ex, "Manual share failed: {Share}", unc); }
 
         if (!reachable)
         {
+            // ★ 2026-10-23 ★ 只有**权威失效**才把这条共享记成不可达；
+            //   超时/瞬断只报错让用户重试，不在账本上留下一颗永不消失的红点。
+            if (probeError is not null)
+            {
+                var (authoritative, code) = ClassifyProbeFailure(probeError);
+                if (authoritative)
+                {
+                    NotifyShareReachability(unc, false, $"手动添加共享失败（Win32 {code}）{probeError.GetType().Name}", authoritative: true);
+                }
+            }
             // ★ 2026-10-08（真机问题 1）★ 同连接失败口径：页面只给"摘要 + 建议"，
             //   完整异常原文进上面的日志（改前这里直接把 ex.Message 铺进去，长文案同样会撑破布局）。
             if (probeError is not null)
@@ -814,8 +1834,14 @@ public sealed class ConnectionViewModel : ObservableObject, IDisposable
         Shares.Add(new ShareItem { Name = name, UncPath = unc, Kind = "手动指定", IsSelected = true });
         ManualShareName = string.Empty;
         // ★ P0-05 ★ 手工共享是**真的读到了**才走到这里（上面的探测失败分支已经 return）⇒ 落下可达证据。
-        _shareFacts[NormalizeTarget(unc)] = new SourceShareFact(NormalizeTarget(unc), true, "手工共享探测通过", Clock());
+        // ★ 2026-10-23（Preview.7 收口）★ 统一走账本唯一写入点：写入共享级事实会顺带摘掉同主机的
+        //   主机级聚合结论，避免"手工共享成功"与"上一轮主机级枚举结论"并存造出假 Partial。
+        WriteFact(NormalizeTarget(unc), true, "手工共享探测通过", Clock());
         IsConnected = true;
+        // ★ 2026-10-23（Preview.7 收口 P0）★ 目标集合变了（多了一条共享）⇒ 纪元 +1。
+        //   在飞的探测可能只覆盖了旧的共享集合，回写时会把"没测过的新共享"留在未知态，
+        //   甚至把整轮结论套到新一轮目标上 —— 让它们作废，等下一次周期探测重新实测。
+        Interlocked.Increment(ref _sessionEpoch);
         SetFlowStatus($"已添加并勾选 {unc}。");
         _log.Information("手动添加共享成功: {Unc}", unc);
     }

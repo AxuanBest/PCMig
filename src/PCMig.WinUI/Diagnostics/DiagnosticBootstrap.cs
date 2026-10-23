@@ -46,6 +46,19 @@ public static class DiagnosticBootstrap
                 InitialMode = CaptureMode.Operational,
                 AppVersion = appVersion,
                 BuildId = buildId,
+                // ★ 2026-10-15（Preview.2 隔离整改）★
+                // 预览产物把诊断会话落到自身数据根的 Diagnostics 子目录，避免与正式版会话混进
+                // 同一目录（诊断中心列表会互相串台）。正式产物下 SubDirectory 返回 null ⇒
+                // StorageRoot 为 null ⇒ DiagnosticRuntime 用其默认根，语义逐位不变。
+                //
+                // ★ 2026-10-15（安装前最后一道 Fail Closed 核验）★
+                // 关键区别：null 有**两种**来源却语义相反 —— "正式身份（该用默认根）"与
+                // "预览身份但隔离失败（用默认根就是写进 %LocalAppData%\PCMig\Diagnostics）"。
+                // 后者必须让本方法抛异常：DiagnosticBootstrap 被 App 的 catch 包住会降级为 NoOp
+                // （不阻断启动，这是既有设计），所以真正拦住它的是入口闸门 + 这里的异常保证
+                // **不会**悄悄把预览会话写进正式诊断目录。
+                StorageRoot = PCMig.Core.Util.PreviewIsolation
+                    .TryResolveForPersistence("Diagnostics", "DiagnosticBootstrap.Start"),
             };
 
             var runtime = DiagnosticRuntime.Start(options, out var degradedReason);

@@ -170,6 +170,18 @@ public sealed class VerifyReportGenerator
 
     // ═════════════════════════════ 01 人话结论 ═════════════════════════════
 
+    /// <summary>
+    /// 01 · 结论（人话）。
+    ///
+    /// ★ v0.5.4 Preview.2（2026-10-16 真机 JOB-20261016-150319-e738）★
+    /// 旧版本的这一段只写「L1 文件数/字节对账未通过：下方逐对象表列出了…」——
+    /// 用户必须自己去 04/05 表里拼 object-000010 + MISMATCH + sourceFiles 10/targetFiles 9
+    /// 才能知道**究竟是哪个文件少了一个**。真机上那个文件叫 DumpStack.log、8 KB、
+    /// 原因是源侧拒绝访问（Windows 错误 5）。
+    /// 新口径：**第一屏就必须回答「哪个盘/哪个文件夹 → 哪个文件 → 出了什么问题」**，
+    /// 且只依据报告里真实存在的证据（FileDiffRecord / 对象状态 / 枚举失败），
+    /// 没有证据的原因一律写「原因尚未确定」，绝不猜测。
+    /// </summary>
     private static void WriteHumanConclusion(StringBuilder sb, VerifyReport v)
     {
         var ok = v.Objects.Count(o => o.Status == "OK");
@@ -203,6 +215,10 @@ public sealed class VerifyReportGenerator
                 ? "<p><span class=\"ok\">L2 抽样哈希核对通过</span>：抽样范围内未发现内容不一致；<b>未抽到的文件没有内容级证据</b>。</p>"
                 : "<p><span class=\"bad\">L2 抽样哈希核对未通过</span>：抽样中发现了内容或存在性差异。</p>");
         }
+
+        // ═══ 首屏「哪个盘 → 哪个文件夹 → 哪个文件 → 什么问题」═══
+        WritePlainLanguageVerdict(sb, v, srcFiles, dstFiles, srcBytes, dstBytes);
+
         sb.AppendLine($"<p>共 <b>{v.Objects.Count}</b> 个对象：通过 <b class=\"ok\">{ok}</b>，" +
                       $"存在差异 <b class=\"bad\">{mismatch}</b>，无法确认 <b class=\"warn\">{unknown}</b>" +
                       (emptyObjects > 0 ? $"，计划与实测都为空 <b>{emptyObjects}</b>（这些对象两侧都没有文件，<b>不算「传成功」</b>）" : "") +
@@ -243,6 +259,174 @@ public sealed class VerifyReportGenerator
                           "也不能把没出现的文件算成缺失。</li>");
         sb.AppendLine("<li>需要「迁移过程」的证据（传了哪些文件、robocopy 退出码、失败重试）请看同目录的<b>迁移报告</b>（见 09）。</li>");
         sb.AppendLine("</ul></div>");
+    }
+
+    /// <summary>
+    /// 首屏「人话判词」：把技术字段翻译成「哪个盘 → 哪个文件夹 → 哪个文件 → 什么问题 → 是否可信」。
+    ///
+    /// 纪律：
+    ///   · 每个事实都指向报告里真实存在的字段（FileDiffRecord / ObjectVerifyResult.Status / EnumerationFailure）；
+    ///   · 拿不到错误码/原因时如实写「原因尚未确定」，**绝不**从上下文猜一个看起来合理的理由；
+    ///   · 明确区分「迁移过程失败」与「本次对账才发现缺失」——两者证据来源不同，
+    ///     报告只陈述自己手里的事实，迁移侧的原因由迁移报告负责（并给出交叉引用）。
+    /// </summary>
+    private static void WritePlainLanguageVerdict(StringBuilder sb, VerifyReport v,
+        long srcFiles, long dstFiles, long srcBytes, long dstBytes)
+    {
+        var missing = v.FileDiffs.Where(d => d.DiffKind == "missing-on-target").ToList();
+        var extra = v.FileDiffs.Where(d => d.DiffKind == "extra-on-target").ToList();
+        var sizeBad = v.FileDiffs.Where(d => d.DiffKind == "size-mismatch").ToList();
+        var hashBad = v.FileDiffs.Where(d => d.DiffKind == "hash-mismatch").ToList();
+        var unreadable = v.FileDiffs.Where(d => d.DiffKind == "unreadable").ToList();
+        var badObjects = v.Objects.Where(o => o.Status is "MISMATCH" or "UNKNOWN").ToList();
+
+        // ── 结论句 ──
+        var (srcLabel, dstLabel) = DescribeEndpoints(v);
+        if (v.OverallPass)
+        {
+            sb.AppendLine($"<p><span class=\"ok\">迁移结果：本次核对通过。</span>" +
+                          $"源位置 <b class=\"mono\">{ReportStyle.E(srcLabel)}</b> → 目标位置 " +
+                          $"<b class=\"mono\">{ReportStyle.E(dstLabel)}</b>；" +
+                          $"文件数 {srcFiles:N0} → {dstFiles:N0}，总字节 {Format.Bytes(srcBytes)} → {Format.Bytes(dstBytes)}，" +
+                          "两侧一致。<b>注意</b>：一致的是<b>文件数量与总字节</b>，不等于每个文件内容都逐字节相同。</p>");
+            return;
+        }
+        if (IsCanceledOrFailed(v.RunStatus)) return;   // 取消/未跑完：上一段已如实说明，不在此处下结论
+
+        sb.AppendLine($"<p><span class=\"bad\">迁移结果：没有完整完成。</span>" +
+                      $"源位置 <b class=\"mono\">{ReportStyle.E(srcLabel)}</b> → 目标位置 " +
+                      $"<b class=\"mono\">{ReportStyle.E(dstLabel)}</b>。" +
+                      $"核对到 <b>{badObjects.Count}</b> 个对象存在问题：" +
+                      $"{string.Join("、", badObjects.Take(8).Select(o => $"<span class=\"mono\">{ReportStyle.E(o.ObjectId)}</span>（{ReportStyle.E(o.StatusText)}）"))}" +
+                      (badObjects.Count > 8 ? $" 等 {badObjects.Count} 个" : "") + "。</p>");
+
+        // ── 具体到文件：逐条列出「文件夹 → 文件 → 大小 → 原因」──
+        var concrete = missing.Concat(sizeBad).Concat(hashBad).Concat(unreadable).Concat(extra).ToList();
+        if (concrete.Count == 0)
+        {
+            // 有对象不通过，却没有任何文件级记录：必须如实说明"不知道是哪个文件"，不编造。
+            sb.AppendLine("<p>本次<b>没有记录到具体是哪个文件出了问题</b>（报告里没有该对象的文件级差异条目）。" +
+                          "请看 04 表该对象的计数与「无法确认」的原因码，或重新验证一次以获得文件级证据。" +
+                          "<b>这不等于没有问题，只等于本次没有拿到文件级证据。</b></p>");
+            return;
+        }
+
+        sb.AppendLine("<h3>具体是哪些文件</h3>");
+        sb.AppendLine("<p class=\"note\">下表按「哪个文件夹 → 哪个文件 → 多大 → 出了什么问题」逐条列出；" +
+                      "只列报告里<b>真实记录到</b>的条目" +
+                      (v.FileDiffsTruncated ? "（差异条目已达记录上限，超出的只体现在 04 表的计数里）" : "") + "。</p>");
+        sb.AppendLine("<table><thead><tr><th>文件夹（目标侧）</th><th>文件</th><th>大小</th>" +
+                      "<th>问题</th><th>原始错误 / 错误码</th><th>原因确定程度</th></tr></thead><tbody>");
+        foreach (var d in concrete.Take(50))
+        {
+            var folder = FolderOf(d.TargetPath);
+            var name = string.IsNullOrEmpty(d.RelativePath) ? FileNameOf(d.TargetPath) : d.RelativePath;
+            var size = d.SourceLength >= 0 ? d.SourceLength : d.TargetLength;
+            sb.AppendLine("<tr>" +
+                          $"<td class=\"mono\">{ReportStyle.E(folder)}</td>" +
+                          $"<td class=\"mono\">{ReportStyle.E(name)}</td>" +
+                          $"<td>{(size < 0 ? "—" : Format.Bytes(size) + $"<br><span class=\"note\">{size:N0} 字节</span>")}</td>" +
+                          $"<td>{DiffKindTag(d.DiffKind)}</td>" +
+                          $"<td>{ReportStyle.E(d.Win32Code ?? (d.Detail is null ? "报告里没有记录错误码" : d.Detail))}</td>" +
+                          $"<td>{CertaintyForDiff(d)}</td>" +
+                          "</tr>");
+        }
+        if (concrete.Count > 50)
+            sb.AppendLine($"<tr><td colspan=\"6\"><span class=\"note\">…另有 {concrete.Count - 50} 条同类条目，见 05 表完整清单。</span></td></tr>");
+        sb.AppendLine("</tbody></table>");
+
+        // ── 五个问题分开回答（用户任务令 §三要求）──
+        sb.AppendLine("<h3>五个问题分别回答</h3><table><thead><tr><th>问题</th><th>结论</th><th>依据</th></tr></thead><tbody>");
+        sb.AppendLine("<tr><td>① 迁移过程是否失败？</td><td>" +
+                      "见同目录的<b>迁移报告</b>与 09 表（本报告只负责核对结果，不代替迁移过程的取证）" +
+                      "</td><td>迁移报告 / receipts / robocopy 退出码</td></tr>");
+        sb.AppendLine("<tr><td>② 本次对账是否发现缺失？</td><td>" +
+                      (missing.Count > 0
+                          ? $"<b class=\"bad\">是</b>：{missing.Count} 条「源有目标无」的文件级记录" +
+                            (missing.Count > 0 && v.Objects.Any(o => o.MissingConfirmed) ? "（已确证）" : "")
+                          : (v.Objects.Any(o => o.Status == "UNKNOWN")
+                              ? "<b class=\"warn\">未能确认</b>：有对象无法确认，详见 04 表原因码"
+                              : "否，未发现「源有目标无」的文件级记录"))
+                      + "</td><td>05 表 / FileDiffRecord(diffKind=missing-on-target)</td></tr>");
+        sb.AppendLine("<tr><td>③ 内容级 SHA-256 是否实际执行？</td><td>" +
+                      (v.Level >= VerifyLevel.L2_SampleHash
+                          ? $"<b>已执行抽样</b>：核对 {v.Objects.Sum(o => o.HashSampled):N0} 个文件" +
+                            $"（抽样比例 {v.SampleHashPercent?.ToString(CultureInfo.InvariantCulture) ?? "未采集"}%），" +
+                            $"不一致 {v.Objects.Sum(o => o.HashMismatched)} 个；<b>未抽到的文件仍无内容级证据</b>"
+                          : "<b class=\"warn\">未执行</b>：本轮的验证级别是 " + ReportStyle.E(DescribeLevel(v.Level)) +
+                            "，只对账文件数量与总字节")
+                      + "</td><td>01 表「验证级别」/ 06 表内容级阶段耗时</td></tr>");
+        sb.AppendLine("<tr><td>④ 数量/字节对账是否通过？</td><td>" +
+                      $"文件数：源 {srcFiles:N0} / 目标 {dstFiles:N0}（差 {Signed(srcFiles - dstFiles)}）；" +
+                      $"总字节：源 {Format.Bytes(srcBytes)} / 目标 {Format.Bytes(dstBytes)}" +
+                      $"（差 {Signed(dstBytes - srcBytes)} 字节）⇒ " +
+                      (srcFiles == dstFiles && srcBytes == dstBytes ? "<b class=\"ok\">一致</b>" : "<b class=\"bad\">不一致</b>") +
+                      "</td><td>02 表概览统计</td></tr>");
+        sb.AppendLine("<tr><td>⑤ 最终整体是否可以称为「完整」？</td><td>" +
+                      (v.OverallPass
+                          ? "<b class=\"ok\">在本次核对口径内可以</b>（仅代表已核对项一致）"
+                          : "<b class=\"bad\">不可以</b>：存在缺失/差异或无法确认的对象")
+                      + "</td><td>01 表「总体结论（业务）」</td></tr>");
+        sb.AppendLine("</tbody></table>");
+    }
+
+    /// <summary>把「哪个盘 / 哪个共享」翻译成人话端点。</summary>
+    private static (string Source, string Target) DescribeEndpoints(VerifyReport v)
+    {
+        var src = string.IsNullOrWhiteSpace(v.SourceHost)
+            ? "（报告未记录源位置）"
+            : (v.SelectedPaths.Count > 0 ? v.SelectedPaths[0] : v.SourceHost!);
+        var dst = string.IsNullOrWhiteSpace(v.TargetRoot) ? "（报告未记录目标位置）" : v.TargetRoot!;
+        return (src, dst);
+    }
+
+    /// <summary>目标路径的所在文件夹（去掉文件名）；拿不到就如实返回原串。</summary>
+    private static string FolderOf(string? targetPath)
+    {
+        if (string.IsNullOrWhiteSpace(targetPath)) return "—";
+        try
+        {
+            var dir = Path.GetDirectoryName(targetPath);
+            return string.IsNullOrEmpty(dir) ? targetPath : dir;
+        }
+        catch { return targetPath; }
+    }
+
+    private static string FileNameOf(string? targetPath)
+    {
+        if (string.IsNullOrWhiteSpace(targetPath)) return "—";
+        try { return Path.GetFileName(targetPath); } catch { return targetPath; }
+    }
+
+    /// <summary>
+    /// 原因确定程度。**这是本轮最重要的诚实性字段**：只有报告里真的有错误码/证据文本才敢说"已确定"，
+    /// 否则一律「原因尚未确定」，让用户知道该去别处取证，而不是接受一个猜出来的理由。
+    ///
+    /// ★ v0.5.4 Preview.2 真机修复（2026-10-16，用户任务令 §三）★
+    ///   必须把两件事**分开陈述**，因为它们的确定程度完全不同：
+    ///     ① 「文件确实缺失」——本报告用枚举比较**已确证**；
+    ///     ② 「为什么没复制成功」——本报告**没有**该文件的迁移期错误码 ⇒ **原因尚未确定**。
+    ///   旧写法对 missing-on-target 只写「部分确定」，于是**真机报告里根本不出现「原因尚未确定」**
+    ///   这七个字（真机 verify-report.json 的 fileDiffs[0].win32Code 为 null，
+    ///   错误码 5 只存在于迁移侧的 robocopy 日志与 receipt 里）。
+    ///   用户看到的是"部分确定"，很容易理解成"原因大体知道了"，与事实不符。
+    ///   现在：有错误码 ⇒ 已确定；没有错误码 ⇒ 明确写出「原因尚未确定」并指向迁移报告。
+    /// </summary>
+    private static string CertaintyForDiff(FileDiffRecord d)
+    {
+        if (!string.IsNullOrWhiteSpace(d.Win32Code))
+            return "<b class=\"ok\">已确定</b><br><span class=\"note\">有 Win32 错误码</span>";
+        if (!string.IsNullOrWhiteSpace(d.Detail) && d.DiffKind is "hash-mismatch" or "size-mismatch")
+            return "<b class=\"ok\">已确定</b><br><span class=\"note\">有两侧实测值</span>";
+        if (d.DiffKind == "missing-on-target")
+            return "<b class=\"warn\">缺失已确证；原因尚未确定</b><br><span class=\"note\">" +
+                   "本报告用枚举比较确认了<b>目标侧确实没有该文件</b>；但<b>为什么</b>没复制成功，" +
+                   "本报告没有记录该文件的迁移期错误码 ⇒ <b>原因尚未确定</b>，" +
+                   "请到同目录的迁移报告 / 该对象的 robocopy 日志里取证。</span>";
+        if (d.DiffKind == "extra-on-target")
+            return "<b class=\"warn\">多余已确证；原因尚未确定</b><br><span class=\"note\">" +
+                   "目标侧确实多出该文件；<b>来源未记录</b> ⇒ 原因尚未确定。</span>";
+        return "<b class=\"warn\">原因尚未确定</b><br><span class=\"note\">报告里没有该文件的错误码或对照值</span>";
     }
 
     // ═════════════════════════════ 02 概览统计 ═════════════════════════════

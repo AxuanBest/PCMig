@@ -72,6 +72,22 @@ public sealed class JobDefinition
     /// </summary>
     public bool AllowIncompleteScan { get; set; }
 
+    /// <summary>
+    /// true = 用户显式选择「不预检开始迁移」（v0.5.4-preview.3）：跳过 <c>PreflightChecker</c> 的
+    /// 源可达性 / 凭据 / 共享枚举 / 目标空间 / 权限 / 同名冲突检查。
+    /// <para>
+    /// 审计事实，落 job.json，续传沿用：事后能看出"这条任务当时没跑预检"。
+    /// **不写 preflight.json**——该文件缺失 = 未执行预检，
+    /// <c>ReportGenerator</c> 的「Preflight 检查记录」附录整段不出现，
+    /// 因此绝不会把"没执行"显示成"预检通过"。
+    /// </para>
+    /// <para>
+    /// 跳过预检**不等于**绕过执行引擎：Job 创建、源扫描、扫描残缺闸门、Planner 生成计划、
+    /// 回执、失败统计与 Step4 验证全部照常走同一条代码路径。
+    /// </para>
+    /// </summary>
+    public bool PreflightSkipped { get; set; }
+
     public MigrationOptions Options { get; set; } = new();
     public string CreatedBy { get; set; } = "";
     public string Notes { get; set; } = "";
@@ -249,6 +265,18 @@ public sealed class JobState
     public int TotalObjects { get; set; }
     public int CompletedObjects { get; set; }
     public int FailedObjects { get; set; }
+    /// <summary>
+    /// ★ v0.5.4 Preview.2（2026-10-16 真机修复）★ 校验阶段确证「源有目标无」的对象数。
+    ///
+    /// 为什么必须与 <see cref="FailedObjects"/> 分开：两者是**不同时点、不同证据**的两件事——
+    /// FailedObjects 来自迁移期回执（robocopy 退出码/错误分类），MissingObjects 来自校验期枚举
+    /// 对账（verify-report 的 MISMATCH + MissingConfirmed）。真机上二者恰好指同一对象
+    /// （object-000010），但存在「迁移报成功、校验却发现目标少了文件」的真实情形，
+    /// 那种情况 FailedObjects=0 而 MissingObjects&gt;0，**绝不能算完成**。
+    /// 默认 0 不落盘，旧 job-state.json 完全兼容。
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int MissingObjects { get; set; }
     public long TotalBytes { get; set; }
     public long CompletedBytes { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]

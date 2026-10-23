@@ -224,7 +224,13 @@ public static class SourceIdentity
         if (!path.StartsWith(@"\\", StringComparison.Ordinal)) return null;
         var segs = path.TrimStart('\\').Split('\\', StringSplitOptions.RemoveEmptyEntries);
         if (segs.Length < 2) return null;
-        var server = segs[0];
+        // ★ 2026-10-23（真机 P0-06）★ `server` 参数必须是 `\\主机` 形态。
+        //   旧代码把 segs[0] 原样（裸 IP `192.0.2.10`）传给 NetShareGetInfo，该 API 立刻返回
+        //   ERROR 1707（The network address is invalid）—— 于是 `sharepath:` 这一分量**从未取到过**，
+        //   现场日志里 100% 是「NetShareGetInfo(192.0.2.10,e) 返回 1707」。
+        //   后果不只是日志噪音：`IdentityChanged` 只在两边都有该分量时才比较它，缺一侧就静默跳过，
+        //   源身份守护实际退化成"只比 volume/fileId"——共享被换成另一台机器上的同名共享时它守不住。
+        var server = @"\\" + segs[0];
         var share = segs[1];
         IntPtr buf = IntPtr.Zero;
         try

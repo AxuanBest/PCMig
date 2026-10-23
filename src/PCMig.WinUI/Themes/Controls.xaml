@@ -1,4 +1,4 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <!-- ══════════════════════════════════════════════════════════════════════════════
        V7 Input Material Language（输入框脱离"默认 WinUI 换皮"观感）
        做法：**不重写 ControlTemplate**，而是覆盖 WinUI 默认 TextBox / PasswordBox 模板
@@ -255,5 +255,46 @@
       </ControlTemplate>
     </Setter.Value></Setter>
   </Style>
-  <FontFamily x:Key="ContentControlThemeFontFamily">Microsoft YaHei UI</FontFamily>
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       PCMigInfoIcon / PCMigInfoIconText（2026-10-18 定稿：ⓘ 是说明图标，不是按钮）
+       ── 历史（四次真机实测，逐一被证伪，别再走回头路）──
+       ① 裸 FontIcon：UIA 树里完全不存在（86 个元素搜不到），没有身份、没有帮助说明。
+       ② Button：可寻址、可聚焦、ToolTip 正常 —— 但语义错了，它看起来可点、给出"点一下会发生什么"
+          的虚假暗示却什么都不做。用户判词：「ⓘ 是信息提示图标，不是按钮」。
+       ③ TextBlock 包 FontIcon：XamlCompiler 直接报
+          WMC0020 Cannot add 'FontIcon' into the collection property 'Inlines' ⇒ 根本不合法。
+       ④ Border / ContentControl：UIA 有 AutomationId/Name（ControlType.Group）、不进 Tab 序，
+          但悬停不弹 ToolTip。★ 当时的归因「Border 不是 Control 所以 ToolTipService 无效」是错的 ★
+          真实原因：ToolTipService 是附加属性，只要 DependencyObject 就能注册；失败是因为
+          容器被 HorizontalAlignment=Left + Background=Transparent 收缩成字形大小的
+          14x14 可命中区，指针几乎不可能稳定落进去。
+       ── 现在定稿（Windows App SDK 1.5+ 确定可行）──
+       容器 = Grid（FrameworkElement，不是 Control ⇒ 天然没有 Click/Pressed/Released 状态机），
+       三件事保证 ToolTip 真的能弹：
+         · 背景用近透明画刷 #01FFFFFF 而不是 Transparent（Transparent 不参与命中测试）；
+         · MinWidth/MinHeight = 24，命中区不小于 Fluent 的最小触控目标；
+         · 不做 HorizontalAlignment=Left 收缩，居中放置。
+       UIA 身份用 AutomationProperties.AutomationId / Name 直接给 FrameworkElement 即可，
+       不需要是控件；IsTabStop=False ⇒ 不进 Tab 序。
+       ⚠ 读屏用户 Tab 不到它，所以同一句话必须同时写进 AutomationProperties.HelpText，
+         不能只藏在 ToolTip 里。
+       ⚠ InfoLabel 不用：它的 Info 部分是真按钮（InfoButtonCommand / IsInfoButtonEnabled，
+         默认 IsTabStop=True 且进 Tab 序），正是本轮要否决的语义。 -->
+  <Style x:Key="PCMigInfoIcon" TargetType="FontIcon">
+    <Setter Property="Glyph" Value="&#xE946;"/>
+    <Setter Property="FontSize" Value="14"/>
+    <Setter Property="VerticalAlignment" Value="Center"/>
+    <Setter Property="HorizontalAlignment" Value="Center"/>
+    <Setter Property="IsHitTestVisible" Value="False"/>
+    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+  </Style>
+  <!-- ⓘ 的承载容器：负责自动化身份、帮助说明与悬停 ToolTip；本身不是控件、不可聚焦、不可点击。 -->
+  <Style x:Key="PCMigInfoIconText" TargetType="Grid">
+    <Setter Property="VerticalAlignment" Value="Center"/>
+    <Setter Property="MinWidth" Value="24"/>
+    <Setter Property="MinHeight" Value="24"/>
+    <Setter Property="Background" Value="#01FFFFFF"/>
+    <Setter Property="IsTabStop" Value="False"/>
+  </Style>
+    <FontFamily x:Key="ContentControlThemeFontFamily">Microsoft YaHei UI</FontFamily>
 </ResourceDictionary>

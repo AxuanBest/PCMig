@@ -8,7 +8,7 @@
     <!--
         Step 4 — 结果与校验（视觉基准：正式参考图 ref4）。
         结构照参考图落位：
-          页标题区 → 顶部操作条（验证完整性 / 尝试修复 / 强制覆盖开关 / 打开报告 / 打开目标文件夹 / 恢复任务）
+          页标题区 → 顶部操作条（校验与验证 / 尝试修复 / 强制覆盖开关 / 打开报告 / 打开目标文件夹 / 恢复任务）
           → 报告清单（表头：时间 / 位置（盘符、文件夹\文件） / 原因 + 搜索框）
           → 实时日志（深色终端风面板，[INFO]/[WARN]/[ERROR] 前缀标签）
 
@@ -95,10 +95,10 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="0"/>
                     </Grid.RowDefinitions>
-                    <Button x:Name="ToolbarVerify" AutomationProperties.AutomationId="Step4.Verify" Grid.Row="0" Grid.Column="0" Style="{StaticResource PCMigPrimaryButton}" Padding="14,7">
+                    <Button x:Name="ToolbarVerify" AutomationProperties.AutomationId="Step4.Verify" Grid.Row="0" Grid.Column="0" Style="{StaticResource PCMigPrimaryButton}" Padding="14,7" ToolTipService.ToolTip="打开校验与验证面板：面板内的「开始验证」才会真正执行 L1 数量/字节对账">
                         <StackPanel Orientation="Horizontal" Spacing="9">
                             <FontIcon Glyph="&#xE73E;" FontSize="15"/>
-                            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="验证完整性"/>
+                            <TextBlock Style="{StaticResource PCMigTextActionButton}" Text="校验与验证"/>
                         </StackPanel>
                     </Button>
                     <Button x:Name="ToolbarRepair" AutomationProperties.AutomationId="Step4.Repair" Grid.Row="0" Grid.Column="1" Style="{StaticResource PCMigSecondaryButton}" Padding="12,6">

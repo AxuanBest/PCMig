@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading.Tasks;
 using PCMig.Core.Jobs;
@@ -21,6 +21,13 @@ namespace PCMig.Core.Tests;
 ///   ① 验证闸门逐个对象实测源根可达性，任一不可达 ⇒ 灯立即打回未连接；
 ///   ② 验证报告里任一对象 <c>SourceUnavailable</c> ⇒ 同上；全部实测可达 ⇒ 灯如实恢复。
 /// 若哪天有人把这两条调用删掉，本文件必须变红。
+///
+/// ★ 2026-10-15 偶发失败定点修复 ★ 本类构造 `ConnectionViewModel` 并断言源灯分档，
+/// 因此也依赖**全测试进程共享**的 `ConnectionViewModel.Clock`。该时钟的改写者
+/// （`P0SourceEvidenceFreshnessTests`）已改挂本类所在的 `A5-jobdir-isolation` 集合，
+/// 故两者串行执行，竞态窗口消失（见 <see cref="JobDirIsolationCollection"/> 的说明）。
+/// 本类**保留** `A5-jobdir-isolation` 是必须的：另外 12 个同类测试都在改写**进程级**
+/// 环境变量 `PCMIG_JOBS`，脱离该集合会让本类的作业目录被别的测试临时换掉。
 /// </summary>
 [Collection("A5-jobdir-isolation")]
 public class P0SourceLampTests : IDisposable
@@ -233,7 +240,7 @@ public class P0SourceLampTests : IDisposable
         // ② 翻译判据只在 Core 的 ShareLossSignal 里（32/33 的排除也在那里，见 P0ShareLossSignalTests）。
         var hook = MethodWindow(code, "private void ApplyShareLossSignalFromRunEnd(JobContext ctx, JobState end)", 1600);
         Assert.Contains("ShareLossSignal.TryMatchShareLossText(end.LastError", hook);
-        Assert.Contains("_connection.NotifyShareReachability(root!, false, evidence);", hook);
+        Assert.Contains("_connection.NotifyShareReachability(root!, false, evidence, authoritative: true);", hook);   // 权威失效，不得降级成子路径诊断
         Assert.Contains("roots.Count == 0", hook);          // 连计划都没有 ⇒ 退化为整体失效
         Assert.DoesNotContain("IsFileLock", hook);          // 文件锁判定不在这层做（只有 Core 一处口径）
     }
@@ -276,11 +283,69 @@ public class P0SourceLampTests : IDisposable
         Assert.Contains("if (IsConnected) { UpdateSourceState(); return; }", body);  // 幂等
         Assert.Contains("IsConnected = true;", body);           // 恢复 = 唯一状态源翻转，不是另开一个绿标志
         // ★ P0-05 ★ 恢复必须**带证据**：先落可达事实，再翻转状态；没有可归属目标就直接 return，绝不点绿。
-        Assert.Contains("_shareFacts[NormalizeTarget(target)] = new SourceShareFact(NormalizeTarget(target), true", body);
+        // ★ 2026-10-23（真机 P0-06）★ 落证据改走唯一写入点 `WriteFact`（账本只在那里增删，
+        //   以便统一归一化键空间并摘掉同主机的主机级聚合结论）。断言随之改为
+        //   "**经 WriteFact 落一条可达事实**"，比原来钉死某条赋值表达式更贴近意图，
+        //   并且"先证据、后翻转"的顺序断言与"无目标不点绿"的条件断言都原样保留。
+        Assert.Contains("WriteFact(", body);
+        Assert.Contains(", true,", body);                        // 落的是**可达**事实，不是失效
         Assert.Contains("if (string.IsNullOrWhiteSpace(target)) return;", body);
-        var factsAt = body.IndexOf("_shareFacts[NormalizeTarget(target)]", StringComparison.Ordinal);
+        var factsAt = body.IndexOf("WriteFact(", StringComparison.Ordinal);
         var flipAt = body.IndexOf("IsConnected = true;", StringComparison.Ordinal);
         Assert.True(factsAt >= 0 && flipAt > factsAt, "必须先落下可达证据，再翻转连接状态（否则又变成无条件绿灯）。");
+    }
+
+    [Fact]
+    public void P0_06_账本唯一写入点_共享级事实必须摘掉主机级聚合结论()
+    {
+        // ★ 2026-10-23（真机 P0-06）★ 真机黄灯的机制就是"主机级聚合结论 + 共享级事实并存"：
+        //   `Derive` 同时看到 fresh 与 dead ⇒ 恒 Partial ⇒ 琥珀，连传输中也一样黄。
+        //   这条结构契约保证"唯一写入点"不会被人绕开重新写回散装赋值。
+        var code = ReadRepoFile("src", "PCMig.WinUI", "Presentation", "ConnectionViewModel.cs");
+        // 窗口放宽到 2600：P0-06 收口把作用域规则（①②③）写成了方法内注释，
+        // 契约断言的对象仍是同一条实现语句，只是它现在排在注释之后。
+        // 窗口放宽到 4600：R1-6B（2026-10-24）把**作用域折叠**与**子路径诊断分流**两条规则
+        // 写进了同一个唯一写入点，实现语句因此下移；契约断言的对象仍是同一条实现。
+        var body = MethodWindow(code, "private void WriteFact(", 4600);
+
+        // ① 键必须先折叠到共享根作用域，否则子路径与共享根各占一个键 ⇒ 假 Partial。
+        Assert.Contains("var scope = ShareScopeOf(target);", body);
+        // ② 子路径"读不到"只进诊断，不许写死共享根（否则把子目录 ACL 问题伪装成整条共享失效）。
+        Assert.Contains("_subPathIssues[target] = new SourceShareFact(target, false, evidence, atUtc);", body);
+        // ③ 共享级事实写入时无条件摘掉同主机的主机级聚合结论（P0-06 原始不变量，保留）。
+        Assert.Contains("IsShareTarget(scope)", body);
+        Assert.Contains("_shareFacts.Remove(HostOf(scope));", body);
+        // ④ 账本本体只以折叠后的键写入 —— 这是"单一权威键空间"的落点。
+        Assert.Contains("_shareFacts[scope] = new SourceShareFact(scope, reachable, evidence, atUtc);", body);
+
+        // ★ 2026-10-23（Preview.7 收口 P0）★ 全文件级不变量：`_shareFacts` 的**增删清**
+        //   只允许出现在三个受控入口里。任何新的散装赋值都会让这条断言变红 ——
+        //   这正是本轮 P0 要防的回归（真机上曾经有四条业务路径绕过统一写入）。
+        var allowed = new[]
+        {
+            "private void WriteFact(",
+            "private void ForgetFact(",
+            "private void ClearFacts(",
+            "private void ForgetFactsOfOtherHosts(",
+        };
+        foreach (var line in code.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("//", StringComparison.Ordinal)) continue;
+            if (!(trimmed.Contains("_shareFacts[", StringComparison.Ordinal)
+                  || trimmed.Contains("_shareFacts.Remove(", StringComparison.Ordinal)
+                  || trimmed.Contains("_shareFacts.Clear(", StringComparison.Ordinal)))
+                continue;
+            // 只允许出现在受控入口的方法体内（用方法签名定位其所在区间）。
+            var lineIndex = code.IndexOf(line, StringComparison.Ordinal);
+            var owner = allowed
+                .Select(sig => code.LastIndexOf(sig, Math.Max(0, lineIndex), StringComparison.Ordinal))
+                .Where(idx => idx >= 0)
+                .DefaultIfEmpty(-1)
+                .Max();
+            Assert.True(owner >= 0,
+                $"发现绕过受控入口的账本直接写入：{trimmed}");
+        }
     }
 
     private static string MethodWindow(string text, string signature, int length)

@@ -427,7 +427,7 @@ public sealed class RobocopyRunner : ITransferWorker
     }
 
     /// <summary>错误行最多保留多少条（防止亿级文件失败时吃光内存）。</summary>
-    private const int MaxErrorLines = 500;
+    internal const int MaxErrorLines = 500;
 
     private static readonly System.Text.RegularExpressions.Regex s_errCodeRx = new(
         @"(?:错误|ERROR)\s+(?<code>\d+)|0x(?<hex>[0-9A-Fa-f]{8})",
@@ -438,7 +438,8 @@ public sealed class RobocopyRunner : ITransferWorker
     /// 实测（公司环境）：SystemCache 里 132 个被应用占用的 *.tmp 让整个对象判失败，
     /// 而旧版本 GUI 只显示"复制失败"四个字，用户完全不知道是哪个文件、什么原因。
     /// </summary>
-    public static string? SummarizeFailures(int exitCode, IReadOnlyList<string>? errorLines)
+    public static string? SummarizeFailures(int exitCode, IReadOnlyList<string>? errorLines,
+        bool errorLinesTruncated = false)
     {
         if (errorLines == null || errorLines.Count == 0) return null;
         // 同一文件会被 robocopy 记"初次失败 + 每次重试"多行（/R:2 → 3 行），必须按路径去重，
@@ -470,10 +471,72 @@ public sealed class RobocopyRunner : ITransferWorker
         sb.Append(total).Append(" 个文件复制失败：").Append(main).Append('（');
         sb.Append(top.Count == 1 ? $"错误码 {top[0].Key}" : $"错误码分布 {dist}").Append('）');
         if (attempts > total) sb.Append("，含重试共 ").Append(attempts).Append(" 次失败");
+        // ★ Preview.4 真机问题 3（2026-10-22）★ 错误行只保留前 500 条（防亿级失败吃内存），
+        //   但旧文案把"采样到的条数"直接说成"失败文件数"：现场 robocopy 统计 7,753 个失败，
+        //   界面却报「498 个文件复制失败」—— 数字看起来精确，实际是采样上限附近的噪声。
+        //   真实失败文件数以 robocopy 统计块为准（引擎会另打一条「robocopy 统计」日志）。
+        if (errorLinesTruncated)
+            sb.Append("，**错误行已达 ").Append(MaxErrorLines)
+              .Append(" 条采样上限，实际失败文件数多于此处数字**（以 robocopy 统计为准）");
         if (samples.Count > 0) sb.Append("；例如：").Append(string.Join("、", samples));
         sb.Append("。robocopy 退出码 ").Append(exitCode)
           .Append("（位掩码：8=有文件失败，1=有文件成功），已达重试上限，跳过这些文件继续其余数据。");
         return sb.ToString();
+    }
+
+    /// <summary>从 robocopy 日志尾部读出的**权威统计**（不是错误行采样）。</summary>
+    internal readonly record struct RobocopyLogSummary(
+        long TotalFiles, long CopiedFiles, long SkippedFiles, long MismatchFiles, long FailedFiles, long OtherFiles);
+
+    private static readonly System.Text.RegularExpressions.Regex s_fileStatRx = new(
+        @"^\s*(?:文件|Files)\s*[:：]\s*(?<a>[\d.,\s]+?)\s{1,}(?<b>[\d.,]+)\s{1,}(?<c>[\d.,]+)\s{1,}(?<d>[\d.,]+)\s{1,}(?<e>[\d.,]+)\s{1,}(?<f>[\d.,]+)\s*$",
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.Multiline);
+
+    /// <summary>
+    /// ★ Preview.4 真机问题 3（2026-10-22）★ 读 robocopy 日志尾部的统计块，拿**真实**的失败文件数。
+    ///
+    /// 为什么需要：错误行只在内存里保留前 <see cref="MaxErrorLines"/> 条，
+    /// 现场 7,753 个失败文件被说成「498 个」（= 采样条数），指标不真实。
+    /// 只读文件尾部 32 KB 并取**最后一个**统计块 —— robocopy 每次运行只会写一个统计块，
+    /// 但 `/TEE` 与 UNILOG 追加模式下同一文件可能有多次运行的历史，必须取最后一块。
+    /// 读不到/超时/格式不符 ⇒ 返回 null（调用方绝不能拿 null 当"0 个失败"）。
+    /// </summary>
+    internal static RobocopyLogSummary? TryReadLogSummary(string? logPath)
+    {
+        if (string.IsNullOrWhiteSpace(logPath) || !File.Exists(logPath)) return null;
+        try
+        {
+            using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            const int tailBytes = 32 * 1024;
+            var start = Math.Max(0, fs.Length - tailBytes);
+            fs.Seek(start, SeekOrigin.Begin);
+            var buf = new byte[fs.Length - start];
+            var read = fs.Read(buf, 0, buf.Length);
+            if (read <= 0) return null;
+
+            var text = Encoding.UTF8.GetString(buf, 0, read);   // UNILOG 是 UTF-8（/UNILOG 默认 Unicode 由 Inno 无关，robocopy 用 UTF-16 时下面会失败 ⇒ 返回 null，不猜）
+            var matches = s_fileStatRx.Matches(text);
+            if (matches.Count == 0)
+            {
+                text = Encoding.Unicode.GetString(buf, 0, read);
+                matches = s_fileStatRx.Matches(text);
+                if (matches.Count == 0) return null;
+            }
+
+            var m = matches[^1];
+            static long Num(string s)
+                => long.TryParse(s.Replace(",", string.Empty).Replace(".", string.Empty).Trim(),
+                    System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+
+            return new RobocopyLogSummary(
+                Num(m.Groups["a"].Value), Num(m.Groups["b"].Value), Num(m.Groups["c"].Value),
+                Num(m.Groups["d"].Value), Num(m.Groups["e"].Value), Num(m.Groups["f"].Value));
+        }
+        catch
+        {
+            return null;   // 统计读不出来绝不影响传输结论
+        }
     }
 
     /// <summary>从 robocopy 错误行里抠出出错路径（跳过本地化消息，兼容 UNC 与盘符，允许路径含空格）。</summary>
@@ -702,6 +765,18 @@ public sealed class RobocopyRunner : ITransferWorker
                 success ? DiagnosticLevel.Information : DiagnosticLevel.Error,
                 success ? DiagnosticOutcome.Succeeded : DiagnosticOutcome.Failed,
                 exitCode: code, durationMs: (int)Math.Min(int.MaxValue, sw.ElapsedMilliseconds));
+
+            // ★ Preview.4 真机问题 3（2026-10-22）★ 错误行被采样上限截断时，把 robocopy 自己的统计记进日志：
+            //   那是唯一权威的失败文件数（现场：错误行 500 条上限 ⇒ 界面说 498，统计说 7,753）。
+            //   只在截断时读（读文件尾部 32 KB，一次），正常成功路径零开销。
+            if (!success && errorLines.Count >= MaxErrorLines)
+            {
+                var stat = TryReadLogSummary(unicodeLogPath);
+                if (stat is { } s0)
+                    _log.Information("robocopy 统计 [{Pass}]：文件 总 {Total} / 复制 {Copied} / 跳过 {Skipped} / 失败 {Failed} / 其他 {Other}" +
+                                     "（错误行已到 {Kept} 条采样上限，界面数字以本条为准）",
+                        pass, s0.TotalFiles, s0.CopiedFiles, s0.SkippedFiles, s0.FailedFiles, s0.OtherFiles, errorLines.Count);
+            }
 
             return new RobocopyRunResult(code, success, Killed: killed, sw.Elapsed, lastErrorLine, errorLines);
         }

@@ -153,60 +153,41 @@ internal static class ImmersiveProgressParameters
     /// <summary>Band 起点相对 Head 的后退距离（DIP）：从后方向 Head 推进。</summary>
     public const double BandTravelLength = 150d;
 
-    // ── ★ Round-3 视觉纠偏（R34 Volumetric Head Halo）★ Head 体积光场 ──────────────
-    // 纪律：Head 的活动高光**只能**由连续衰减的局部体积光场表达。
-    // 禁止可辨识的 Stroke / Rim / Outline 作为主要 Head Glow —— 这就是本轮修掉的"一圈白线"。
+    // ── ★ 真机问题 4（2026-10-21）★ 前沿高光（Leading Edge Highlight）──────────────
+    //
+    // 【改前】Head 用三层**同心椭圆径向光场**（Outer 24×8 / Bloom 15×6 / Arc 7×4.5）叠加。
+    //   在 12 DIP 的生产厚度上，横向半径 24 DIP 的椭圆等于一个直径 48 DIP 的圆形光斑：
+    //   它在条内只有 12 DIP 高，其余全部溢出到轨道外 ⇒ 用户看到的正是"孤立的、明显呈圆形的模糊泛光"。
+    //   更关键的缺陷是**没有方向**：椭圆以 Head 为中心对称展开，既不贴合填充终点，也不表达运动方向，
+    //   所以它读起来像"临时贴上去的光圈"，而不是"这条进度条长了前沿"。
+    //
+    // 【改后】前沿 = 一条**贴住填充终点的非对称渐变光带**：
+    //   · 右端精确止于 Head，并由**填充胶囊**裁剪 ⇒ 光带只能出现在已完成区域内，低进度时随宽度自动收窄，
+    //     绝不可能飘到未完成的轨道上（任务令 §7.3 硬要求）；
+    //   · 左端按 <see cref="HeadEdgeTailLength"/> 渐隐 ⇒ 有明确方向（向后拖尾），不是一团对称光；
+    //   · 纵向**不溢出条厚**（旧实现允许 bloom 越出，是"圆形光斑"观感的直接来源）；
+    //   · 峰值内缩 <see cref="HeadEdgePeakInset"/>，让最亮处落在材质内部而不是轮廓线上，
+    //     不产生"一圈白线 / 霓虹圆环"（R34 的既有纪律继续生效）。
+    //   参考成熟实现的做法（Material 3 linear indicator 的 active track 端帽、Fluent 的 focus 光带、
+    //   Dribbble 上大量 linear progress 案例）：**前沿亮度来自"被截断的渐变"**，而不是"叠加的模糊圆"。
 
-    /// <summary>光场中心相对 Head 的**向后**偏移（DIP）：3~6，让光从材质内部溢出来。</summary>
-    public const double HeadHaloCenterBackOffset = 4d;
+    /// <summary>前沿光带向后拖尾长度（DIP）。取值必须显著大于条厚、小于一个端帽直径量级：18~26。</summary>
+    public const double HeadEdgeTailLength = 22d;
 
-    /// <summary>外层体积光的横向半径（DIP）：20~30。</summary>
-    public const double HeadHaloOuterRadiusX = 24d;
+    /// <summary>光带峰值距 Head 的内缩距离（DIP）：1.5~3。让最亮处落在材质内部，避免读成轮廓线。</summary>
+    public const double HeadEdgePeakInset = 2.5d;
 
-    /// <summary>外层体积光的纵向半径（DIP）：7~9（略大于半厚度 ⇒ 允许轻微 bloom 越出胶囊）。</summary>
-    public const double HeadHaloOuterRadiusY = 8d;
+    /// <summary>外层光带峰值不透明度：0.24~0.34。</summary>
+    public const double HeadEdgeOpacity = 0.30d;
 
-    /// <summary>外层体积光峰值不透明度：0.10~0.18。</summary>
-    public const double HeadHaloOuterOpacity = 0.16d;
+    /// <summary>内芯光带拖尾长度（DIP）：7~12（比外层短，形成"芯 + 晕"的层次，而不是均匀一片）。</summary>
+    public const double HeadEdgeCoreTailLength = 9d;
 
-    /// <summary>内层体积光的横向半径（DIP）：8~14。</summary>
-    public const double HeadHaloInnerRadiusX = 11d;
+    /// <summary>内芯光带峰值不透明度：0.18~0.26。</summary>
+    public const double HeadEdgeCoreOpacity = 0.22d;
 
-    /// <summary>内层体积光的纵向半径（DIP）：4~6。</summary>
-    public const double HeadHaloInnerRadiusY = 5d;
-
-    /// <summary>内层体积光峰值不透明度：0.15~0.25。</summary>
-    public const double HeadHaloInnerOpacity = 0.22d;
-
-    // ── ★ 执行书 §9.2（2026-10-05 视觉第二轮）★ Head Halo 至少三层 ────────────────
-    //   Layer A = Arc-attached Inner Glow（贴 Head 圆弧、纯白、三层里最亮、范围最小）
-    //   Layer B = Soft Outer Bloom（向 Head 后方/上方/下方扩散，连续衰减、无边界）
-    //   Layer C = Cyan Support Glow（很轻的青色，用于与 Chroma 材质融合，即上面的 Outer 层）
-    //   目的：让光"沿圆弧附着并向外融化"，而不是一块能看出边界的椭圆贴纸。
-
-    /// <summary>Layer A（白芯）横向半径（DIP）：6~9。</summary>
-    public const double HeadHaloArcRadiusX = 7d;
-
-    /// <summary>Layer A（白芯）纵向半径（DIP）：4~5.5。</summary>
-    public const double HeadHaloArcRadiusY = 4.5d;
-
-    /// <summary>Layer A 峰值不透明度：0.22~0.32（三层里最亮）。</summary>
-    public const double HeadHaloArcOpacity = 0.28d;
-
-    /// <summary>Layer A 中心相对 Head 的后退偏移（DIP）：1.5~3（比外层更贴近圆弧）。</summary>
-    public const double HeadHaloArcBackOffset = 2d;
-
-    /// <summary>Layer B（柔光团）横向半径（DIP）：13~18。</summary>
-    public const double HeadHaloBloomRadiusX = 15d;
-
-    /// <summary>Layer B（柔光团）纵向半径（DIP）：5~7。</summary>
-    public const double HeadHaloBloomRadiusY = 6d;
-
-    /// <summary>Layer B 峰值不透明度：0.10~0.18。</summary>
-    public const double HeadHaloBloomOpacity = 0.14d;
-
-    /// <summary>Layer B 中心相对 Head 的后退偏移（DIP）：3~5。</summary>
-    public const double HeadHaloBloomBackOffset = 3.5d;
+    /// <summary>光带纵向柔化条纹数（固定 5 条：条厚 12 DIP 时每条 2.4 DIP，足以表达上下亮度差且不产生条纹感）。</summary>
+    public const int HeadEdgeVerticalStripes = 5;
 
     // ── ★ Round-3 视觉纠偏（R31/R32）★ 几何与材质开关 ─────────────────────────
     /// <summary>胶囊几何重建阈值（DIP）：进度宽度变化超过它才重建 Geometry（既不每帧分配，也不留错几何）。</summary>

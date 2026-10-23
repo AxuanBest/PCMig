@@ -267,7 +267,7 @@ public sealed class PreflightChecker
         //
         // ★ 缺陷 O-B22c-1 修正（本批）★：旁证集合里**必须去掉「TCP 445 端口可达」**——
         //   端口可通只证明"有 SMB 服务在监听"，完全不证明"认证成功"。
-        //   B22c 场景正是如此：源机 445 通、域控 10.77.0.10 不可达、凭据无法完成域校验，
+        //   B22c 场景正是如此：源机 445 通、域控 192.0.2.20 不可达、凭据无法完成域校验，
         //   旧口径把 smbOk 当旁证 ⇒ 照样放行 ⇒ 界面宣「已连接」+「发现 0 个共享」（假连接）。
         //   真正能证明认证的只有三种结果：直连数据共享成功 / 共享枚举或管理共享探测成功 /
         //   源路径**真的读得到**（读得到即认证与授权都过了）。TCP 端口不在其列。
@@ -378,7 +378,14 @@ public sealed class PreflightChecker
                 }
                 catch (Exception ex)
                 {
-                    Add(report, "链路吞吐基准", false, "Warning", $"测速失败（共享可能只读）：{ex.Message}");
+                    // ★ 真机问题 2（2026-10-21）★ 改前这里直接把 .NET 原文铺进检查项 Detail：
+                    //   「测速失败（共享可能只读）：Access to the path '\\192.0.2.11\f\.pcmig-bench-….tmp' is denied.」
+                    //   结果是「预检通过」与一句英文 "Access is denied" 同框，用户读成"源文件访问被拒"，
+                    //   而事实是"只在源共享上写不了测速文件、读源文件完全正常"。
+                    //   现在：UI 侧只给中文结论 + 明确「不影响读取源文件」；原始异常原文降级为括号内的技术细节（保留排障能力）。
+                    Add(report, "链路吞吐基准", false, "Warning",
+                        $"测速未完成：{DescribeBenchmarkFailure(ex)}；这不影响读取源文件，可以继续迁移。" +
+                        $"（技术细节：{ex.Message}）");
                 }
                 finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* 清理失败不阻断 */ } }
             }
@@ -505,6 +512,30 @@ public sealed class PreflightChecker
     }
 
 
+    /// <summary>
+    /// 测速失败的中文归因（真机问题 2）。**只用于"向用户解释"**，不改变任何判定：
+    /// 测速失败历来都是非阻断提醒（<c>Severity=Warning, Pass=false</c>），放行闸门始终是「源路径可读」。
+    ///
+    /// 为什么必须单独归因：现场把 <c>Access is denied</c> 原样上屏，用户会理解为"源文件读不了"，
+    /// 而真实含义往往是"这个共享只给了读权限，写不了测速临时文件"。两者后果完全不同。
+    /// 纯函数 ⇒ 可被单元测试直接覆盖（不依赖网络/文件系统）。
+    /// </summary>
+    internal static string DescribeBenchmarkFailure(Exception? ex)
+    {
+        if (ex is null) return "无法建立测速文件";
+        if (ex is UnauthorizedAccessException) return "源共享不允许创建测速文件（只读或无写权限）";
+        if (ex is IOException && LooksLikeAccessDenied(ex.Message))
+            return "源共享不允许创建测速文件（只读或无写权限）";
+        if (LooksLikeAccessDenied(ex.Message)) return "源共享不允许创建测速文件（只读或无写权限）";
+        return "源共享上无法完成测速读写";
+    }
+
+    private static bool LooksLikeAccessDenied(string? message)
+        => !string.IsNullOrEmpty(message)
+           && (message.Contains("denied", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("拒绝访问", StringComparison.Ordinal)
+               || message.Contains("0x5", StringComparison.OrdinalIgnoreCase));
+
     internal static int ExtractWin32Error(Exception? ex)
     {
         if (ex is System.ComponentModel.Win32Exception w) return w.NativeErrorCode;
@@ -556,10 +587,42 @@ public sealed class PreflightChecker
         catch (Exception) { /* 观察失败绝不影响预检 */ }
     }
 
+    /// <summary>
+    /// ★ 真机问题 2（2026-10-21）★ 结论汇总。
+    ///
+    /// 【缺陷】旧实现把 <c>severity</c>（=「该检查失败时的潜在严重程度」）当成「当前问题的实际严重程度」：
+    /// <code>
+    ///   ErrorCount   = Checks.Count(c =&gt; c.Severity == "Error")     // 通过项也被计入
+    ///   WarningCount = Checks.Count(c =&gt; c.Severity == "Warning")
+    /// </code>
+    /// 现场证据 JOB-20261021-113312-48f4/preflight.json：<c>overallPass=true</c> 却
+    /// <c>errorCount=1</c>（「源路径」检查 pass=true / severity=Error）、<c>warningCount=2</c>
+    /// （IPC$ pass=true / severity=Warning，测速 pass=false / severity=Warning）。
+    /// 「通过」与「1 个错误」同框，用户无法判断到底该不该继续。
+    ///
+    /// 【修正】只统计**实际失败**的检查：<c>!Pass &amp;&amp; Severity == ...</c>。
+    /// <c>Severity</c> 保留原语义（失败时的潜在严重程度），它决定"这一项一旦失败是否阻断"，
+    /// 由 <see cref="PreflightReport.OverallPass"/> 的判据承担；两个概念不再混用。
+    /// </summary>
+    internal static (int Blocking, int Notices) CountFailures(IReadOnlyList<PreflightCheck> checks)
+    {
+        var blocking = 0;
+        var notices = 0;
+        foreach (var c in checks)
+        {
+            if (c.Pass) continue;                       // 通过的检查不是"当前问题"
+            if (c.Severity == "Error") blocking++;
+            else notices++;                             // Warning（含未识别的 severity）都按非阻断提醒计
+        }
+        return (blocking, notices);
+    }
+
     private PreflightReport Finish(PreflightReport r)
     {
         r.OverallPass = r.Checks.All(c => c.Pass || c.Severity != "Error");
-        _log.Information("Preflight 结束: {Result}（{Checks} 项检查）", r.OverallPass ? "通过" : "存在阻断项", r.Checks.Count);
+        var (blocking, notices) = CountFailures(r.Checks);
+        _log.Information("Preflight 结束: {Result}（{Checks} 项检查，阻断 {Blocking}，提醒 {Notices}）",
+            r.OverallPass ? "通过" : "存在阻断项", r.Checks.Count, blocking, notices);
 
         // ★ 结论级观察（预检是"能不能迁"的唯一闸门，其结论必须可离线复核）★
         try
@@ -573,8 +636,8 @@ public sealed class PreflightChecker
                     new PflSummaryPayload(
                         r.OverallPass,
                         r.Checks.Count,
-                        r.Checks.Count(c => c.Severity == "Error"),
-                        r.Checks.Count(c => c.Severity == "Warning")),
+                        blocking,
+                        notices),
                     Outcome: r.OverallPass ? DiagnosticOutcome.Succeeded : DiagnosticOutcome.Failed));
             }
         }

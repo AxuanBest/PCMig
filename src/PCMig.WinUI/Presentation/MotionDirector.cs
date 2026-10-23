@@ -52,10 +52,38 @@ internal static class MotionDirector
 
     private const string ForceMotionEnvironmentVariable = "PCMIG_FORCE_MOTION";
 
+    /// <summary>已定论的系统动画偏好（<c>null</c> = 尚未定论）。★ 一旦定论就缓存 ★</summary>
+    private static bool? _animationsEnabled;
+
+    /// <summary>Shell 是否已激活（由 App 在 <c>window-activated</c> 时置位）。</summary>
+    private static bool _shellInteractive;
+
     /// <summary>
-    /// §32：系统是否允许播放动画。每次读取系统偏好，避免进程启动时的远程会话瞬态值把整段会话永久锁为静态。
-    /// <c>PCMIG_FORCE_MOTION=1</c> 仅供本机视觉验收显式覆写，默认仍遵从系统无障碍偏好。
-    /// 取不到偏好时保守地按允许处理：宁可播放一次克制的过渡，也不要因为 API 不可用而整体失去动效。
+    /// ★ 2026-10-14（v0.5.4 Preview.1 回归修复）★ 窗口激活后由 <c>App</c> 调用：
+    /// 只有**此后**读到的 <c>false</c> 才算"用户在本机把动画关掉了"。
+    /// </summary>
+    internal static void MarkShellInteractive() => _shellInteractive = true;
+
+    /// <summary>
+    /// §32：系统是否允许播放动画（尊重无障碍偏好）。
+    ///
+    /// ★ 2026-10-14 回归修复 ★ 缺陷现象：**所有页面/浮层过渡动画全部消失**。
+    /// 现场证据（本机 RDP 会话，`PCMIG_FLUIDZOOM_DIAG=1`）：
+    ///   `StartTransition? opening=True panel=ChangelogPanel source=Button anim=False`
+    /// 根因：上一轮把这里从"**只读一次并缓存**"改成"**每次调用都读**"，
+    ///   而 <see cref="Windows.UI.ViewManagement.UISettings"/>.<c>AnimationsEnabled</c> 在
+    ///   **远程会话（RDP/RemoteApp）里恒为 false**（它不是用户在本机做的无障碍选择，是会话属性），
+    ///   于是每一次过渡都被这道闸门拒掉 ⇒ 整个动效层消失（v0.5.3 稳定版在同样环境下是播放动画的）。
+    ///
+    /// 现行判据（顺序即优先级）：
+    ///   1) <c>PCMIG_FORCE_MOTION=1</c> —— 本机视觉验收的显式覆写，恒为允许；
+    ///   2) 已定论 ⇒ 直接用定论（不再反复问系统，避免同一会话内结果漂移）；
+    ///   3) 非 UI 线程 ⇒ 不下结论、按允许处理（UISettings 要求 UI 线程）；
+    ///   4) 取不到偏好（异常）⇒ 按允许处理，**不缓存**；
+    ///   5) 读到 <c>false</c> 且当前是**远程会话** ⇒ 判为不可信，按允许处理（见上）；
+    ///   6) 读到 <c>false</c> 且窗口**尚未激活** ⇒ 判为启动期瞬态，不采信；
+    ///   7) 其余情况（读到 <c>true</c>，或窗口已激活后读到 <c>false</c>）⇒ 定论并缓存。
+    /// 即：**只有"本机、UI 线程、窗口已激活"读到的 false 才会关掉动画** —— 那才是用户的真实选择。
     /// </summary>
     public static bool SystemAnimationsEnabled
     {
@@ -64,15 +92,43 @@ internal static class MotionDirector
             if (string.Equals(Environment.GetEnvironmentVariable(ForceMotionEnvironmentVariable), "1", StringComparison.Ordinal))
                 return true;
 
+            if (_animationsEnabled is { } settled) return settled;
+
+            if (Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread() is null)
+                return true;   // 非 UI 线程：不下结论，等 UI 线程来问
+
+            bool value;
             try
             {
-                return new Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
+                value = new Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Motion] UISettings unavailable, assuming animations on: {ex.Message}");
-                return true;
+                return true;   // 取不到 ⇒ 按允许，且不缓存（下次再问）
             }
+
+            if (!value && IsRemoteSession()) return true;      // 远程会话的 false 不可信（回归修复点）
+            if (!value && !_shellInteractive) return true;     // 启动期瞬态，不采信
+
+            _animationsEnabled = value;
+            return value;
+        }
+    }
+
+    private const int SmRemoteSession = 0x1000;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
+
+    /// <summary>当前进程是否运行在远程会话（RDP/RemoteApp）里。</summary>
+    private static bool IsRemoteSession()
+    {
+        try { return GetSystemMetrics(SmRemoteSession) != 0; }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Motion] GetSystemMetrics failed: {ex.Message}");
+            return false;
         }
     }
 
@@ -659,10 +715,71 @@ internal static class MotionDirector
     private const string SourceBreathDurationKey = "PCMigMotionSourceBreathDuration";
     private const string SourceBreathMinOpacityKey = "PCMigMotionSourceBreathMinOpacity";
 
+    // ★ Preview.6 · 真机呼吸闪烁根因（2026-10-22）★
+    //
+    // 【现场症状】用户实机视频 20261022-0737-46.2927842.mp4：绿色活动态下指示灯**快速闪灭**，没有呼吸感。
+    //
+    // 【真实根因 — 不是"周期太短"，是"相位每 80 ms 被重置一次"】
+    //   ① 底栏 80 ms 呈现节拍 MainWindow.RefreshFooterPresentation → SyncTransferActivity →
+    //      _transferActive 为真 ⇒ 通知 SourceState，View 的 PropertyChanged 分支 ⇒
+    //      UpdateSourceConnectionIndicator()；
+    //   ② PushFooter() 也**每次**无条件再调一次 UpdateSourceConnectionIndicator()（会话属性一变就推一次）；
+    //   ③ 旧 PlaySourceBreathing 每次进来都 `StopAnimation("Opacity")` 再 `StartAnimation`，而且
+    //      关键帧 **0f 起点就是最低亮度** ⇒ 时间线被拉回 t=0 ⇒ 圆点每 80 ms 从 minOpacity 重新起步、
+    //      永远爬不到 1.0，观感就是"一盏定频闪灭的灯"。周期 1.05 s 只是让这个重置看起来更碎。
+    //   ⇒ 修法不是延长时间，也不是把 Running 映射成绿：**同一呼吸状态下的重复请求必须是无副作用的空操作**。
+    //
+    // 【第二条根因 — 起点亮度】即使相位不被重置，从 min 起步也会让人先看到一个"暗下去"的瞬间。
+    //   现在呼吸从 **1.0（当前常亮亮度）** 起步 ⇒ 状态切换时没有任何亮度跳变，先柔和变暗再回来。
+    //
+    // 【第三条 — 亮度曲线】旧关键帧 0→0.5→1 全部挂在同一条 cubic-bezier(0.4,0,0.6,1) 上，
+    //   两端速度不为零 ⇒ 谷底与峰顶都是"折角"，2 秒周期下看着像跳变。
+    //   现在用正弦型（sin²）曲线：(1+cos(2πt))/2 在两端导数为零，全程连续，永远不出现折角。
+
     /// <summary>
-    /// 源连接指示器"正在连接"的琥珀色柔和呼吸：Opacity <c>min → 1 → min</c> 无限循环
-    /// （周期取自 <c>PCMigMotionSourceBreathDuration</c>，默认 1.05 s）。
-    /// 重复调用**接管**旧动画而不是叠加；系统关闭动画时直接吸附到常亮终态（Opacity = 1）。
+    /// 每个指示器元素当前**已生效**的呼吸签名（周期 tick 数 + 最低亮度）。
+    /// 只有签名相同才认定"已经在呼吸同一套参数"⇒ 重复调用直接返回，绝不重启相位。
+    /// 用 ConditionalWeakTable：元素被回收时条目自动消失，不会累积、不构成资源泄漏。
+    /// </summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, BreathSignature>
+        ActiveBreaths = new();
+
+    private sealed record BreathSignature(long DurationTicks, float MinOpacity);
+
+    /// <summary>
+    /// ★ Preview.6 实测缝（仅 DEBUG）★ 只读查询：该元素当前是否被本类记为"正在呼吸"。
+    ///
+    /// 为什么需要它：真机实测出现"该呼吸的元素零变化"，而截图无法区分
+    /// 「没进呼吸」/「进了但动画没生效」/「生效了但幅度被压扁」三种成因。
+    /// 这个方法只回答**第一种**（本类是否认为在呼吸），不改状态、不进 Release。
+    /// </summary>
+#if DEBUG
+    internal static bool IsSourceBreathingForHarness(FrameworkElement? element)
+        => element is not null && ActiveBreaths.TryGetValue(element, out _);
+
+    /// <summary>
+    /// ★ Preview.6 实测缝（仅 DEBUG）★ 真实"启动动画"的累计次数（穿过幂等闸门的次数）。
+    ///
+    /// 用来把"幂等闸门是否每次都放行"这件事变成可核对的数字：
+    ///   · 16 ms 节拍持续运行 + 状态不变 ⇒ 这个数**不该增长**（相位不被重置）；
+    ///   · 300 次高频投影冲击 ⇒ 这个数**不该增长**；
+    ///   · 真正从"不呼吸"切到"呼吸" ⇒ 恰好 +1。
+    /// 它不能替代像素证据，只把"有没有重复建动画"从主观判断变成实测计数。
+    /// </summary>
+    internal static long SourceBreathStartCountForHarness;
+
+    internal static void ResetSourceBreathStartCountForHarness() => SourceBreathStartCountForHarness = 0;
+#endif
+
+    /// <summary>
+    /// 源连接指示器的柔和呼吸：Opacity <c>[min, 1]</c> 循环，<b>幂等</b>。
+    ///
+    /// 语义（★ Preview.6 修正 ★）：
+    ///   · 已在呼吸**同一套参数** ⇒ 立即返回，什么都不做（不 StopAnimation、不重置时间线、不重建动画）。
+    ///     这是修复"80 ms 一拍反复重启导致定频闪灭"的关键，也是用户要求"重复事件不得重置相位"的落点。
+    ///   · 参数变了（周期 / 最低亮度改了）或此前没在呼吸 ⇒ 接管：先停旧的再起新的（最多一次）。
+    ///   · 系统关闭动画 ⇒ 直接吸附常亮终态（不呼吸）。
+    /// 所有调用都发生在 UI 线程（底栏节拍与会话属性通知都已在 UI 线程），无需额外加锁。
     /// </summary>
     public static void PlaySourceBreathing(FrameworkElement? element)
     {
@@ -676,27 +793,27 @@ internal static class MotionDirector
 
         try
         {
+            var span = GetDuration(SourceBreathDurationKey, 2.0).TimeSpan;
+            if (span <= TimeSpan.Zero) span = TimeSpan.FromMilliseconds(2000);
+            var min = (float)Math.Clamp(GetDouble(SourceBreathMinOpacityKey, 0.45), 0.05, 1.0);
+
+            // ★ 幂等闸门 ★ 已经在呼吸同一套参数 ⇒ 空操作（相位保持连续）。
+            var signature = new BreathSignature(span.Ticks, min);
+            if (ActiveBreaths.TryGetValue(element, out var active) && active == signature) return;
+
             var visual = ElementCompositionPreview.GetElementVisual(element);
             var compositor = visual.Compositor;
-
-            var span = GetDuration(SourceBreathDurationKey, 1.05).TimeSpan;
-            if (span <= TimeSpan.Zero) span = TimeSpan.FromMilliseconds(1050);
-            var min = (float)Math.Clamp(GetDouble(SourceBreathMinOpacityKey, 0.35), 0.05, 1.0);
 
             // 接管旧动画：同一元素上绝不并行两条呼吸（否则相位不同步会出现"抖一下"）。
             visual.StopAnimation("Opacity");
 
-            var easing = compositor.CreateCubicBezierEasingFunction(
-                new Vector2(0.40f, 0.00f), new Vector2(0.60f, 1.00f));
-
-            var breath = compositor.CreateScalarKeyFrameAnimation();
-            breath.InsertKeyFrame(0f, min);
-            breath.InsertKeyFrame(0.5f, 1f, easing);
-            breath.InsertKeyFrame(1f, min, easing);
-            breath.Duration = span;
-            breath.IterationBehavior = AnimationIterationBehavior.Forever;
+            var breath = CreateSineBreath(compositor, span, min);
 
             visual.StartAnimation("Opacity", breath);
+            ActiveBreaths.AddOrUpdate(element, signature);
+#if DEBUG
+            SourceBreathStartCountForHarness++;
+#endif
         }
         catch (Exception ex)
         {
@@ -706,10 +823,47 @@ internal static class MotionDirector
         }
     }
 
-    /// <summary>停止呼吸并吸附到常亮终态（Opacity 恰为 1）。可安全重复调用。</summary>
+    /// <summary>
+    /// 生成一条**正弦型**呼吸曲线：<c>opacity(t) = min + (1 − min) · (1 + cos(2πt/T)) / 2</c>。
+    ///
+    /// 为什么这样写（而不是三关键帧 + easing）：
+    ///   · 曲线在 t=0 处恰好等于 **1.0**（常亮亮度）⇒ 从"绿常亮"切到"绿呼吸"时没有亮度跳变；
+    ///   · 用立方贝塞尔 (0.4,0)-(0.6,1) 逼近半周期的 sin² 段，端点速度为零 ⇒ 谷底/峰顶都没有折角；
+    ///   · 采样点多（16 段/周期）⇒ 肉眼看到的是连续亮度变化，不是台阶。
+    /// 只用 Composition 关键帧（合成线程播放）：不产生任何 UI 定时器、不触发 Measure/Arrange。
+    /// </summary>
+    private static ScalarKeyFrameAnimation CreateSineBreath(Compositor compositor, TimeSpan span, float min)
+    {
+        // 端点速度为零的贝塞尔：(0.4,0,0.6,1) 的切线斜率在两端都趋于 0，正好贴合 sin² 的半周期形状。
+        var ease = compositor.CreateCubicBezierEasingFunction(
+            new Vector2(0.40f, 0.00f), new Vector2(0.60f, 1.00f));
+
+        const int Segments = 16;   // 每个完整周期 16 段（每段≈125 ms）：肉眼完全连续，又不制造海量关键帧
+        var breath = compositor.CreateScalarKeyFrameAnimation();
+        for (var i = 1; i <= Segments; i++)
+        {
+            var t = (double)i / Segments;                                  // 0 → 1（t=0 由下面的起始帧承担）
+            var wave = 0.5 * (1.0 + Math.Cos(2.0 * Math.PI * t));          // t=0 ⇒ 1，t=0.5 ⇒ 0，t=1 ⇒ 1
+            var value = (float)(min + (1.0 - min) * wave);
+            breath.InsertKeyFrame((float)t, value, ease);
+        }
+        // 起始帧必须是**当前常亮亮度 1.0**：任何进入呼吸的切换点都不得出现突然变暗。
+        breath.InsertKeyFrame(0f, 1f);
+        breath.Duration = span;
+        breath.IterationBehavior = AnimationIterationBehavior.Forever;
+        return breath;
+    }
+
+    /// <summary>
+    /// 停止呼吸并吸附到常亮终态（Opacity 恰为 1）。可安全重复调用，也幂等：
+    /// 本来就没在呼吸时不再重复写属性（避免每 80 ms 一次的无意义属性写入）。
+    /// </summary>
     public static void ResetSourceBreathing(FrameworkElement? element)
     {
         if (element is null) return;
+        var wasBreathing = ActiveBreaths.TryGetValue(element, out _);
+        ActiveBreaths.Remove(element);
+        if (!wasBreathing && element.Opacity >= 1.0) return;   // 已常亮 ⇒ 空操作
         try
         {
             var visual = ElementCompositionPreview.GetElementVisual(element);

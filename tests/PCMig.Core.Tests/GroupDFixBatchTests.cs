@@ -157,17 +157,50 @@ public sealed class GroupDFixBatchTests
         Assert.NotEqual(100.0, TransferOrchestrator.Percent(s));
     }
 
-    [Theory]
-    [InlineData(JobPhase.Completed)]
-    [InlineData(JobPhase.CompletedWithErrors)]
-    public void F4_Percent_OnlyReachesHundredWhenTheJobIsSettled(JobPhase phase)
+    [Fact]
+    public void F4_Percent_OnlyReachesHundredWhenTheJobIsSettled()
     {
         var s = new JobState
         {
-            Phase = phase, TotalObjects = 1, CompletedObjects = 1,
+            Phase = JobPhase.Completed, TotalObjects = 1, CompletedObjects = 1,
             TotalBytes = 1024, CompletedBytes = 1024,
         };
         Assert.Equal(100.0, TransferOrchestrator.Percent(s));
+    }
+
+    /// <summary>
+    /// ★ v0.5.4 Preview.2 真机修复（2026-10-16，用户任务令 §一）★
+    ///   本条由原 <c>F4_Percent_OnlyReachesHundredWhenTheJobIsSettled</c> 的
+    ///   <c>[InlineData(JobPhase.CompletedWithErrors)]</c> 改写而来，**不是为了让测试通过而放松断言**：
+    ///   用户令 §一 明确要求「CompletedWithErrors 绝不能显示 100%，任何存在 Failed/Missing/未完成对象
+    ///   的终态都不得 100%，至少 &lt;=99.9%」，并把它列为"最重要的验收标准"。
+    ///   旧断言恰恰固定了被真机证伪的行为——真机 JOB-20261016-150319-e738 终态为
+    ///   completedWithErrors（9/10 对象、DumpStack.log 缺失、报告 overallPass=false），
+    ///   界面却因这条旧口径显示 100%，用户先看到"完成"再在报告里发现文件没复制成功。
+    ///   新语义：CompletedWithErrors 的显示上限恒为 99.9；只有 Phase==Completed 才允许 100%。
+    /// </summary>
+    [Fact]
+    public void F4_Percent_CompletedWithErrors_NeverReachesHundred()
+    {
+        var s = new JobState
+        {
+            Phase = JobPhase.CompletedWithErrors, TotalObjects = 1, CompletedObjects = 1,
+            TotalBytes = 1024, CompletedBytes = 1024,
+        };
+        Assert.Equal(99.9, TransferOrchestrator.Percent(s));
+        Assert.NotEqual(100.0, TransferOrchestrator.Percent(s));
+    }
+
+    /// <summary>真机形态：CompletedWithErrors + 有失败对象 + 字节被抹平到等于计划 ⇒ 仍然只能 99.9。</summary>
+    [Fact]
+    public void F4_Percent_CompletedWithErrorsWithFailures_StaysAt99Point9()
+    {
+        var s = new JobState
+        {
+            Phase = JobPhase.CompletedWithErrors, TotalObjects = 10, CompletedObjects = 9, FailedObjects = 1,
+            TotalBytes = 119_491_120_745, CompletedBytes = 119_491_120_745,
+        };
+        Assert.Equal(99.9, TransferOrchestrator.Percent(s));
     }
 
     [Fact]

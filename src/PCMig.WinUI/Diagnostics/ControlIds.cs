@@ -42,6 +42,17 @@ public static class ControlIds
     public const string Step1AddShare = "Step1.AddShare";
     public const string Step1ManualShareName = "Step1.ManualShareName";
     public const string Step1BenchmarkToggle = "Step1.BenchmarkToggle";
+    /// <summary>
+    /// 测速说明 ⓘ 图标的稳定 ID。
+    /// 2026-10-18 二次修正：该图标是**说明图标，不是按钮** —— 用 TextBlock + FontIcon 承载，
+    /// 有 AutomationId / AutomationProperties.Name / ToolTip，但不是 Button，也没有 Click/Pressed 语义。
+    /// </summary>
+    public const string Step1BenchmarkInfoIcon = "Step1.BenchmarkInfoIcon";
+    /// <summary>
+    /// Step 2「超大数据模式」说明 ⓘ 图标的稳定 ID。
+    /// 2026-10-18 二次修正：与 Step1 保持一致的非按钮式实现（TextBlock + FontIcon）。
+    /// </summary>
+    public const string Step2ExpertModeInfoIcon = "Step2.ExpertModeInfoIcon";
     public const string Step1ShareList = "Step1.ShareList";
     public const string Step1EmptySharesHint = "Step1.EmptySharesHint";
 
@@ -64,6 +75,12 @@ public static class ControlIds
 
     // Step 2 选择数据与目标（D6.1 §12 补齐）
     public const string Step2Prepare = "Step2.Prepare";
+    /// <summary>
+    /// v0.5.4-preview.3 新增：「不预检开始迁移」（跳过 PreflightChecker，但扫描/计划/回执/验证照常）。
+    /// 与 <see cref="Step2Prepare"/> / <see cref="Step2Start"/> 是**三个独立入口**：
+    /// 前两个保持原语义不变，这条只跳过预检那一段。
+    /// </summary>
+    public const string Step2SkipPreflight = "Step2.SkipPreflight";
     public const string Step2Start = "Step2.Start";
     public const string Step2Pause = "Step2.Pause";
     public const string Step2Stop = "Step2.Stop";
@@ -161,7 +178,7 @@ public static class ControlIds
     /// </summary>
     public static readonly IReadOnlyList<string> BusinessCritical = new[]
     {
-        Step1Connect, Step1AddShare, Step2Prepare, Step2Start, Step2Pause, Step2Stop, Step2Resume,
+        Step1Connect, Step1AddShare, Step2Prepare, Step2SkipPreflight, Step2Start, Step2Pause, Step2Stop, Step2Resume,
         Step2ExistingJobs, Step4Verify, Step4Repair, Step4Resume, VerificationPanelStart, ShellTransferStart, ShellTransferPause,
         ShellTransferStop, ShellTransferResume, ShellMaterialTuning, ShellDiagnostics, ShellDiagnosticsPanel,
         DiagnosticsRefresh, DiagnosticsDeepToggle, DiagnosticsWarnOnly, DiagnosticsExport,

@@ -9,6 +9,10 @@
 //      锁与 EFS + 超大规模说明）把执行卡无限撑高；
 //    · 左侧「提示」卡却永远显示冻结文案「就绪 / 暂无报错」，与真实状态无关（假绿）；
 //    · 「连接与安全提示」卡同样与真实安全状态无关（缺密码这类真提示只出现在右侧长句里）。
+//      ★ 追加（2026-10-14 Issue 6，用户指示）：该卡已从 Step2 右栏**移除** ——
+//        它是右栏溢出 62.5 DIP、被 Shell 页面导航 Footer 覆盖的直接原因（真机 200% DPI 实测）。
+//        SecurityHint 通道本身仍在（VM 的 SetSecurityHint 与 SR-10 写入者纪律不变），
+//        只是 Step2 不再有落点。
 //  ⇒ 本文件把 §9 的**五条语义通道 + 面板映射**钉成可执行断言。
 //
 //  ── 怎么够得着 WinUI 的类型 ────────────────────────────────────────────────
@@ -365,29 +369,45 @@ public sealed class Batch6StatusRoutingTests : IDisposable
 
     // ══════════════════════════ SR-08 ══════════════════════════
 
-    /// <summary>面板映射（§9）：左栏读四通道、安全卡读 SecurityHint、执行卡读短句且限行。</summary>
+    /// <summary>
+    /// 面板映射（§9）：左栏读四通道、执行卡读短句且限行。
+    /// ★ Issue 6（2026-10-14，用户指示）★ Step2 右栏的「连接与安全提示」卡已**移除**：
+    ///   它是右栏溢出 62.5 DIP、被 Shell 页面导航 Footer 覆盖的直接原因（真机 200% DPI 实测）。
+    ///   ⇒ 本测试相应地不再断言 Step2 上存在 SecurityHintText 落点；
+    ///     SecurityHint 通道本身的**写入者纪律**仍由 SR-10 锁定（VM 的 SetSecurityHint 不变）。
+    /// </summary>
     [Fact]
     public void SR08_PanelsReadTheSemanticChannels()
     {
         // 右侧执行卡：读短句 + 限行截断，不再直接绑定聚合句。
         var step2Cs = ReadRepoFile("src/PCMig.WinUI/Views/Step2SelectDataPage.xaml.cs");
         Assert.Contains("StateMessageText.Text = session.ExecutionStatus;", step2Cs);
-        Assert.Contains("SecurityHintText.Text = session.SecurityHint", step2Cs);
         Assert.DoesNotContain("StateMessageText.Text = session.StatusMessage", step2Cs);
+
+        // ★ Issue 6 ★ Step2 不再有 SecurityHint 落点（卡已移除），
+        //   且代码后置不得残留对已删控件的引用（否则编译/运行期必然出错）。
+        Assert.DoesNotContain("SecurityHintText", step2Cs);
 
         var step2Xaml = ReadRepoFile("src/PCMig.WinUI/Views/Step2SelectDataPage.xaml");
         Assert.Contains("x:Name=\"StateMessageText\"", step2Xaml);
         Assert.Contains("MaxLines=\"2\"", step2Xaml);
         Assert.Contains("TextTrimming=\"CharacterEllipsis\"", step2Xaml);
-        Assert.Contains("x:Name=\"SecurityHintText\"", step2Xaml);
+        Assert.DoesNotContain("x:Name=\"SecurityHintText\"", step2Xaml);
+        // 已删的第三卡不得复活（否则右栏会重新溢出）。
+        Assert.DoesNotContain("连接与安全提示</TextBlock>", step2Xaml);
+        // 右栏只允许两卡：存放位置 + 执行。
+        Assert.Contains("x:Name=\"SelectRightStack\"", step2Xaml);
 
-        // 左栏提示卡：投影四条通道（安全提示按映射不进本卡）。
+        // 左栏提示卡：投影五条通道（★ R2 接手修复 · 缺陷 G：SecurityHint 已收回本卡 ★）。
+        //   历史备注（务必别再写回去）：Issue 6（2026-10-14）移除 Step2 右栏那张卡之后，
+        //   本行曾改成 `Assert.DoesNotContain(... SecurityHint ...)` —— 那等于**把"提示被丢弃"
+        //   钉成正确行为**。测试保护错误行为比没有测试更危险，已在 R2 修复。
         var hintCs = ReadRepoFile("src/PCMig.WinUI/Views/ShellHintCard.xaml.cs");
         Assert.Contains(nameof(MigrationSessionViewModel.OperationalStatus), hintCs);
         Assert.Contains(nameof(MigrationSessionViewModel.UserHint), hintCs);
         Assert.Contains(nameof(MigrationSessionViewModel.ErrorSummary), hintCs);
         Assert.Contains(nameof(MigrationSessionViewModel.CurrentObjectStatus), hintCs);
-        Assert.DoesNotContain("." + nameof(MigrationSessionViewModel.SecurityHint), hintCs);
+        Assert.Contains(nameof(MigrationSessionViewModel.SecurityHint), hintCs);
 
         var hintXaml = ReadRepoFile("src/PCMig.WinUI/Views/ShellHintCard.xaml");
         Assert.Contains("x:Name=\"HintOperationalText\"", hintXaml);
@@ -395,6 +415,10 @@ public sealed class Batch6StatusRoutingTests : IDisposable
         Assert.Contains("x:Name=\"HintUserText\"", hintXaml);
         Assert.Contains("x:Name=\"HintErrorText\"", hintXaml);
         Assert.Contains("x:Name=\"HintStatusText\"", hintXaml);
+        // ★ R2 缺陷 G ★ 安全通道的落点：必须在本卡里真实存在（不是只留注释）。
+        Assert.Contains("x:Name=\"HintSecurityText\"", hintXaml);
+        // 但**不得**加回 Step2 右栏（会重新造成 200% DPI 下溢出 62.5 DIP）。
+        Assert.DoesNotContain("x:Name=\"SecurityHintText\"", step2Xaml);
 
         // Shell 层接线：MainWindow 把同一会话交给提示卡（四页共用，不各写一份）。
         Assert.Contains("HintCard.Attach(Session);", ReadRepoFile("src/PCMig.WinUI/MainWindow.xaml.cs"));

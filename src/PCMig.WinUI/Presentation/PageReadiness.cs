@@ -2,6 +2,9 @@ using System;
 using System.ComponentModel;
 using System.IO;
 using PCMig.Core.Models;
+// ★ v0.5.4 Preview.2（P1-A）★ 诚实状态句要读引擎真值的"连续字节来源"枚举
+//   ProgressTruthSource（InFlightSource）——它定义在 Core.Transfer 下。
+using PCMig.Core.Transfer;
 
 namespace PCMig.WinUI.Presentation;
 
@@ -58,6 +61,12 @@ public sealed class PageReadiness : ObservableObject
         nameof(MigrationSessionViewModel.LastVerifyResultText),
         nameof(MigrationSessionViewModel.CanVerifyNow),
         nameof(MigrationSessionViewModel.FailedObjects),
+        // ★ v0.5.4 Preview.2（P1-A 返修，2026-10-15）★
+        //   A 类诚实状态句的判据来自 LastTruth.InFlightSource，但 LastTruth 每帧都变
+        //   （ApplySnapshot:3784），**不能**直接订阅 —— 那会把四页文案刷成高频风暴
+        //   （见本类上方 L48-51 的既有纪律）。改订阅它的**低频派生位** HasTrustedInflightSource：
+        //   该属性仅在"有可信来源 ⇄ 无可信来源"真正翻转时才发通知，传输期间同一状态不发。
+        nameof(MigrationSessionViewModel.HasTrustedInflightSource),
     ];
 
     private void OnSessionChanged(object? sender, PropertyChangedEventArgs e)
@@ -137,40 +146,36 @@ public sealed class PageReadiness : ObservableObject
     // ── Step 3 / Step 4 ──────────────────────────────────────────────────────
     // 说明（本包变更）：原先这两处是"半真 / 纯假"文案（只看 IsConnected），
     // 现在改为由 MigrationSessionViewModel 的**真实状态**判定；session 为 null 时退回旧口径。
-    public string Step3StateText => _session is null
-        ? (IsConnected
-            ? "已就绪：可在 Step 2 勾选内容后开始迁移。"
-            : "尚未开始迁移（需要先完成 Step 1 连接与 Step 2 选择）。")
-        : _session.IsRunning && _session.IsPaused
-            ? $"已暂停：{_session.ObjectText} 个对象，{_session.ProgressText}——点「恢复任务」可续传（已完成的对象不会重传）。"
-        : _session.IsRunning
-            ? $"迁移进行中：{_session.ProgressText}（{_session.Percent:0.0}%），对象 {_session.ObjectText}" +
-              (_session.FailedObjects > 0 ? $"，失败 {_session.FailedObjects} 个。" : "。")
-        // ── A.5（P1-3）：Completed 与 CompletedWithErrors **必须分成两句** ──
-        //   合并成"迁移已结束"会让"只传了一部分"的任务看起来跟正常完成一样。
-        : _session.Phase == JobPhase.Completed
-            ? $"迁移已完成（{_session.PhaseText}）：{_session.ProgressText}。可到 Step 4 做基础一致性检查并查看报告。"
-        : _session.Phase == JobPhase.CompletedWithErrors
-            ? $"迁移**未完整完成**（{_session.PhaseText}）：实际完成 {_session.Percent:0.0}%（{_session.ProgressText}）。" +
-              $"有失败对象未补齐，可到 Step 4 看失败清单、点「尝试修复」或「恢复任务」补齐（已完成的对象不会重传）。"
-        // ── 四态区分（用户点名要求：不得因为界面上都表现成"没在传"就把它们混成一个状态）──
-        //   暂停 / 中断 / 取消的**可续传性不同**，因此引导必须不同：
-        //     · Paused      ⇒ CanResume=true（ResumablePhases 含 Paused）→ 引导「恢复任务」；
-        //     · Interrupted ⇒ CanResume=true（同上）→ 引导「恢复任务」；
-        //     · Canceled    ⇒ **CanResume=false**（MigrationSessionViewModel.ResumablePhases 不含 Canceled）
-        //                     ⇒ 绝不能引导"恢复任务"，只能引导回 Step 2 重新开始。
-        : _session.Phase == JobPhase.Paused
-            ? $"已暂停：{_session.ObjectText} 个对象，{_session.ProgressText}——点「恢复任务」可续传（已完成的对象不会重传）。"
-        : _session.Phase == JobPhase.Interrupted
-            ? $"已中断（可续传）：{_session.ObjectText} 个对象，{_session.ProgressText}——点「恢复任务」续传，已完成的对象不会重传。"
-        : _session.Phase == JobPhase.Canceled
-            ? $"已取消：{_session.ObjectText} 个对象，{_session.ProgressText}。可回 Step 2 重新「开始迁移」。"
-        : _session.HasPlan
-            ? $"计划已就绪：{_session.ObjectText} 个对象，共 {_session.PlanBytesText}。" +
-              (_session.CanStart ? "点「开始迁移」即可执行。" : "请先在 Step 2 指定目标路径。")
-        : _session.HasJob
-            ? $"任务 {_session.JobIdText} 已载入（{_session.PhaseText}），但还没有可执行的计划：请回 Step 2 预检并生成计划。"
-            : "尚未开始迁移（需要先完成 Step 1 连接与 Step 2 选择并生成计划）。";
+    // ── ★ v0.5.4 Preview.2（Round3 审查返修，2026-10-15）★ ──────────────────────
+    //   【返修原因】原实现把分支顺序写成本属性里的一条长三元链，其顺序为
+    //       … IsRunning && IsPaused / **IsRunning（无条件）** / Completed… / (A 类缺源句) / …
+    //   其中 A 类诚实缺源句要求 IsRunning==true，而该条件已被更早的"无条件 IsRunning"分支
+    //   完全覆盖 ⇒ **该分支永远不可达，界面上一次也不会显示**；而 HonestActivityStateTests
+    //   的 13 个用例全绿，因为它们只测纯函数，测不到调用点的条件顺序。
+    //
+    //   【修法】把**分支顺序本身**也移进 Core 的纯选择器 Step3StateSelector.Select()，
+    //   本属性只负责"采集标量 + 调用 + 返回"。这样：
+    //     · 顺序缺陷可以在现有 xUnit 里被**直接断言**（下一步会新增 PageReadinessStep3BranchTests）；
+    //     · 生产代码与测试**共用同一个选择器**，不存在"测的是副本"；
+    //     · WinUI 侧不再持有第二份分支口径（本类头顶注释的既有纪律）。
+    public string Step3StateText => Step3StateSelector.Select(new Step3StateSelector.Step3Input(
+        HasSession: _session is not null,
+        IsConnected: IsConnected,
+        IsRunning: _session?.IsRunning ?? false,
+        IsPaused: _session?.IsPaused ?? false,
+        Phase: _session?.Phase ?? default,
+        HasTruthFrame: _session?.LastTruth is not null,
+        HasTrustedInflightSource: _session?.HasTrustedInflightSource ?? false,
+        ObjectText: _session?.ObjectText ?? string.Empty,
+        ProgressText: _session?.ProgressText ?? string.Empty,
+        Percent: _session?.Percent ?? 0.0,
+        FailedObjects: _session?.FailedObjects ?? 0,
+        PhaseText: _session?.PhaseText ?? string.Empty,
+        PlanBytesText: _session?.PlanBytesText ?? string.Empty,
+        CanStart: _session?.CanStart ?? false,
+        HasPlan: _session?.HasPlan ?? false,
+        HasJob: _session?.HasJob ?? false,
+        JobIdText: _session?.JobIdText ?? string.Empty));
 
     public string Step4StateText => _session is null
         ? (IsConnected

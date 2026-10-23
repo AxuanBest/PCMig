@@ -245,6 +245,12 @@ public sealed class D61PrivacyInputObservationTests : IDisposable
         Assert.True(legal);                            // 合法类别照常接受
 
         var sessionDir = runtime.Store!.SessionDir;
+        // ★ 2026-10-24（R1-6A 反偶发失败）★ 先等管线静默再关闭。
+        //   本用例期望"关闭时管线本来就是空的"，但重负载下排空泵可能拿不到线程池线程，
+        //   关闭会诚实地记 drain-budget-exhausted 并放弃 —— 于是合法事件没落盘，
+        //   第 252 行的 Contains 偶发变红（2026-10-24 全量并行跑时真实命中过一次）。
+        //   等待不削弱任何断言：该拒收的仍然拒收，该落盘的必须落盘。
+        D2TestSupport.WaitForPipelineQuiescent(runtime);
         D2TestSupport.Shutdown(runtime);
 
         var jsonl = string.Join("\n", Directory.GetFiles(Path.Combine(sessionDir, "events"), "*.jsonl").Select(File.ReadAllText));

@@ -245,13 +245,17 @@
                             <!-- 同左栏：空状态与真实文件流二选一（Grid 仅为同格叠放，Border 只能有一个子元素）。 -->
                             <Grid>
                             <StackPanel x:Name="LiveFilesEmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
-                                <FontIcon Glyph="&#xE8A5;" FontSize="28" Foreground="{StaticResource StepIconBrush}"/>
-                                <TextBlock Style="{StaticResource PCMigTextEmptyStateTitle}" Text="当前没有正在复制的文件。"
-                                           HorizontalAlignment="Center"/>
+                                <FontIcon x:Name="LiveFilesEmptyIcon" Glyph="&#xE8A5;" FontSize="28" Foreground="{StaticResource StepIconBrush}"/>
+                                <!-- ★ 真机问题 3（2026-10-21）★ 标题不再写死"当前没有正在复制的文件"：
+                                     大文件通道（/J）下文件级事件要等整个文件复制完成才来，此期间标题改为
+                                     「正在传输对象：<名称>」——由代码后置按**真实活动**切换（不是文案美化）。 -->
+                                <TextBlock x:Name="LiveFilesEmptyTitle" Style="{StaticResource PCMigTextEmptyStateTitle}"
+                                           Text="当前没有正在复制的文件。"
+                                           HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
                                 <!-- 原先这里硬编码「（说明：该窗口正在搬运 0 个文件）」的假计数，
-                                     现改为由 Engine 的 FileCopied 事件 / 停滞提示驱动的真实一行（初始为空，无假数据）。 -->
+                                     现改为由 Engine 的 FileCopied 事件 / 停滞提示 / 对象级真值驱动的真实一行（无假数据）。 -->
                                 <TextBlock x:Name="LiveFilesHintText" Style="{StaticResource PCMigTextHintBody}" Text=""
-                                           HorizontalAlignment="Center"/>
+                                           HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
                             </StackPanel>
                             <!-- 真实文件流：数据源 = MigrationSessionViewModel.LiveFiles（引擎 FileCopied 事件投影，≤200 条滚动）。
                                  U66（密度）：条目上下内边距 3→2，同高度多出一行；只动内边距，

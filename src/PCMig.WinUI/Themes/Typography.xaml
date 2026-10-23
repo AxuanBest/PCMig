@@ -1,4 +1,4 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <FontFamily x:Key="PCMigBodyFontFamily">Microsoft YaHei UI</FontFamily>
   <Style x:Key="PCMigTextBase" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource PCMigBodyFontFamily}"/></Style>
   <Style x:Key="DisplayTitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="30"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
@@ -60,7 +60,15 @@
   <Style x:Key="PCMigTextSourceStatus" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
   <Style x:Key="PCMigTextStepBadge" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="17"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="White"/></Style>
   <Style x:Key="PCMigTextPageSubtitle" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
-  <Style x:Key="PCMigTextFormNote" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
+    <!-- ★ 2026-10-18 信息图标与行内基线（用户令：文字视觉下沉、视觉中线不一致）★
+       问题不是字号，是行盒：ScrollViewer/StackPanel 里 13 DIP 雅黑自然行高 ≈17.4 DIP，
+       ascender 比 descender 高、descender 空间偏小 ⇒ 按 VerticalAlignment=Center 居中"行盒"时，
+       可见字形墨迹整体坐低约 2 DIP（真机像素实测：文字墨迹中心 401 vs 开关轨道中心 398.5）。
+       修法：显式 LineHeight=20（与同表 13 DIP 的先例一致）+ LineStackingStrategy=MaxHeight
+       （行盒按字体度量，不被同行更大的 ⓘ em 盒撑高）+ UseLayoutRounding（亚像素对齐稳定）。
+       ⇒ 行盒中线 = 墨迹中线，Center 对齐即可让文字与开关、图标三者视觉中线合一。
+       注意：这是字体度量层面的结构修正，不是给某一行写死像素位移；换 DPI / 换字号仍自洽。 -->
+  <Style x:Key="PCMigTextFormNote" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/><Setter Property="LineHeight" Value="20"/><Setter Property="LineStackingStrategy" Value="MaxHeight"/><Setter Property="UseLayoutRounding" Value="True"/></Style>
   <Style x:Key="PCMigTextStatusChipLabel" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></Style>
   <Style x:Key="PCMigTextStatusChipValue" TargetType="TextBlock" BasedOn="{StaticResource PCMigTextBase}"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/></Style>
   <!-- Step 3 进度页 -->

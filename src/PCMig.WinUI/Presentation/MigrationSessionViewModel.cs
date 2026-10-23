@@ -662,6 +662,178 @@ public sealed class MigrationSessionViewModel : ObservableObject
     private double _percent;
     public double Percent { get => _percent; private set => Set(ref _percent, value); }
 
+    /// <summary>
+    /// ★ v0.5.4 Preview.2 真机修复（2026-10-16，用户任务令 §五）★
+    /// **可信完成**：迁移是否真的可以称为"完成"，用于 Step3 → Step4 的自动前进。
+    ///
+    /// 为什么必须由这个属性统一回答：用户令明确禁止任何调用点自己拼
+    /// <c>percent &gt;= 100</c>。真机 JOB-20261016-150319-e738 正是被这种口径害的——
+    /// 10 个对象完成 9 个、object-000010 因 DumpStack.log 被源侧拒读而 Failed、
+    /// 验证报告里 MISMATCH，界面却因为 completedBytes 被抹平而显示 100%。
+    /// 若自动前进只看百分比，用户会被直接送到 Step4，而 Step3 的真实失败态一闪而过。
+    ///
+    /// 本属性**唯一**取自 Core 的 <see cref="TransferOrchestrator.IsTrustworthyCompletion"/>，
+    /// 六项判据（Phase==Completed ∧ TotalObjects&gt;0 ∧ FailedObjects==0 ∧ MissingObjects==0
+    /// ∧ CompletedObjects==TotalObjects ∧ CompletedBytes==TotalBytes）缺一不可。
+    /// 任何一项不成立——CompletedWithErrors / 有失败对象 / 有缺失对象 / 字节没闭环——
+    /// 都返回 false，用户留在 Step3 看到真实状态。
+    /// 计算发生在 <see cref="FinishRunAsync"/>（唯一拿到真实 JobState 的收尾点）。
+    /// </summary>
+    private bool _trustworthyCompletion;
+
+    /// <summary>
+    /// 最近一次从真实 JobState 读到的「校验期确证目标缺失」对象数。
+    /// 只服务于 <see cref="SnapshotSaysTrustworthyCompletion"/>（快照里没有这个字段），
+    /// 真正写 <see cref="TrustworthyCompletion"/> 的唯一出口仍是 <see cref="ApplyTrustworthyCompletion"/>。
+    /// </summary>
+    private int _knownMissingObjects;
+    public bool TrustworthyCompletion
+    {
+        get => _trustworthyCompletion;
+        private set => Set(ref _trustworthyCompletion, value);
+    }
+
+    /// <summary>
+    /// 按真实 JobState 重算 <see cref="TrustworthyCompletion"/>（唯一写入点）。
+    /// 未拿到状态（null）时一律 false —— 拿不到证据就不许说"完成"。
+    /// </summary>
+    private void ApplyTrustworthyCompletion(JobState? s)
+    {
+        // ★ R2 接手修复 · S-4 滞后一帧 ★
+        //   快照通路（ApplySnapshot）拿不到 JobState（它只有引擎快照里的对象数/字节），
+        //   却必须回答"这一帧允不允许显示 100%"。旧实现直接读上面那个属性 —— 那是**上一次**
+        //   按落盘状态算出来的结论，于是"收尾那一刻的 Completed 快照"用着"运行中"的旧值，
+        //   明明字节闭环也显示 99.9%，要等收尾路径再写一次才变 100（真机上表现为进度条卡在 99.9%）。
+        //   这里把"最近一次从真实状态读到的确证缺失数"记下来，供快照级判据复用：
+        //   快照自身能被证明闭环，但校验期已确证目标少文件时仍不许 100%。
+        _knownMissingObjects = s?.MissingObjects ?? 0;
+        TrustworthyCompletion = s is not null && TransferOrchestrator.IsTrustworthyCompletion(s);
+    }
+
+    /// <summary>
+    /// ★ R2 接手修复 · S-4 滞后一帧 ★ 用**快照自身携带的数据**判"这一帧可不可信"，而不是复用上一帧的结论。
+    ///
+    /// 判据与 Core <see cref="TransferOrchestrator.IsTrustworthyCompletion"/> 逐项对齐，唯一差别是
+    /// <c>MissingObjects</c> 不在 <see cref="ProgressSnapshot"/> 里，改用最近一次从真实 JobState 读到的值
+    /// （<see cref="_knownMissingObjects"/>）—— 传输期它恒为 0（开跑时会复位），
+    /// 校验期确证缺失后由 <see cref="ApplyVerifyConclusion"/> 走落盘口径重算，两条通路互相校验而非各算一套。
+    /// </summary>
+    private bool SnapshotSaysTrustworthyCompletion(ProgressSnapshot s)
+        => s.Phase == JobPhase.Completed
+           && s.TotalObjects > 0
+           && s.FailedObjects == 0
+           && _knownMissingObjects == 0
+           && s.CompletedObjects >= s.TotalObjects
+           && s.CompletedBytes == s.TotalBytes;
+
+    /// <summary>
+    /// ★ R2 接手修复 · 缺陷 H（S-1/S-2/S-3/S-4 合并处置）★
+    /// <b>「进度 100%」的唯一放行口径</b>：先按 Core 判据重算可信完成，只有可信才允许写 100.0；
+    /// 不可信时一律取真实落盘比例并封顶 <see cref="TransferOrchestrator.SettledPercentCapPublic"/>（99.9）。
+    ///
+    /// 为什么必须收敛到一个方法：修复前"写 100%"在外壳里有四条互不相干的通路
+    /// （载入历史任务 / 修复轮复验通过 / 校验发现缺失 / 进度快照兜底），
+    /// 其中三条只看 <c>Phase == Completed</c> 或 <c>report.OverallPass</c>，与 Core 的
+    /// <see cref="TransferOrchestrator.IsTrustworthyCompletion"/> 是两个互不校验的维度 ——
+    /// 结果就是"进度条满了、内部却认为不可信、页面也不自动前进"这种自相矛盾的画面。
+    /// 收敛后只要有人再新增一条写 100% 的通路而不经此方法，就会立刻暴露在测试里。
+    /// </summary>
+    /// <param name="s">真实的 JobState（拿不到就传 null：null 一律不可信，绝不猜完成）。</param>
+    private void ApplySettledCompletion(JobState? s)
+    {
+        ApplyTrustworthyCompletion(s);
+        if (TrustworthyCompletion)
+        {
+            PublishPercent(100.0, allowVisualSnap: true);
+            return;
+        }
+        if (s is null) return;
+        PublishPercent(Math.Min(ActualPercent(s), TransferOrchestrator.SettledPercentCapPublic), allowVisualSnap: true);
+    }
+
+    /// <summary>
+    /// ★ R2 接手修复 · 缺陷 H（S-3）★ 校验结论落地到界面的**唯一**入口：
+    /// 先把「确证缺失」写进 job-state（<see cref="VerifyReconciliation.Apply"/>），
+    /// 再按同一口径重算可信完成**与百分比**。
+    ///
+    /// 抽成方法而不是写在 <c>VerifyAsync</c> 里，是为了让单测能直接钉住这条契约
+    /// （测试项目以链接源码方式编译本文件，属同一程序集）。校验才是最硬的证据：
+    /// 它一旦发现目标确实少文件，界面就不允许继续停在 100%。
+    /// </summary>
+    internal void ApplyVerifyConclusion(JobContext ctx, VerifyReport? report)
+    {
+        // 顺序不可颠倒：先把「确证缺失」写进 job-state（有落盘证据），再据此重算界面结论。
+        VerifyReconciliation.Apply(ctx, report);
+        ApplySettledCompletion(ctx.LoadStateOrNew());
+    }
+
+    /// <summary>
+    /// ★ R2 接手修复 · 缺陷 J（2026-10-17）★ **写百分比的唯一出口**。
+    ///
+    /// 缺陷原文（独立代码审查 🔴-2 实测）：界面上三处显示百分比的地方读的都是
+    /// <c>truth?.Percent ?? Session.Percent</c> ——
+    ///   · <c>MainWindow.PushFooter</c>（底栏）；
+    ///   · <c>Step3ProgressPage.PushState</c>（页内大号百分比）；
+    ///   · 两处呈现节拍（<c>RefreshFooterPresentation</c> / <c>AdvancePresentationTick</c>）。
+    /// 也就是说：**只要 PresentationTruth 非空，<see cref="Percent"/> 根本不会被读**。
+    /// 于是缺陷 H（S-3）"校验确证缺失后把 Percent 压回 99.9"这条路，对任何已经收到过
+    /// 进度快照的任务**完全无效** —— 用户仍然看到 100%（来自那份旧真值），
+    /// 正是任务令明令禁止的「有文件缺失但进度 100%」。
+    ///
+    /// 收口方式：任何写百分比的通路都必须经这里，由它保证
+    /// 「<see cref="PresentationTruth"/>.Percent 与 <see cref="Percent"/> 不会一个 100 一个 99.9」。
+    /// 只向下压、不向上抬：真值仍然只由引擎快照产生，本方法绝不凭空抬高显示。
+    /// </summary>
+    /// <param name="percent">已经过可信完成闸门裁决的百分比。</param>
+    /// <param name="allowVisualSnap">
+    /// 是否允许把**呈现层**（80 ms 节拍的视觉值）一并压下来。
+    /// 只在"结论被更强的证据改小"时传 true（校验确证缺失、载入历史不可信任务、收尾降级）；
+    /// 传输过程中的每一帧快照必须传 false —— 那段时间视觉值由
+    /// <see cref="ProgressPresentationCoordinator.ApplyTruth"/> 的单调推进负责，
+    /// 随手 SnapTo 会破坏"暂停/恢复期间显示不倒退"的连续性契约。
+    /// </param>
+    private void PublishPercent(double percent, bool allowVisualSnap = false)
+    {
+        Percent = percent;
+        // 只压不抬：旧真值若比裁决结果更乐观，必须跟着降下来（否则 UI 读它、看不到降级）。
+        if (_presentationTruth is not null && _presentationTruth.Percent > percent)
+            PresentationTruth = _presentationTruth with { Percent = percent };
+        // 呈现层的视觉百分比只由 ApplyTruth（单调）产生，本身只会往上走；
+        // 校验期把结论压下来时，若不同步 SnapTo，底栏与 Step3 的那个大号数字
+        // 仍然会停在旧的 100% —— 于是"进度条 100% + 校验确证缺失"同屏。
+        // 只在**向下压**时动用显式回退（向上仍由引擎真值驱动，绝不由本方法抬高）。
+        if (allowVisualSnap && _presentation.VisualPercent > percent)
+            _presentation.SnapTo(percent, DateTime.UtcNow, "percent-lowered");
+    }
+
+    /// <summary>
+    /// ★ R2 接手修复 · 缺陷 K ★ 「正在校验」的独立闸门位。
+    ///
+    /// <para>
+    /// 缺陷原文：<c>VerifyAsync</c> 全程**不置** <c>IsRunning</c>（那是传输引擎的位），而
+    /// <c>CanStart</c> / <c>CanRepair</c> / <c>CanResume</c> 三个判据又**只看** <c>IsRunning</c>，
+    /// 于是校验在飞时「开始迁移」「尝试修复」「恢复任务」三个按钮仍然亮着：
+    /// 用户一点，<c>TransferOrchestrator</c> 就带着它**开跑时载入的那份内存快照**开始周期性
+    /// <c>SaveState</c>，把校验刚确证的 <c>MissingObjects</c> 整体覆盖回 0 ——
+    /// 「校验发现目标少文件」这条结论当场消失，界面重新变成 100% + 已完成。
+    /// </para>
+    /// <para>
+    /// 反向的不对称必须补齐：<c>VerifyAsync</c> 一直有 <c>if (IsRunning &amp;&amp; !allowDuringRun)</c>
+    /// 守卫（运行中不许校验），而「校验中不许运行」这条路**从来没被拦过**。
+    /// 本属性就是那条路，语义与 <c>IsRunning</c> 对等：两条链任一在飞，另一条必须进不来。
+    /// </para>
+    /// </summary>
+    private bool _isVerifying;
+    public bool IsVerifying
+    {
+        get => _isVerifying;
+        private set
+        {
+            if (!Set(ref _isVerifying, value)) return;
+            RaiseDerived();
+        }
+    }
+
     private bool _isRunning;
     public bool IsRunning
     {
@@ -948,6 +1120,64 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// <summary>当前对象状态（来自引擎的进度快照，不是 UI 自己推的）。</summary>
     public string CurrentObjectStatus { get => _currentObjectStatus; private set => Set(ref _currentObjectStatus, value); }
 
+    private string _checkSummary = string.Empty;
+    /// <summary>
+    /// ★ 真机问题 2（2026-10-21）★ **检查结论**通道：只回答"检查过没有、通过没通过、有几条非阻断提醒"。
+    ///
+    /// 为什么必须是独立通道、且**不走** <see cref="SetChannel"/>：
+    ///   · <see cref="SetChannel"/> 会同步覆盖 <c>StatusMessage</c> 与右侧执行卡短句 —— 而"检查结论"
+    ///     是一个持续存在的结论，不该顶掉"正在扫描/正在传输"这类阶段句；
+    ///   · 任务令 §5.1 要求三个维度分开：操作阶段（OperationalStatus）、检查结论（本属性）、
+    ///     问题级别（ErrorSummary / 本属性的提醒数）。旧实现把它们拼成一句长句，
+    ///     于是出现「预检通过 + Access is denied + 正在扫描 + 暂无报错」四种声音同屏。
+    /// </summary>
+    public string CheckSummary { get => _checkSummary; private set => Set(ref _checkSummary, value); }
+
+    private int _checkNoticeCount;
+    /// <summary>当前实际存在的**非阻断提醒**条数（= 未通过的 Warning 检查项；通过的检查永不计入）。</summary>
+    public int CheckNoticeCount { get => _checkNoticeCount; private set => Set(ref _checkNoticeCount, value); }
+
+    /// <summary>写入检查结论（唯一入口）。<paramref name="notices"/> 只统计**实际失败**的非阻断提醒。</summary>
+    private void SetCheckSummary(string? summary, int notices)
+    {
+        CheckNoticeCount = notices < 0 ? 0 : notices;
+        CheckSummary = summary ?? string.Empty;
+    }
+
+    /// <summary>
+    /// ★ Preview.4 真机问题 1（2026-10-22）★ 预检写下的 UserHint 是**行动号召**（"可以开始迁移"），
+    /// 它只在"尚未开始迁移"时成立。一旦进入实质阶段（Running）必须撤下，否则会与迁移状态长期并存。
+    ///
+    /// 边界（不得扩大）：
+    ///   · 只清 UserHint（行动号召），**不清** <see cref="CheckSummary"/>（结论 + 提醒数）——
+    ///     预检发现的历史提醒因此不会被删除，仍可在状态行与日志里核对；
+    ///   · 不清 ErrorSummary / SecurityHint：那两路与"要不要开始"无关；
+    ///   · 幂等：没写过预检提示时什么也不做（不影响暂停/恢复/重试等其它入口写入的 UserHint）。
+    /// </summary>
+    private void RetirePreflightCallToAction()
+    {
+        if (!_preflightHintActive) return;
+        _preflightHintActive = false;
+        // 直接写通道属性，**不走** SetChannel：SetChannel 会顺带把 StatusMessage / 执行卡短句
+        // 改成这条文本（清空就变成空串），而那两处应当继续显示当前阶段句。
+        UserHint = string.Empty;
+    }
+
+    /// <summary>预检阶段是否写下过"可以开始迁移"这类行动号召（只有它需要被实质阶段撤下）。</summary>
+    private bool _preflightHintActive;
+
+    /// <summary>
+    /// 检查结论 → 一句话（供状态行/提示卡）。语义固定：
+    ///   · 有阻断错误 ⇒ 由 <see cref="ErrorSummary"/> 承担，本方法返回空（避免两处说同一件事）；
+    ///   · 通过 + N 条提醒 ⇒「检查通过 · N 条提醒」；
+    ///   · 通过 + 0 条提醒 ⇒「检查通过 · 无提醒」。
+    /// 纯函数 ⇒ 可被单元测试直接覆盖。
+    /// </summary>
+    internal static string DescribeCheckSummary(bool overallPass, int notices)
+        => !overallPass ? string.Empty
+            : notices > 0 ? $"检查通过 · {notices} 条提醒"
+            : "检查通过 · 无提醒";
+
     private string _executionStatus = "等待 Step 1 连接旧电脑；连接完成并在 Step 2 选定内容后，这里会给出可执行的下一步。";
     /// <summary>右侧执行卡显示的**短句**（第一句 + 限长）；细节在左侧提示面板。</summary>
     public string ExecutionStatus { get => _executionStatus; private set => Set(ref _executionStatus, value); }
@@ -1011,7 +1241,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
     public bool HasJob => Ctx is not null;
 
     /// <summary>可"开始迁移"：不在跑、有计划、有目标根。</summary>
-    public bool CanStart => !IsRunning && HasPlan && !string.IsNullOrWhiteSpace(TargetRoot);
+    public bool CanStart => !IsRunning && !IsVerifying && HasPlan && !string.IsNullOrWhiteSpace(TargetRoot);
 
     private static readonly JobPhase[] ResumablePhases =
         [JobPhase.Running, JobPhase.Paused, JobPhase.Interrupted, JobPhase.AwaitingReview, JobPhase.CompletedWithErrors];
@@ -1023,12 +1253,13 @@ public sealed class MigrationSessionViewModel : ObservableObject
     ///   ② 运行已结束、阶段可续传（Interrupted / CompletedWithErrors …）⇒ 启动新一次运行。
     ///   "正在暂停中"一律禁用：此刻用户的两次相反意图会叠在一起。</summary>
     public bool CanResume => Ctx is not null
+        && !IsVerifying
         && PauseUiState != PauseUiState.Pausing
         && (PauseUiState == PauseUiState.Paused || (!IsRunning && ResumablePhases.Contains(Phase)));
 
     private bool _hasVerifyReport;
     /// <summary>可"尝试修复"：有任务且（有验证报告 / 有失败对象 / 上次完成但有错）。</summary>
-    public bool CanRepair => !IsRunning && Ctx is not null
+    public bool CanRepair => !IsRunning && !IsVerifying && Ctx is not null
         && (_hasVerifyReport || FailedObjects > 0 || Phase is JobPhase.CompletedWithErrors or JobPhase.Interrupted);
 
     /// <summary>可暂停（FIX BATCH 2 按钮矩阵）：运行中、且不在"已暂停 / 正在暂停"两个状态下。
@@ -1146,6 +1377,56 @@ public sealed class MigrationSessionViewModel : ObservableObject
     public string NetworkEtaText => NetworkThroughput.EtaText;
 
     /// <summary>
+    /// ★ Preview.4 真机问题 2（2026-10-22）★ 判定"确实在传输"的网卡速率下限（256 KB/s）。
+    /// 取值理由：低于这个量级只可能是背景流量/ARP/心跳，不足以证明"迁移正在搬数据"。
+    /// </summary>
+    public const double TransferActivityFloorBytesPerSecond = 256 * 1024;
+
+    /// <summary>最近一帧快照里，已确认显示字节是否比高水位更大（小文件通道的活性证据）。</summary>
+    private bool _bytesAdvancing;
+
+    /// <summary>当前网卡接收速率（无读数 ⇒ NaN；调用方必须自己判 NaN）。</summary>
+    public double NetworkReceiveBytesPerSecond
+    {
+        get
+        {
+            var snap = NetworkThroughput;
+            if (snap.Paused) return double.NaN;
+            if (snap.HasSpeed && !double.IsNaN(snap.EmaBytesPerSecond)) return snap.EmaBytesPerSecond;
+            return snap.StableBytesPerSecond;
+        }
+    }
+
+    /// <summary>
+    /// ★ Preview.4 真机问题 2（2026-10-22）★ **底栏源连接灯"绿呼吸"的唯一判据**。
+    ///
+    /// 【上一版为什么实机仍然黄】判据是"已显示字节增长"，但 `/J` 大文件通道下目标文件被预分配，
+    /// 引擎日志明写「本通道只使用 robocopy 已确认的输出」⇒ 一个 20 GB 文件传 3 分钟，
+    /// committed 字节一次都不涨 ⇒ 60 秒证据过期 ⇒ 琥珀。实机：JOB-20261022-094322-42ea 92 MB/s 仍在黄灯。
+    ///
+    /// 【本版】两条证据**任一成立**即可：
+    ///   ① 物理观测：网卡接收吞吐 ≥ <see cref="TransferActivityFloorBytesPerSecond"/>（数据真的在流）；
+    ///   ② 引擎确认：已显示字节比本趟高水位更大（小文件通道）。
+    /// 反向条件（全部是否决项，保证不伪造）：非 Running / 正在暂停 / 已暂停 / 正在停止 / 采样器自身标记暂停。
+    /// </summary>
+    public bool HasLiveTransferActivity
+    {
+        get
+        {
+            if (Phase != JobPhase.Running) return false;
+            if (PauseUiState is PauseUiState.Pausing or PauseUiState.Paused) return false;
+            if (IsStopping) return false;
+
+            var rate = NetworkReceiveBytesPerSecond;
+            if (!double.IsNaN(rate) && rate >= TransferActivityFloorBytesPerSecond) return true;
+
+            // 网卡无读数时退到引擎字节判据；两者都不成立 ⇒ 不亮呼吸灯（宁可不绿也不伪造）。
+            return _bytesAdvancing;
+        }
+    }
+
+
+    /// <summary>
     /// 惰性启动网卡吞吐观测（幂等）。目标地址解析**放后台线程**（绝不阻塞 UI）；
     /// 解析不到就保持"连接中 ⇒ —"，绝不编造数字。
     /// </summary>
@@ -1237,6 +1518,40 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// <summary>★ 只读诊断 ★ 当前连续性模式（Live / Frozen / CatchingUp）。</summary>
     internal ContinuationMode ContinuationDisplayMode => _continuation.Mode;
 
+    // ── ★ v0.5.4 Preview.2（P1-A 返修，2026-10-15）★ 飞行中字节"有无可信来源"的低频派生位 ──
+    //   存在的理由（必须读）：Step 3 的诚实状态句需要知道"本刻有没有可信的中途字节来源"，
+    //   但它的原始判据 LastTruth 每帧都变（ApplySnapshot:3784）⇒ 若直接订阅 LastTruth，
+    //   按 PageReadiness L48-51 的既有纪律会把四个页面的文案广播刷成高频风暴。
+    //
+    //   因此这里只暴露一个**只在真正翻转时通知**的派生位：传输期间（状态一直是"无来源"或
+    //   一直是"有来源"）它**不发通知**，只有从一种解释翻到另一种时才对。Change() 是朴素的
+    //   相等判断，不引入任何计时器/插值/速率换算。
+    //
+    //   语义边界：true 表示"本帧存在已确认的中途字节来源"（如 WorkerIoCounters 进程 I/O 计数器）
+    //   ⇒ UI **不得**再显示"暂无可确认进度"。判据与 ProgressTruthSnapshot.Create:120-122 同源。
+    private bool _hasTrustedInflightSource;
+    /// <summary>
+    /// ★ v0.5.4 Preview.2（P1-A）★ 本帧是否存在**已确认的中途字节来源**。
+    /// false 时只说明"本刻缺数据"，**不**蕴含"仍在传输"或"不是卡死"。
+    /// </summary>
+    public bool HasTrustedInflightSource => _hasTrustedInflightSource;
+
+    /// <summary>
+    /// 由 <see cref="ApplySnapshot"/> 调用，把真值帧换算成上面的低频派生位。
+    /// 只在翻转时发通知（传输期间同一状态不发）⇒ 不会造成文案刷新风暴。
+    /// 快照缺失（LastTruth 为 null）时**保守取 false**，UI 据此退回原有文案，不臆造状态。
+    /// </summary>
+    private void SyncInflightSourceFlag()
+    {
+        var truth = _lastTruth;
+        var has = truth is not null
+                  && truth.InFlightSource != ProgressTruthSource.None
+                  && truth.InFlightConfirmedBytes > 0;
+        if (_hasTrustedInflightSource == has) return;
+        _hasTrustedInflightSource = has;
+        Raise(nameof(HasTrustedInflightSource));
+    }
+
     // ── ★ Round-2 2026-10-05（§3.2 / §3.3）★ 进度**呈现**时间线 ──
     //   唯一写入者：ApplySnapshot（ApplyTruth / Freeze）、PauseAsync·StopAsync（经 CaptureContinuationCheckpoint
     //   冻结）、ResumeAsync（ResumeLive）、RunTransferCoreAsync（Reset）。
@@ -1285,6 +1600,24 @@ public sealed class MigrationSessionViewModel : ObservableObject
     private string _currentObjectDetail = string.Empty;
     public string CurrentObjectDetail { get => _currentObjectDetail; private set => Set(ref _currentObjectDetail, value); }
     public bool HasCurrentObjectDetail => !string.IsNullOrEmpty(CurrentObjectDetail);
+
+    private string _activeObjectName = string.Empty;
+    /// <summary>
+    /// ★ 真机问题 3（2026-10-21）★ 当前正在传输的**对象名**（= 当前对象路径的最后一段）。
+    ///
+    /// 为什么需要它：大文件通道（<c>/J /MT /NP</c>）下一个 17~20 GB 的 PST 要传几十分钟，
+    /// 而 <see cref="LiveFiles"/> 只在**文件复制完成**时才追加一条 ⇒ 此期间文件流列表恒为空。
+    /// Step3 右栏过去只认 <c>LiveFiles.Count</c>，于是显示「当前没有正在复制的文件。」——
+    /// 与事实（正在传输 103 GiB 对象）正面冲突。对象名 + 对象级字节进度是**诚实且已有**的替代证据。
+    /// </summary>
+    public string ActiveObjectName { get => _activeObjectName; private set => Set(ref _activeObjectName, value); }
+
+    private string _activeObjectProgressText = string.Empty;
+    /// <summary>
+    /// ★ 真机问题 3 ★ 当前对象的**真实字节进度**（已传 / 对象总量），来自引擎进度快照的
+    /// <c>CurrentObjectDoneBytes / CurrentObjectTotalBytes</c>，不是从文件列表反推的。
+    /// </summary>
+    public string ActiveObjectProgressText { get => _activeObjectProgressText; private set => Set(ref _activeObjectProgressText, value); }
 
     private string _stallHintText = string.Empty;
     public string StallHintText { get => _stallHintText; private set => Set(ref _stallHintText, value); }
@@ -1575,6 +1908,20 @@ public sealed class MigrationSessionViewModel : ObservableObject
     }
 
     /// <summary>
+    /// ★ 真机问题 3 ★ 对象显示名 = 对象路径最后一段（兼容 UNC 与尾随分隔符）。
+    /// 纯函数 ⇒ 可单测（不依赖任何真实路径存在，只做字符串处理）。
+    /// 例：<c>\\192.0.2.11\f\mail</c> → <c>mail</c>；<c>\\host\f\</c> → <c>f</c>。
+    /// </summary>
+    internal static string DescribeObjectName(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        var trimmed = path.TrimEnd('\\', '/');
+        if (trimmed.Length == 0) return string.Empty;
+        var idx = trimmed.LastIndexOfAny(new[] { '\\', '/' });
+        return idx >= 0 ? trimmed[(idx + 1)..] : trimmed;
+    }
+
+    /// <summary>
     /// ★ 验证结论文案的唯一出口（硬约束）★
     ///   · L1 通过 → 只能是 <see cref="L1ResultText"/>，**绝不**显示成"完整性验证通过"；
     ///   · L2 展示而 HashSampled == 0 → 必须附 <see cref="NoHashSampleText"/>；
@@ -1655,6 +2002,13 @@ public sealed class MigrationSessionViewModel : ObservableObject
 
     /// <summary>
     /// 预检 → 扫描 → 生成计划（写入 job.json / preflight.json / observed-state.json / plan.json）。
+    /// <para>
+    /// <paramref name="skipPreflight"/>=true 时为「不预检开始迁移」模式：**只跳过 PreflightChecker
+    /// 那一段检查**（不实例化、不写 preflight.json、Phase 不进 Preflight），
+    /// 其余环节——Job 创建、源扫描、扫描残缺闸门、Planner 生成计划——一步不少，
+    /// 语句与正常模式完全相同。跳过的结论以 <see cref="JobDefinition.PreflightSkipped"/>
+    /// 落 job.json，并在任务日志里留一条 WARN 事实。
+    /// </para>
     /// **本方法不含任何对话框**：需要用户确认的两处（扫描残缺闸门 / 发现未完成任务）走注入的回调，
     /// 回调由页面用 ContentDialog 实现（ContentDialog 需要 XamlRoot，属页面层职责）。
     /// </summary>
@@ -1674,6 +2028,10 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// <see cref="ResumeDecision.CreateNew"/> = 用户选了“创建全新任务”，照旧新建；
     /// <see cref="ResumeDecision.ResumeExisting"/> = 用户选了“继续上次任务”，载入既有任务（不新建）。
     /// </param>
+    /// <param name="skipPreflight">
+    /// true = 跳过 <c>PreflightChecker</c>（v0.5.4-preview.3「不预检开始迁移」）。
+    /// **不是**绕过引擎：扫描/闸门/计划/回执/验证照常，见方法 summary。
+    /// </param>
     /// <returns>true = 计划已生成（HasPlan）或已载入可续传任务。</returns>
     public async Task<bool> PrepareAsync(
         JobDefinition definition,
@@ -1681,7 +2039,8 @@ public sealed class MigrationSessionViewModel : ObservableObject
         IProgress<string>? progress = null,
         CancellationToken ct = default,
         Func<Task<bool>>? confirmIncompleteScan = null,
-        ResumeDecision resumeDecision = ResumeDecision.Unspecified)
+        ResumeDecision resumeDecision = ResumeDecision.Unspecified,
+        bool skipPreflight = false)
     {
         if (IsRunning)
         {
@@ -1774,15 +2133,28 @@ public sealed class MigrationSessionViewModel : ObservableObject
         //   之后 Robocopy Dest / Verifier / Repair / Report 全部读计划里的目标路径，不再各自重算。
         //   恢复既有任务不走本行（续传以旧 job.json 的原值为准，绝不改写历史作业的目标路径）。
         definition.Options.SelectedFolderMapping = SelectedFolderMapping;
+        // ★ v0.5.4-preview.3「不预检开始迁移」★ 把"跳过预检"这件事本身写进 job.json 作为审计事实
+        //   （必须在 jm.Create 之前设好，Create 会把整份 definition 原子写入 job.json）。
+        //   注意：这里**不写 preflight.json**——该文件缺失即"未执行预检"，
+        //   ReportGenerator 的 Preflight 附录因此整段不出现，不会被读成"预检通过"。
+        definition.PreflightSkipped = skipPreflight;
 
-        SetOperational("正在预检…");
+        SetOperational(skipPreflight ? "不预检模式：正在准备任务…" : "正在预检…");
         // ★ A.5（P1-4）：预检 = 进入"新任务"上下文。先把上一个任务的实时投影、验证投影与日志投影
         //   整批复位（否则上一轮的失败清单/当前对象/上一次验证结论会跟着新任务一起显示）。
         //   落在下面两行日志之前，保证日志面板里剩下的都是**本次预检**的真实行。
         ResetForJobSwitch();
-        // 真实动作日志（Step4 实时日志面板）：这一条描述的是**正在真实执行**的预检项，不是示例文案。
-        Log("INFO", "开始预检：由 Core 的 PreflightChecker 实测源可达性 / 目标空间 / 权限 / 同名冲突");
-        Log("INFO", $"预检目标：源 {definition.SourceHost}｜目标 {definition.TargetRoot}｜线程 {ResolveThreads(SelectedMt)}");
+        // 真实动作日志（Step4 实时日志面板）：这两条描述的是**正在真实执行**的动作，不是示例文案。
+        if (skipPreflight)
+        {
+            Log("WARN", "本次跳过预检（用户选择「不预检开始迁移」）：未执行源可达性 / 凭据 / 共享枚举 / 目标空间 / 权限 / 同名冲突检查");
+            Log("INFO", $"任务目标：源 {definition.SourceHost}｜目标 {definition.TargetRoot}｜线程 {ResolveThreads(SelectedMt)}");
+        }
+        else
+        {
+            Log("INFO", "开始预检：由 Core 的 PreflightChecker 实测源可达性 / 目标空间 / 权限 / 同名冲突");
+            Log("INFO", $"预检目标：源 {definition.SourceHost}｜目标 {definition.TargetRoot}｜线程 {ResolveThreads(SelectedMt)}");
+        }
         // ★ 硬要求 2：新任务开始生成计划时，**必须**先把“可开始迁移”的依据清干净。
         //   若只清对象清单而 Ctx 仍指向旧任务，HasPlan 会继续为 true（计划为空也显示可以开始）。
         //   故这里连同 Ctx 一起清掉：在下一次计划成功写入之前，HasPlan / CanStart 恒为 false。
@@ -1799,48 +2171,86 @@ public sealed class MigrationSessionViewModel : ObservableObject
             var jm = new JobManager(_log);
             var ctx = await Task.Run(() => jm.Create(definition), ct);   // 阻塞 IO（建目录 + 原子写 job.json）
             var jobLog = LogBootstrap.CreateJobLogger(ctx.JobDir, ctx.JobId);
-            Phase = JobPhase.Preflight;
-
-            var checker = new PreflightChecker(jobLog);
-            var sourcePaths = definition.Sources.Select(s => s.Path).ToList();
-            var pre = await Task.Run(() => checker.RunAsync(
-                definition.SourceHost,
-                definition.SourceUser,
-                string.IsNullOrWhiteSpace(password) ? null : password,
-                sourcePaths,
-                definition.TargetRoot,
-                estimatedBytes: 0,
-                benchmark: _connection?.BenchmarkOnConnect ?? false), ct);
-            ctx.SavePreflight(pre);
-
-            if (!pre.OverallPass)
+            if (skipPreflight)
             {
-                var bad = pre.Checks.Where(c => !c.Pass && c.Severity == "Error").ToList();
-                foreach (var c in bad.Take(8)) AddFail("预检 · " + c.Name, c.Detail);
-                // ★ 缺陷 A-01a：旧文案只贴第一条 Detail（"路径不存在或不可访问（检查共享名/权限）"）——
-                // 既不说**是哪条路径/哪项检查**，也不给下一步，用户不知道要去掉哪个勾。
-                // 现在按「检查名（原因）」列出失败项，并给一句可执行的下一步。
-                // 观察 O-A19-4：原写法用「检查名（Detail）」包一层括号，而 Detail 自身常带括号
-                // （如目标盘「…（技术细节：…）」），用户会看到「（…（…））」嵌套。
-                // 改为「检查名：Detail」并用 SubTitle 分隔，同时去掉 Detail 末尾句号避免「。。」。
-                var named = string.Join("；", bad.Take(3).Select(c => $"{c.Name}：{c.Detail.TrimEnd('。')}"));
-                var next = bad.Any(c => c.Name.StartsWith("源路径", StringComparison.Ordinal))
-                    ? "请回到第 1 步取消勾选读不到的那条共享（或换成对方开放的共享名后重试）。"
-                    : bad.Any(c => c.Name.Contains("目标盘", StringComparison.Ordinal))
-                        ? "请在右侧「目标根目录」改成这台电脑上真实存在的磁盘路径（例如 D:\\迁移目标），再点「预检并生成计划」。"
-                        : "请按上面的失败项提示修正后，再点「预检并生成计划」。";
-                SetErrorSummary($"预检未通过（{bad.Count} 项）：{named}。{next}");
-                Log("ERROR", $"预检未通过（{bad.Count} 项）：{named}");
-                return false;
+                // ★ v0.5.4-preview.3「不预检开始迁移」★ 整个 PreflightChecker 段被跳过：
+                //   · 不实例化 checker、不调 RunAsync、**不写 preflight.json**；
+                //   · Phase 不进 Preflight，直接进 Scanning；
+                //   · 用户已被告知的风险（源不可读 / 目标不可写 / 同名冲突）会在扫描与传输阶段
+                //     以真实错误呈现，由既有的失败清单 / 回执 / Step4 报告记录——不在这里伪造"通过"。
+                //   下面**不放在 if 块里**的扫描、扫描残缺闸门、Planner、state 落盘一步不少。
+                Phase = JobPhase.Scanning;
+                SetOperational("已跳过预检，正在扫描源数据（大容量磁盘可能需要几分钟）…");
+                // ★ 把「未执行预检」写进**落盘**日志：Log(level,text) 只往 Step4 实时日志面板的内存集合里追加，
+                //   不经过 Serilog；job.json 的 PreflightSkipped 是任务证据，但事后翻 logs\job-*.log 也应能查到
+                //   （任务令 §四：未执行预检这一事实必须保留在日志或任务证据中）。jobLog 到这一行才可用。
+                _log.Warning("本次任务跳过预检（用户选择「不预检开始迁移」）：未执行源可达性 / 凭据 / 共享枚举 / 目标空间 / 权限 / 同名冲突检查｜源 {Host}｜目标 {Target}",
+                    definition.SourceHost, definition.TargetRoot);
+                jobLog.Warning("本次跳过预检（用户选择「不预检开始迁移」）：未执行源可达性 / 凭据 / 共享枚举 / 目标空间 / 权限 / 同名冲突检查；job.json preflightSkipped=true，本次不写 preflight.json");
+                Log("INFO", "已跳过预检，开始扫描源数据（Job 已创建，job.json preflightSkipped=true）…");
             }
+            else
+            {
+                Phase = JobPhase.Preflight;
 
-            var warns = pre.Checks.Where(c => !c.Pass && c.Severity == "Warning").ToList();
-            SetOperational(warns.Count > 0
-                ? $"预检通过（{warns.Count} 项提醒不阻断：{warns[0].Name} —— {warns[0].Detail}）正在扫描源数据…"
-                : "预检通过，正在扫描源数据（大容量磁盘可能需要几分钟）…");
-            Log("INFO", warns.Count > 0
-                ? $"预检通过（{warns.Count} 项提醒不阻断），开始扫描源数据…"
-                : "预检通过，开始扫描源数据…");
+                var checker = new PreflightChecker(jobLog);
+                var sourcePaths = definition.Sources.Select(s => s.Path).ToList();
+                var pre = await Task.Run(() => checker.RunAsync(
+                    definition.SourceHost,
+                    definition.SourceUser,
+                    string.IsNullOrWhiteSpace(password) ? null : password,
+                    sourcePaths,
+                    definition.TargetRoot,
+                    estimatedBytes: 0,
+                    benchmark: _connection?.BenchmarkOnConnect ?? false), ct);
+                ctx.SavePreflight(pre);
+
+                if (!pre.OverallPass)
+                {
+                    var bad = pre.Checks.Where(c => !c.Pass && c.Severity == "Error").ToList();
+                    foreach (var c in bad.Take(8)) AddFail("预检 · " + c.Name, c.Detail);
+                    // ★ 缺陷 A-01a：旧文案只贴第一条 Detail（"路径不存在或不可访问（检查共享名/权限）"）——
+                    // 既不说**是哪条路径/哪项检查**，也不给下一步，用户不知道要去掉哪个勾。
+                    // 现在按「检查名（原因）」列出失败项，并给一句可执行的下一步。
+                    // 观察 O-A19-4：原写法用「检查名（Detail）」包一层括号，而 Detail 自身常带括号
+                    // （如目标盘「…（技术细节：…）」），用户会看到「（…（…））」嵌套。
+                    // 改为「检查名：Detail」并用 SubTitle 分隔，同时去掉 Detail 末尾句号避免「。。」。
+                    var named = string.Join("；", bad.Take(3).Select(c => $"{c.Name}：{c.Detail.TrimEnd('。')}"));
+                    var next = bad.Any(c => c.Name.StartsWith("源路径", StringComparison.Ordinal))
+                        ? "请回到第 1 步取消勾选读不到的那条共享（或换成对方开放的共享名后重试）。"
+                        : bad.Any(c => c.Name.Contains("目标盘", StringComparison.Ordinal))
+                            ? "请在右侧「目标根目录」改成这台电脑上真实存在的磁盘路径（例如 D:\\迁移目标），再点「预检并生成计划」。"
+                            : "请按上面的失败项提示修正后，再点「预检并生成计划」。";
+                    // 预检未通过 ⇒ 检查结论通道必须同步清空（否则上一次「检查通过」会残留在状态行上）。
+                    SetCheckSummary(string.Empty, 0);
+                    SetErrorSummary($"预检未通过（{bad.Count} 项）：{named}。{next}");
+                    Log("ERROR", $"预检未通过（{bad.Count} 项）：{named}");
+                    return false;
+                }
+
+                var warns = pre.Checks.Where(c => !c.Pass && c.Severity == "Warning").ToList();
+                // ★ 真机问题 2（2026-10-21）★ 三个维度分开落位，不再拼成一句长句。
+                //   旧实现：「预检通过（1 项提醒不阻断：链路吞吐基准 —— 测速失败（共享可能只读）：
+                //            Access to the path '\\\\192.0.2.11\\f\\.pcmig-bench-….tmp' is denied.）正在扫描源数据…」
+                //   这一句同时说了"通过""失败""Access is denied""正在扫描"，用户无法判断当前到底能不能继续。
+                //   现在：
+                //     · 操作阶段  → 主提示只留「正在扫描源数据…」（当前最重要的一件事）；
+                //     · 检查结论  → 状态行「检查通过 · N 条提醒」；
+                //     · 问题级别  → 提醒明细进辅助区（UserHint），原始英文已在 PreflightChecker 降级为技术细节。
+                SetOperational("正在扫描源数据（大容量磁盘可能需要几分钟）…");
+                SetUserHint(warns.Count > 0
+                    ? "检查通过，可以开始迁移。非阻断提醒：" +
+                      string.Join("；", warns.Take(3).Select(c => $"{c.Name} —— {c.Detail.TrimEnd('。')}"))
+                    : "检查通过，可以开始迁移。");
+                // ★ Preview.4 真机问题 1 ★ 标记"这条行动号召等迁移开始就要撤下"。
+                _preflightHintActive = true;
+                SetCheckSummary(DescribeCheckSummary(true, warns.Count), warns.Count);
+                Log("INFO", warns.Count > 0
+                    ? $"预检通过（{warns.Count} 条非阻断提醒：{string.Join("、", warns.Select(c => c.Name))}），开始扫描源数据…"
+                    : "预检通过（无提醒），开始扫描源数据…");
+                foreach (var w in warns.Take(8))
+                    Log("WARN", $"预检提醒 · {w.Name}：{w.Detail}");
+            }
 
             Phase = JobPhase.Scanning;
             var matrix = MigrationMatrix.Load(null, jobLog).WithExtraExclusions(definition.CustomExclusions, jobLog);
@@ -2274,6 +2684,16 @@ public sealed class MigrationSessionViewModel : ObservableObject
             return;
         }
 
+        // ★ R2 接手修复 · 缺陷 K ★ 「校验中不许开跑」——与 VerifyAsync 里那条「运行中不许校验」
+        //   完全对称。少了这一条，校验在飞时点「开始」会让传输引擎带着开跑那刻的内存快照周期性
+        //   SaveState，把校验刚写下的 MissingObjects 覆盖回 0（缺陷 K 的原始现场）。
+        if (IsVerifying)
+        {
+            SetOperational("正在验证中：请等验证结束后再开始迁移（此刻开跑会覆盖校验结论）。");
+            LastRunOutcome = ActionOutcomePolicy.ForRun(new RunBusinessResult(Phase, "run-verify-in-progress", null));
+            return;
+        }
+
         // ★ Round-2 2026-10-05（§2.1-8）★ **只有"用户发起的恢复"**才保留显示连续性：
         //   重新开始（RunAsync）与修复（RepairAsync）都是新语义，新任务必须从 0 开始显示 ⇒ 显式解除。
         //   同时把 raw 回退基线复位（换了一轮运行的 raw 序列不可比）。
@@ -2306,6 +2726,11 @@ public sealed class MigrationSessionViewModel : ObservableObject
             return;
         }
 
+        // ★ Preview.4 真机问题 1（2026-10-22）★ 实质阶段开始 —— 预检的"行动号召"到此必须失效。
+        //   实机：预检通过后点了开始迁移、robocopy 已经在跑，提示区仍显示
+        //   「检查通过，可以开始迁移。非阻断提醒：…」，与「正在传输」并存，用户以为还停在预检。
+        //   根因：UserHint 是一条**一次性写入后无人回收**的通道（整轮只有预检与少数前置校验会写）。
+        RetirePreflightCallToAction();
         IsRunning = true;
         IsFinished = false;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -2483,7 +2908,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
         }
         else
         {
-            foreach (var root in roots) _connection.NotifyShareReachability(root!, false, evidence);
+            foreach (var root in roots) _connection.NotifyShareReachability(root!, false, evidence, authoritative: true);
         }
         Log("WARN", $"引擎报告共享级错误（{evidence}）：已把源连接灯拉回真实状态（不再显示已连接）。");
     }
@@ -2515,8 +2940,23 @@ public sealed class MigrationSessionViewModel : ObservableObject
         //   否则用户看到 100% 就会以为"修好了"（这正是现场症状）。
         var isRepairRun = onlyObjectIds is { Count: > 0 };
         IsFinished = finished;
-        if (completed) Percent = 100.0;
-        else if (finished) Percent = ActualPercent(end);
+        // ★ v0.5.4 Preview.2 真机修复（2026-10-16，用户任务令 §五）★
+        //   可信完成判据在此**唯一**落定（拿到真实 JobState 的地方只有这里）。
+        //   注意它**不**参与上面的 Percent 显示逻辑（Percent 另有其诚实口径），
+        //   只回答"能不能把用户自动送到 Step4"这一个问题。
+        ApplyTrustworthyCompletion(end);
+        // ★ R2 接手修复 · 缺陷 B ★ 外壳不能再无条件写 100%：
+        //   旧写法 `if (completed) Percent = 100.0;` 只认引擎返回的 phase，比 Core 的可信完成判据宽得多
+        //   （不看字节闭环、不看校验期确证缺失），于是会出现「进度条 100% + 已完成 + 不跳 Step4」。
+        //   现在唯一放行条件是自己的 TrustworthyCompletion —— 它与 Core 用同一个出口，
+        //   因此「显示 100%」与「可信完成」结构上不可能再不一致。
+        //   ⚠ 不可信时退回 ActualPercent（实测落盘比例），绝不显示 100%，也绝不因失败而抹成 0。
+        //   ★ 缺陷 J ★ 必须经 PublishPercent：界面上三处读数都是 `truth?.Percent ?? Session.Percent`，
+        //   只改 Percent 会被那份旧真值盖掉（详见 PublishPercent 的说明）。
+        //   ★ 缺陷 J ★ 收尾是"更强的证据改小结论"的时机（校验期确证缺失会把 100% 压回 99.9），
+        //   因此这里允许把 80 ms 节拍的视觉值一并压下去，否则底栏大号数字仍停在旧值。
+        if (TrustworthyCompletion) PublishPercent(100.0, allowVisualSnap: true);
+        else if (finished) PublishPercent(Math.Min(ActualPercent(end), TransferOrchestrator.SettledPercentCapPublic), allowVisualSnap: true);
         DataLabel = isRepairRun
             ? (finished ? "修复重拷 / 计划（待复验）" : "已传 / 计划")
             : (finished ? "实际落盘 / 计划" : "已传 / 计划");
@@ -2581,7 +3021,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
             var repairCount = onlyObjectIds!.Count;
             SetOperational($"重拷结束（{phase}），正在重新校验…");
             Log("INFO", $"重拷结束（{phase}）：正在重新校验（基础一致性检查）…");
-            await VerifyAsync(VerifyLevel.L1_CountSize, null, ct);
+            await VerifyAsync(VerifyLevel.L1_CountSize, null, ct, null, allowDuringRun: true);
 
             // ── ★ P0-04 ★ 这次修复到底算不算成功，由**复验结论**说了算，不由"重拷跑了多少"说了算 ──────
             //   现场症状："修复的进度跑到 100%，可最后验证还是失败"，用户据此以为已经修好了。
@@ -2604,10 +3044,17 @@ public sealed class MigrationSessionViewModel : ObservableObject
             var repairScope = repairCount == 1 ? "1 个对象" : $"{repairCount} 个对象";
             ProgressNeedsAttention = !verifyPassed;
             DataLabel = verifyPassed ? "修复重拷 / 计划（复验通过）" : "修复重拷 / 计划（复验未通过）";
+            // ★ R2 接手修复 · 缺陷 H（S-2）★ 修复轮的"100%"也必须过同一道闸门。
+            //   改前这里只判 `verifyPassed`（= 复验报告 OverallPass），而 OverallPass 只说明
+            //   "这一轮复验没有发现差异"，与"字节账是否闭环"是两个互不校验的维度；
+            //   历史任务里存在 OverallPass=true 但 completedBytes != totalBytes 的形态。
+            var repairState = ctx.LoadStateOrNew();
+            ApplySettledCompletion(repairState);
             if (verifyPassed)
             {
-                Percent = 100.0;
-                SetOperational($"✔ 修复完成（本次重拷 {repairScope}，进度 100%）→ {StatusMessage}");
+                SetOperational(TrustworthyCompletion
+                    ? $"✔ 修复完成（本次重拷 {repairScope}，进度 100%）→ {StatusMessage}"
+                    : $"✔ 复验通过（本次重拷 {repairScope}，进度 {Percent:0.0}%）→ {StatusMessage}");
                 Log("INFO", $"修复完成：本次重拷 {repairScope} + 复验通过（结论见状态栏）。");
             }
             else
@@ -2645,7 +3092,40 @@ public sealed class MigrationSessionViewModel : ObservableObject
     /// ★ P1-12 ★ 结构化真实进度（验收 R9）：验证面板用它显示真实计数。
     /// 纯只读投影——不参与任何判定，投递失败/抛异常都不会影响验证结论。
     /// </param>
-    public async Task VerifyAsync(VerifyLevel level = VerifyLevel.L1_CountSize, IProgress<string>? progress = null, CancellationToken ct = default, IProgress<VerifyProgressSnapshot>? detail = null)
+    /// <param name="allowDuringRun">
+    /// ★ R2 接手修复 · 缺陷 I（2026-10-17）★ **只有修复轮自动复验可以传 true**。
+    /// <para>
+    /// 缺陷原文：修复（Repair）走的是 <c>RunAsync</c> 那条主路径，<c>IsRunning = true</c> 在
+    /// <c>RunTransferCoreAsync</c> 开头置起、要等 <c>finally</c> 里的 <c>CleanupRun</c> 才复位；
+    /// 而 <c>FinishRunAsync</c> 的 <c>isRepairRun</c> 分支就在这中间调 <c>VerifyAsync</c>。
+    /// 于是那句 <c>if (IsRunning) { ... return; }</c> 会把**修复轮的自动复验整个拒掉**：
+    /// 复验从未真的跑过，<c>ctx.LoadVerify()</c> 读到的是上一轮的旧报告（或 null），
+    /// 于是"修复到底成没成"永远判成未通过，而界面上看到的却是重拷已 100%。
+    /// <para>
+    /// 语义边界：用户手点「验证」时 <c>IsRunning</c> 为 true 必须继续拒绝（运行中核对目标没有意义）；
+    /// 修复轮的自动复验发生在**重拷已经结束之后**，此时拒绝它的理由并不存在。
+    /// 故这里不放宽判据，只是为"引擎自己发起的、时点在重拷之后"的复验开一条显式通道，
+    /// 并且要求调用方逐字写明 <c>allowDuringRun: true</c> —— 让后来的人一眼看出这是刻意为之。
+    /// </para>
+    /// </param>
+    public async Task VerifyAsync(VerifyLevel level = VerifyLevel.L1_CountSize, IProgress<string>? progress = null, CancellationToken ct = default, IProgress<VerifyProgressSnapshot>? detail = null, bool allowDuringRun = false)
+    {
+        // ★ R2 接手修复 · 缺陷 K ★ 闸门位必须在**走进校验体的第一刻**就置起来，
+        //   而且必须覆盖所有提前返回（无任务 / 运行中拒绝 / 闸门拒绝），故用 try/finally 包住主体：
+        //   漏掉任何一条 return 路径，界面就会永久停在「正在验证」，三个按钮再也点不动。
+        var wasVerifying = IsVerifying;
+        IsVerifying = true;
+        try
+        {
+            await VerifyCoreAsync(level, progress, ct, detail, allowDuringRun).ConfigureAwait(true);
+        }
+        finally
+        {
+            IsVerifying = wasVerifying;
+        }
+    }
+
+    private async Task VerifyCoreAsync(VerifyLevel level = VerifyLevel.L1_CountSize, IProgress<string>? progress = null, CancellationToken ct = default, IProgress<VerifyProgressSnapshot>? detail = null, bool allowDuringRun = false)
     {
         LastVerifyReport = null;   // 每次开跑先清掉上一次的报告：界面绝不能把旧结论当本次结果展示
         // ★ K5（2026-10-12 实测缺口）★ 验证动作原先只写界面日志（Log → 本页日志卡），**不进 app 日志**：
@@ -2662,7 +3142,7 @@ public sealed class MigrationSessionViewModel : ObservableObject
             LastVerifyOutcome = ActionOutcomePolicy.ForVerify(new VerifyBusinessResult(false, false, "verify-no-task", false, false));
             return;
         }
-        if (IsRunning)
+        if (IsRunning && !allowDuringRun)
         {
             SetUserHint("迁移/修复进行中：请先结束运行再验证。");
             Log("WARN", "验证被拒绝：迁移/修复进行中。");
@@ -2707,6 +3187,14 @@ public sealed class MigrationSessionViewModel : ObservableObject
             //    progress/detail 都是 UI 线程上创建的 Progress<T>，回调仍会 marshal 回 UI 线程。
             report = await Task.Run(() => verifier.RunAsync(level, progress, ct, detail), ct);
             ctx.SaveVerify(report);
+            // ★ R2 接手修复 · 缺陷 A ★ 校验结论回流 job-state，并立刻重算"可信完成"：
+            //   在此之前 VerifyAsync 从不刷新 TrustworthyCompletion，界面一直拿着**迁移期**的结论，
+            //   于是"迁移说完成、校验发现目标少文件"这件事既写不进状态、也改不动界面与自动跳转。
+            // ★ R2 接手修复 · 缺陷 H（S-3）★ 这里还必须**连百分比一起重算**：
+            //   改前只刷了 TrustworthyCompletion 而没动 Percent ⇒ 用户点「验证」发现目标少文件后，
+            //   「进度 100%」与「校验确证缺失、不可信完成」会同时留在界面上（Step3 与底栏都读 Percent），
+            //   而 _progressSealed 之后没有任何快照能再改它。校验是比迁移更强的证据，必须能把它压下去。
+            ApplyVerifyConclusion(ctx, report);
             // ★ P0-05 ★ 验证报告里每个对象的 SourceUnavailable 都是"源根当时真的读不到"的实测结论，
             //   是整个程序里关于源共享是否还在的**最硬证据**；据此把底栏源灯拉回真实状态。
             SyncSourceLampFromVerify(report);
@@ -3530,12 +4018,20 @@ public sealed class MigrationSessionViewModel : ObservableObject
             var unreliable = ctx.StateViewUnreliable;
             // ★ A.5（P1-3）：**只有真 Completed 才可以强制 100%**。载入一个 CompletedWithErrors 的旧任务时
             //   必须显示它真实传到哪（JobState 的 CompletedBytes/TotalBytes），否则用户会以为已经传完了。
-            var completed = Phase == JobPhase.Completed;
-            Percent = completed
-                ? 100.0
-                : unreliable
-                    ? 0            // 状态损坏：照旧不冒充比例（下方文案已说明"以回执为准"），但绝不写 100%
-                    : Phase == JobPhase.CompletedWithErrors ? ActualPercent(st) : st.Percent;
+            // ★ R2 接手修复 · 缺陷 H（S-1）★ 载入历史任务也必须走与收尾同一个放行口径。
+            //   改前这里只判 `Phase == JobPhase.Completed` 就直接写 100%，且整条 Adopt 路径
+            //   **从不重算 TrustworthyCompletion** ⇒ 打开一份"已完成但字节不闭环"的历史任务后，
+            //   界面显示 100% 而内部认为不可信、页面也不会自动前进（真实存档里有这种任务）。
+            //   现在：先按 Core 判据重算可信完成，只有可信才允许 100.0。
+            ApplyTrustworthyCompletion(st);
+            //   ★ 缺陷 J ★ 换任务时视觉值可能残留上一个任务的 100%（Adopt 不复位 _presentation），
+            //   必须一并压到本任务的真实水平，因此三处都允许视觉回退。
+            if (unreliable)
+                PublishPercent(0, allowVisualSnap: true);  // 状态损坏：照旧不冒充比例（下方文案已说明"以回执为准"），但绝不写 100%
+            else if (TrustworthyCompletion)
+                PublishPercent(100.0, allowVisualSnap: true);
+            else
+                PublishPercent(Math.Min(ActualPercent(st), TransferOrchestrator.SettledPercentCapPublic), allowVisualSnap: true);
             DataLabel = Phase is JobPhase.Completed or JobPhase.CompletedWithErrors ? "实际落盘 / 计划" : "已传 / 计划";
             PlanBytesText = Format.Bytes(st.TotalBytes);
             ActualBytesText = Format.Bytes(st.CompletedBytes);
@@ -3617,6 +4113,14 @@ public sealed class MigrationSessionViewModel : ObservableObject
 
     private CancellationTokenSource? _cts;
     private int _lastCompletedCount = -1;
+
+    /// <summary>
+    /// ★ 真机问题 1（2026-10-21）★ 传输字节高水位（只用于判定"是否真的在增长"）：
+    /// 底栏源连接灯的"绿呼吸"必须由**真实字节增长**驱动，不能只看 Phase==Running ——
+    /// 运行中完全可能长时间零增长（等待源端、写盘阻塞），那时不该呼吸（那是假活动）。
+    /// 用高水位而不是"上一次值"：进度回退（引擎重建 committed 回退）不得被误判成新活动。
+    /// </summary>
+    private long _transferBytesHighWater;
 
     /// <summary>
     /// A.5（P1-3）：**实际完成比例**的唯一算法——只有 <see cref="JobPhase.Completed"/> 才允许显示 100%。
@@ -3742,6 +4246,31 @@ public sealed class MigrationSessionViewModel : ObservableObject
             LastPauseOutcome = new ActionOutcomeDecision(DiagnosticOutcome.Succeeded, "pause-achieved");
         else if (engineState == PauseState.PauseFailed)
             LastPauseOutcome = new ActionOutcomeDecision(DiagnosticOutcome.Failed, "pause-failed");
+
+        // ★ Preview.6（2026-10-22）★ 暂停真值一变就把"此刻还有没有数据在搬"同步到连接层：
+        //   用户在需求里明确要求"暂停后立刻停止呼吸、恢复绿色常亮"，而不是等下一次 80 ms 呈现节拍
+        //   （那次 Tick 本来也会经 HasLiveTransferActivity 得到 false，这里只是不给它留延迟窗口）。
+        //   ★ 只搬 Phase / PauseUiState / IsStopping 这三个**既有**事实，不新增任何判定，
+        //     也不撤销可达证据（不会把绿变成黄/红）。
+        SyncTransferActivityFlag(Phase == JobPhase.Running
+            && next is not (PauseUiState.Pausing or PauseUiState.Paused)
+            && !IsStopping);
+    }
+
+    /// <summary>
+    /// ★ Preview.6 ★ 把会话层的活性结论推给连接层（唯一入口在 MainWindow 的呈现节拍，这里只做**立即**补推）。
+    /// 判据与 <see cref="HasLiveTransferActivity"/> 的反向否决项逐一对应（非 Running / 暂停中 / 已暂停 / 正在停止），
+    /// 方向**只允许"退出活动位"**：本方法绝不把灯点成"正在传输"，亮呼吸仍必须由呈现节拍的网络证据决定。
+    /// </summary>
+    private void SyncTransferActivityFlag(bool active)
+    {
+        try
+        {
+            if (active) return;                                  // 点亮方向只走呈现节拍，避免绕过网卡证据
+            _connection?.SyncTransferActivity(false,
+                PresentationTruth?.DisplayedTransferredBytes ?? 0L, double.NaN);
+        }
+        catch { /* 灯是装饰性投影：任何异常都不得影响暂停状态机 */ }
     }
 
     /// <summary>把引擎的进度快照翻译成显示位（唯一入口；所有 UI 更新都在 UI 线程）。</summary>
@@ -3782,6 +4311,9 @@ public sealed class MigrationSessionViewModel : ObservableObject
         var continuity = _continuation.Apply(rawTruth, s.Phase, Ctx?.JobId);
         RecordProgressTransition(s, rawTruth, continuity);
         LastTruth = rawTruth;
+        // ★ v0.5.4 Preview.2（P1-A）★ 同步"有无可信中途来源"的低频派生位。
+        //   放在 LastTruth 赋值之后、消费端读取之前：只在真正翻转时发一次通知。
+        SyncInflightSourceFlag();
         var displayTruth = continuity.Effective;
         // ★ 真机复验返修（2026-10-05 run2）★ UI 消费端（顶栏 Step3ProgressPage.PushState /
         //   底栏 MainWindow.PushFooter）读的是**显示真值**，不是 raw：
@@ -3790,8 +4322,34 @@ public sealed class MigrationSessionViewModel : ObservableObject
         PresentationTruth = displayTruth;
         // ★ Round-2 2026-10-05（§3.2）★ 推进**呈现**时间线：数字与进度条共用的视觉目标在这里被设定。
         UpdatePresentationTimeline(s.Phase, displayTruth, s.TotalBytes);
-        Percent = displayTruth?.Percent ?? (s.Phase == JobPhase.Completed ? 100.0 : s.Percent);
+        // ★ R2 接手修复 · 缺陷 H（S-4）★ 兜底通路也不能凭空给 100%。
+        //   改前本行有两重绕过：① displayTruth.Percent 在 plannedBytes<=0 且 settled 时直接给 100
+        //   （settled 还包含 CompletedWithErrors）；② truth 为 null 时按 Phase==Completed 写 100。
+        //   现在：可信完成才允许 100.0，否则取真值/计划比例并封顶 99.9。
+        // ★ R2 接手修复 · S-4 滞后一帧（第二轮）★ 判据必须取自**本帧快照自身**：
+        //   旧实现只看 TrustworthyCompletion，而它是上一次按落盘状态算出的结论 ——
+        //   收尾那一帧的 Completed 快照拿到的仍是"运行中"的旧值，于是字节已闭环也只显示 99.9%，
+        //   要等收尾路径再写一次才变 100（真机表现为进度条卡在 99.9%）。
+        // ★ 缺陷 J ★ 这里写的是**本帧**的快照百分比，正是 UI 要读的那份真值；
+        //   必须与 PresentationTruth.Percent 保持一致（PublishPercent 负责同步）。
+        PublishPercent(SnapshotSaysTrustworthyCompletion(s) || TrustworthyCompletion
+            ? 100.0
+            : Math.Min(displayTruth?.Percent ?? s.Percent, TransferOrchestrator.SettledPercentCapPublic));
         var displayedBytes = displayTruth?.DisplayedTransferredBytes ?? s.CompletedBytes;
+        // ★ Preview.4 真机问题 2（2026-10-22）★ 活性证据改为"两条任一"，并**不再**由本方法直接驱动灯：
+        //   灯的唯一同步入口是 MainWindow 的呈现节拍（ConnectionViewModel.SyncTransferActivity），
+        //   因为只有那里能同时看到"网卡在不在收数据"。
+        //   这里只维护字节判据（小文件通道有效；/J 大文件通道下 committed 不动是正常的，见
+        //   「通道的目标文件可能被预分配文件长度…本通道只使用 robocopy 已确认的输出」）。
+        if (displayedBytes > _transferBytesHighWater)
+        {
+            _transferBytesHighWater = displayedBytes;
+            _bytesAdvancing = s.Phase == JobPhase.Running;
+        }
+        else if (s.Phase != JobPhase.Running)
+        {
+            _bytesAdvancing = false;
+        }
         var plannedBytes = displayTruth?.PlannedBytes ?? s.TotalBytes;
         ProgressText = $"{Format.Bytes(displayedBytes)} / {Format.Bytes(plannedBytes)}";
         PlanBytesText = Format.Bytes(plannedBytes);
@@ -3842,6 +4400,11 @@ public sealed class MigrationSessionViewModel : ObservableObject
         {
             CurrentObjectDetail = $"当前对象：{s.CurrentObjectPath}，已传 {Format.Bytes(s.CurrentObjectDoneBytes)}" +
                 (s.CurrentObjectTotalBytes > 0 ? $"/{Format.Bytes(s.CurrentObjectTotalBytes)}" : string.Empty);
+            // ★ 真机问题 3（2026-10-21）★ 对象级真值：文件级事件缺席时右栏靠它说清"在传什么、传了多少"。
+            ActiveObjectName = DescribeObjectName(s.CurrentObjectPath);
+            ActiveObjectProgressText = s.CurrentObjectTotalBytes > 0
+                ? $"{Format.Bytes(s.CurrentObjectDoneBytes)} / {Format.Bytes(s.CurrentObjectTotalBytes)}"
+                : Format.Bytes(s.CurrentObjectDoneBytes);
             var stalled = s.StallSeconds >= StallWarnSeconds;
             StallHintText = stalled
                 ? $"⏳ 已 {s.StallSeconds:0} 秒没有新的落盘字节（不是卡死：引擎仍在等待源端/正在写入）。" +
@@ -3854,6 +4417,10 @@ public sealed class MigrationSessionViewModel : ObservableObject
         {
             CurrentObjectDetail = string.Empty;
             StallHintText = string.Empty;
+            // ★ 真机问题 3 ★ 运行结束/暂停即清空对象级活动真值：绝不能把上一轮的对象留在面板上
+            //   冒充"正在传输"（任务令 §6.2：暂停、停止、完成后不得保留过期活动信息）。
+            ActiveObjectName = string.Empty;
+            ActiveObjectProgressText = string.Empty;
         }
 
         // ★ FIX BATCH 6（§9）★ 当前对象通道：只由**引擎真值**写入（对象 id 来自快照，
@@ -4315,6 +4882,11 @@ public sealed class MigrationSessionViewModel : ObservableObject
     private void ResetRunProjection()
     {
         ClearFailItems();
+        // ★ 真机问题 2 ★ 新一次运行 = 上一轮的检查结论作废（否则状态行会沿用上一轮的「检查通过 · N 条提醒」）。
+        //   注意：预检在本方法之后才跑，跑完会重新写入，所以这里清空不会丢失本轮结论。
+        SetCheckSummary(string.Empty, 0);
+        // ★ 真机问题 1 ★ 新一次运行 = 上一条传输的字节高水位作废（否则本轮从 0 开始会被当成"没有增长"）。
+        _transferBytesHighWater = 0;
         LiveFiles.Clear();
         CurrentFileText = "—";
         CurrentObjectPath = string.Empty;
@@ -4324,6 +4896,11 @@ public sealed class MigrationSessionViewModel : ObservableObject
         EngineSpeedText = "—";
         EtaText = "—";
         _lastCompletedCount = -1;
+        // ★ v0.5.4 Preview.2 真机修复（2026-10-16，用户任务令 §五）★
+        //   新一次运行 / 换任务 = 上一轮的"可信完成"结论立即作废。
+        //   否则上一轮真完成的 true 会残留到本轮：用户在 Step2 点「开始迁移」被送到 Step3 后
+        //   可能被旧结论直接推到 Step4（而本轮才刚开始跑）。拿不到证据就不许说完成。
+        TrustworthyCompletion = false;
 
         // ★ P0-04 ★ 新一次运行（Run / Resume / Repair）或换任务 = **解除收尾封版**：
         //   否则上一轮的终局结论会把本轮的进度显示位锁死。同时清掉上一轮的"复验需注意"与过期计数。
@@ -4338,6 +4915,22 @@ public sealed class MigrationSessionViewModel : ObservableObject
         _shownOmittedLogs = 0;
         _omittedHintLine = null;
         _flushCount = 0;
+
+        // ★ D-01 修复（R2 · 2026-10-17）★ 上一轮的"有无可信中途来源"结论同样必须作废。
+        //
+        //   缺陷（接手审计 A 批 · D）：本方法复位了 _lastCompletedCount / TrustworthyCompletion /
+        //   _progressSealed / ProgressNeedsAttention / _postFinishSnapshotsIgnored / _batcher 与全部
+        //   丢弃计数，**唯独漏了 _hasTrustedInflightSource**。而 SyncInflightSourceFlag() 的第一句是
+        //   `if (_hasTrustedInflightSource == has) return;`（本文件 :1299）——
+        //   于是新一次运行的首帧如果算出的 has 恰好等于上一轮残留值（典型：上一轮失败停在"有来源"，
+        //   本轮开头尚无数据、算出来也是 false 之外的同一值），这个派生位就会被短路而不发通知，
+        //   Step3 的状态句会短暂沿用上一轮的活动结论 —— 正是"拿不到证据却说有活动"的反面。
+        //
+        //   复位点必须与 _lastTruth 的作废同源：本方法由 RunTransferCoreAsync 在开跑前调用，
+        //   而 _lastTruth 在下一帧 ApplySnapshot 里被覆盖。这里直接置 false（"本刻没有已确认来源"），
+        //   不 Raise —— 该派生位的通知纪律是"只在真正翻转时发一次"，由下一次
+        //   SyncInflightSourceFlag() 决定是否需要通知；在这里额外 Raise 反而会多一次无用刷新。
+        _hasTrustedInflightSource = false;
     }
 
     /// <summary>
@@ -4773,8 +5366,81 @@ public sealed class MigrationSessionViewModel : ObservableObject
         Raise(nameof(CanVerifyNow));
         Raise(nameof(VerifyBlockedReason));
     }
-}
+#if DEBUG
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ★ 2026-10-22 · 开发者 UI Harness 缝合点（★ 整块仅在 Debug 编译单元存在 ★）★
+    //
+    // 存在理由（Preview.6 本机 UI 实测发现的问题）：
+    //   Harness 直接 `SyncTransferActivity(true)` 把灯点成"正在传输"，但真实呈现节拍每
+    //   16 ms 会用 `HasLiveTransferActivity` 重算一次并把它打回 false —— 因为本机既没有
+    //   真实网卡吞吐、也没有可信字节增长。上轮日志实证：
+    //       T4 step2 sync -> TransferActive=True State=Transferring
+    //       probe [T4-a]  SourceState=Connected TransferActive=False   ← 800 ms 后被打回
+    //
+    // 正确做法不是"压住刷新"，而是**补齐判据需要的真实输入**：
+    //   · 网卡吞吐：把生产用的默认探针换成 Debug 测试数据源（计数器按真实时间线性增长）；
+    //     采样、EMA、下限比较全部仍由**正式代码**计算，判据 `HasLiveTransferActivity` 一字未改。
+    //   · 阶段/暂停：把引擎真值推到它本来只能从快照里读到的字段（`_enginePauseState` /
+    //     `ApplyPauseTruth`），走的是**正式**路径，连"暂停即熄灯"的同步逻辑也照样触发。
+    //
+    // 边界：这些方法不存在于 Release；不接受外部参数控制判据；不产生任何伪造的进度、
+    //       字节或回执事实；只搬运"输入条件"。
+    // ═══════════════════════════════════════════════════════════════════════════
 
+    /// <summary>【仅 Debug】把网卡吞吐采样器的探针换成测试数据源（幂等；采样器不存在则先启动）。</summary>
+    internal string HarnessInstallThroughputProbe(PCMig.Core.Network.INetworkInterfaceProbe probe)
+    {
+        ArgumentNullException.ThrowIfNull(probe);
+        var diag = $"Host='{Host}' before={(_networkThroughput is null ? "null" : "exists")}";
+        EnsureNetworkThroughput();
+        diag += $" after={(_networkThroughput is null ? "null" : "exists")}";
+        if (_networkThroughput is null)
+            diag += " REASON=Host 为空，生产逻辑不会创建采样器";
+        else
+        {
+            _networkThroughput.ReplaceProbe(probe);
+            var sel = _networkThroughput.Selection;
+            diag += $" probeIdx={sel.InterfaceIndex} usable={sel.IsUsable} run={_networkThroughput.IsRunning}";
+        }
+        return diag;
+    }
+
+    /// <summary>【仅 Debug】把网卡吞吐采样器还回生产默认探针（真实网卡）。</summary>
+    internal void HarnessRestoreThroughputProbe()
+        => _networkThroughput?.ReplaceProbe(null);
+
+    /// <summary>【仅 Debug】立即确保网卡吞吐观测已启动（生产入口在"IsConnected 变化"事件里）。</summary>
+    internal void HarnessEnsureThroughput() => EnsureNetworkThroughput();
+
+    /// <summary>
+    /// 【仅 Debug】采样器状态诊断串（给实测日志用；只读，不改任何状态）。
+    /// </summary>
+    internal string HarnessThroughputDiagnostic()
+    {
+        var s = _networkThroughput;
+        if (s is null) return "null(未启动)";
+        var sel = s.Selection;
+        return $"run={s.IsRunning} idx={sel.InterfaceIndex} usable={sel.IsUsable} paused={s.Snapshot.Paused} state={s.Snapshot.State}";
+    }
+
+    /// <summary>【仅 Debug】施加引擎阶段真值（正式路径 <c>ApplySnapshot</c> 里是 <c>Phase = s.Phase;</c>）。</summary>
+    internal void HarnessSetPhase(JobPhase phase)
+    {
+        Phase = phase;
+        Raise(nameof(Phase));
+    }
+
+    /// <summary>
+    /// 【仅 Debug】施加引擎暂停真值。走**正式**方法 <see cref="ApplyPauseTruth"/>，
+    /// 于是 "暂停 ⇒ 立刻熄灯" 的同步逻辑与 UI 状态全部照常执行。
+    /// </summary>
+    internal void HarnessSetPauseTruth(PauseState state)
+    {
+        var now = state == PauseState.None ? (DateTime?)null : DateTime.UtcNow;
+        ApplyPauseTruth(state, now, now, PauseOutcomeKind.None, null);
+    }
+#endif
+}
 /// <summary>
 /// 「未完成任务」探测的**去抖计时器抽象**（P2-6）。
 ///
@@ -5192,6 +5858,7 @@ internal sealed class ContinuationDisplayState
         LastRawForwardLeapPercent = suspicious ? percent : 0d;
         return suspicious;
     }
+
 }
 
 /// <summary>

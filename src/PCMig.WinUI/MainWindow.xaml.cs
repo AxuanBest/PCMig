@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -38,8 +39,6 @@ public sealed partial class MainWindow : Window
     private static readonly double MinimumClientHeightDip = UniformScaleHost.IsRequested
         ? UniformScaleHost.DesignHeight * UniformScaleHost.MinimumScale
         : 640.0;
-
-    private bool _viewportCalibrated;
 
     /// <summary>关闭收尾只执行一次（AppWindow.Closing 可能被多次触发）。</summary>
     private bool _shuttingDown;
@@ -138,6 +137,10 @@ public sealed partial class MainWindow : Window
         };
         Readiness = new PageReadiness(ViewModel, Session);
         InitializeComponent();
+        // ★ Preview.6 · 2026-10-22 隔离修正 ★ 这里**不再**有任何测试分支：
+        //   XAML 里的 HarnessBanner 默认 Visibility="Collapsed"，Release 与 Debug 的默认呈现一致；
+        //   显形它的是 Debug 专属的 Harness.UiHarness.Banner()。
+        //   于是正式载荷里既没有 HarnessRequested、也没有读取 PCMIG_UI_HARNESS 的语句。
         // ★ P1-10 ★ 壳 XAML 解析完成（此前的耗时 = App 构造 + XAML 加载 + 主题资源 + 首个 VM 装配）。
         StartupTimeline.Mark("shell-xaml-loaded");
         ExtendsContentIntoTitleBar = true;
@@ -145,10 +148,11 @@ public sealed partial class MainWindow : Window
         // Caption Buttons 落在标题栏细条内，不再压在 Product Header 上；我们不自绘 — □ ×。
         SetTitleBar(TitleBarRoot);
         ApplyTitleBarInset();
-        // 必须先订阅再改尺寸：ResizeClient 触发的首次布局可能是同步完成的，
-        // 若订阅晚于它，视口自校正事件将永不触发（实测踩到过）。
+        // 必须先订阅再设尺寸：MoveAndResize 触发的首次布局可能是同步完成的；
+        // 订阅晚于它，首帧的响应式档位就会漏算（实测踩到过）。
+        // 【2026-10-17】订阅只为"布局跟随"，不再有任何视口自校正 —— 见 OnRootSizeChanged 注释。
         if (Content is FrameworkElement root) root.SizeChanged += OnRootSizeChanged;
-        ApplyCanonicalClientSize();
+        ApplyInitialWindowLayout();
         // Win32 最小追踪尺寸：WinUI 3 未公开 min-size API，这里在窗口 HWND 上挂 WM_GETMINMAXINFO 子类过程。
         // 必须在窗口句柄可用后安装；纯窗口行为，不接触业务/导航/绑定。
         WindowMinimumSize.Install(
@@ -262,13 +266,23 @@ public sealed partial class MainWindow : Window
         //    因此这段逻辑留在 MainWindow，而不是塞进 Step 1 页面。
         ViewModel.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(ConnectionViewModel.IsConnected) or nameof(ConnectionViewModel.Host))
+            // ★ 2026-10-23（真机 P0-06）★ 顶栏也订阅 SourceState / SourceStateDetail：
+            //   它与底栏必须由**同一个权威源**驱动，否则顶栏会一直停在"已连接"而底栏早已变黄。
+            // ★ 2026-10-24 ★ 顶栏订阅的是**四态灯**（LampState 是用户可见的唯一权威），
+            //   内部 SourceState 变化只用于刷新诊断文字；两者都订阅，避免"灯变了但顶栏没变"。
+            if (e.PropertyName is nameof(ConnectionViewModel.IsConnected)
+                or nameof(ConnectionViewModel.Host)
+                or nameof(ConnectionViewModel.SourceState)
+                or nameof(ConnectionViewModel.LampState)
+                or nameof(ConnectionViewModel.LampText)
+                or nameof(ConnectionViewModel.SourceStateDetail))
                 UpdateSourceStatus();
             // ★ 2026-10-08（真机问题 4）★ 底栏「源连接」指示器同样只认业务状态（不猜、不轮询）：
             //   SourceState 由 ConnectionViewModel 单点派生，这里只做投影。
             // ★ P0-05 ★ 证据本身变化（新增/替换某条源的可达性结论、或失效原因文字变了）也必须重投影，
             //   否则会出现"颜色对了但提示还写着上一条源的问题"这种半新半旧的状态。
             if (e.PropertyName is nameof(ConnectionViewModel.SourceState)
+                or nameof(ConnectionViewModel.LampState)
                 or nameof(ConnectionViewModel.UnreachableShares)
                 or nameof(ConnectionViewModel.SourceStateDetail))
                 UpdateSourceConnectionIndicator();
@@ -352,6 +366,15 @@ public sealed partial class MainWindow : Window
         // 详见 Presentation\UniformScaleHost.cs
         UniformScaleHost.Install(this);
 
+        // ★ v0.5.4 Preview.2（2026-10-15）★ 版本串改为**从程序集读取**，不再硬编码。
+        //   存在的理由：标题栏此前把 "v0.5.3" 写死在 XAML 里（MainWindow.xaml 的 Window.Title、
+        //   TitleBarVersionText、版本徽章 TextBlock 三处），而 <Version> 由 csproj 决定 ⇒
+        //   换了版本号的构建仍自称 v0.5.3，人工验收时**无法从界面判断手上跑的是哪个版本**。
+        //   现在三处统一由 DisplayVersion 派生：读 AssemblyInformationalVersion（csproj 的
+        //   <InformationalVersion>，本项目与 <Version> 同值），读不到则回退 AssemblyVersion。
+        //   仅替换版本字符串本身，不动任何布局/资源 Key/控件树结构。
+        ApplyDisplayVersion();
+
         // ── U64：Hover Lift / Pressed Sink（恢复历史交互反馈）──────────────────────────
         // 在**应用根**上挂一次路由指针事件即覆盖全部按钮与侧栏 Step Card（含 DataTemplate 内实例），
         // 因此不需要改任何 ControlTemplate / 几何 / 材质。必须在 UniformScaleHost 重挂之后取
@@ -367,6 +390,68 @@ public sealed partial class MainWindow : Window
 
         // ★ P1-10 ★ 构造函数收尾：挂"壳真正加载完 / 首个可交互调度轮"两段，并写末行汇总。
         InstallStartupTimelineHook();
+    }
+
+    /// <summary>
+    /// ★ v0.5.4 Preview.2（2026-10-15）★ 把标题栏三处版本串统一改为从程序集读取。
+    ///
+    /// 为什么需要：版本号由 csproj 的 &lt;Version&gt; 决定，而标题栏此前把 "v0.5.3" 硬编码在
+    /// MainWindow.xaml 里 ⇒ 换个版本号构建出来的窗口**仍然自称 v0.5.3**，验收时无法从界面
+    /// 分辨手上跑的是哪个版本（这正是本轮 0.5.4-preview.2 身份核验卡住的地方）。
+    ///
+    /// 取值优先级：AssemblyInformationalVersion（csproj 的 &lt;InformationalVersion&gt;，
+    /// 本项目与 &lt;Version&gt; 同值）→ AssemblyVersion → 取不到就保持 XAML 里的原样。
+    /// 只替换字符串本身：窗口标题、TitleBarVersionText、版本徽章三处，不动布局与资源 Key。
+    /// </summary>
+    private void ApplyDisplayVersion()
+    {
+        try
+        {
+            var asm = typeof(App).Assembly;
+            var informational = System.Reflection.CustomAttributeExtensions
+                .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(asm)
+                ?.InformationalVersion;
+            // InformationalVersion 可能带 "+<commit>" 后缀（SourceLink 默认行为），界面只显示主版本段。
+            var raw = !string.IsNullOrWhiteSpace(informational)
+                ? informational
+                : asm.GetName().Version?.ToString();
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return;     // 取不到就保持 XAML 原值，绝不显示空白版本
+            }
+
+            var plus = raw.IndexOf('+');
+            if (plus >= 0)
+            {
+                raw = raw[..plus];
+            }
+
+            var display = raw.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? raw : "v" + raw;
+
+            // ① 窗口标题：把 " · v<旧版本>" 换掉，保留产品名前缀。
+            var oldSuffix = TitleBarVersionText?.Text;
+            if (!string.IsNullOrWhiteSpace(oldSuffix))
+            {
+                Title = Title.Replace(" · " + oldSuffix, " · " + display, StringComparison.Ordinal);
+            }
+
+            // ② 自定义标题栏里的版本文本。
+            if (TitleBarVersionText is not null)
+            {
+                TitleBarVersionText.Text = display;
+            }
+
+            // ③ 产品标题行右侧的版本徽章（ChangelogButton 内的 TextBlock）。
+            if (ChangelogButton?.Content is TextBlock badge)
+            {
+                badge.Text = display;
+            }
+        }
+        catch (Exception ex)
+        {
+            // 版本显示是纯呈现信息：任何失败都不得影响启动，保持 XAML 原值即可。
+            System.Diagnostics.Debug.WriteLine($"[Shell] ApplyDisplayVersion 降级：{ex.Message}");
+        }
     }
 
     /// <summary>
@@ -528,6 +613,32 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    /// ★ v0.5.4 Preview.2 真机修复（2026-10-16，用户任务令 §五）★
+    /// 迁移**真正完成** ⇒ 自动把用户从 Step3 送到 Step4（结果与校验）。
+    ///
+    /// 三条纪律：
+    ///   ① **唯一判据**是 <see cref="MigrationSessionViewModel.TrustworthyCompletion"/>，
+    ///      也就是 Core 的 <c>IsTrustworthyCompletion</c> 六项判据。这里**不看** Percent，
+    ///      更不看"100%"这个数字/字符串——用户令把"100% 即触发条件"列为必须消灭的口径；
+    ///   ② 只在**当前确实停在 Step3** 时前进：用户自己点了别的页（去看日志、去 Step2 复核）
+    ///      说明他有自己的判断，不能把他强行拽走；
+    ///   ③ 导航失败绝不影响迁移与其余状态（只记诊断，不弹窗、不改业务状态）。
+    ///
+    /// CompletedWithErrors / 有 Failed / 有 Missing / completedBytes &lt; totalBytes 时
+    /// TrustworthyCompletion 恒为 false ⇒ 用户留在 Step3 看到真实失败状态，
+    /// 由他自己进 Step4 查看验证与报告。
+    /// </summary>
+    private void OnSessionChangedForAutoAdvance(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(MigrationSessionViewModel.TrustworthyCompletion)) return;
+        if (!Session.TrustworthyCompletion) return;
+        // 只在用户还停在 Step3 时前进：他若已自行切页，尊重他的选择（不抢导航）。
+        if (Nav.Current != StepKind.Progress) return;
+        try { Nav.GoTo(StepKind.Result, NavigationReasons.TransferCompleted); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"自动进入 Step4 失败：{ex}"); }
+    }
+
+    /// <summary>
     /// 关闭收尾：释放 UI 层持有物，然后立即结束进程。
     ///
     /// 只做释放与退出，不动任何业务状态、不写存档、不改交互语义；可重复调用。
@@ -604,6 +715,13 @@ public sealed partial class MainWindow : Window
     private void AttachFooterToSession()
     {
         Session.PropertyChanged += (_, _) => PushFooter();
+        // ★ v0.5.4 Preview.2 真机修复（2026-10-16，用户任务令 §五）★
+        //   迁移**真正完成**时自动 Step3 → Step4。
+        //   判据**唯一**取自 Session.TrustworthyCompletion（它再取自 Core 的
+        //   TransferOrchestrator.IsTrustworthyCompletion，六项全成立才为真）。
+        //   **绝不**在这里看 Percent / 100% —— 用户令明令禁止；真机那次 CompletedWithErrors
+        //   被抹平到 100% 正是这条禁令的来由：有失败对象就必须把用户留在 Step3 看清真实状态。
+        Session.PropertyChanged += OnSessionChangedForAutoAdvance;
         // ★ FIX BATCH 5（§8）★ 轨道宽度变化（窗口缩放 / 响应式密度档位切换）时必须重算，
         //   否则填充会停留在上一次的值上与真实百分比不符。写入者仍是 UpdateFooterProgressFill（唯一）。
         FooterProgressHost.SizeChanged += (_, _) => UpdateFooterProgressFill();
@@ -712,6 +830,23 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void RefreshFooterPresentation()
     {
+        // ★ Preview.4 真机问题 2（2026-10-22）★ 传输活性同步必须在证据巡检**之前**：
+        //   活性成立 ⇒ 先给可达证据续期，再巡检；否则巡检会按"证据已过期"把灯降成琥珀。
+        //
+        //   为什么需要这一拍：`/J` 大文件通道下 committed 字节长时间不动（目标文件被预分配，
+        //   引擎只用 robocopy 已确认的输出），上一版"字节增长"判据因此永远不会触发续期，
+        //   传输再快也会在 60 秒后变黄 —— 这就是 Preview.4 实机仍然黄灯的直接原因。
+        //   现在判据由会话层给出（网卡真实接收吞吐 ≥ 256 KB/s 或引擎确认字节增长），
+        //   本层只做同步，不自己判断。
+        try
+        {
+            ViewModel.SyncTransferActivity(
+                Session?.HasLiveTransferActivity == true,
+                Session?.PresentationTruth?.DisplayedTransferredBytes ?? 0L,
+                Session?.NetworkReceiveBytesPerSecond ?? double.NaN);
+        }
+        catch { /* 活性同步失败绝不影响底栏呈现 */ }
+
         // ★ P0-05（2026-10-13）★ 空闲期源共享**证据新鲜度巡检**（与底栏呈现共用这个 80 ms 节拍）：
         //   证据一过期就把"已连接"降级为"待确认"（无 IO、立即生效），随后按 ≥20 s 间隔异步补一次读探测。
         //   放在 session 判空之前：没有会话时底栏灯同样必须诚实。
@@ -1137,8 +1272,22 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// 诊断导出的落点。
+    ///
+    /// ★ 2026-10-15（Preview.2 隔离整改）★ 预览产物**不再默认写桌面共享目录**
+    /// <c>Desktop\PCMig-Diagnostic</c> —— 那是跨版本共享路径，正式版与预览版的导出文件
+    /// 会混在一起且无法区分来源。预览版改为写到自身数据根的 Exports 子目录
+    /// （<c>%LocalAppData%\PCMig-Preview2\Exports</c>），与其它预览数据同根，卸载随访。
+    /// 正式产物下语义与改动前逐位一致（仍优先桌面）。
+    /// </summary>
     private static string ResolveExportDirectory()
     {
+        // ★ 预览身份 + 隔离失败 ⇒ 抛异常，不得回退到桌面共享目录或 %LocalAppData%\PCMig ★
+        var isolated = PCMig.Core.Util.PreviewIsolation
+            .TryResolveForPersistence("Exports", "MainWindow.ResolveExportDirectory");
+        if (!string.IsNullOrWhiteSpace(isolated)) return isolated!;
+
         try
         {
             var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
@@ -1416,9 +1565,34 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>源状态文案（ProductHeader）：未连接 = 参考图文案「未指定旧电脑」；已连接 = 真实主机名。</summary>
-    private void UpdateSourceStatus() =>
-        SourceStatusText.Text = ViewModel.IsConnected ? $"已连接 {ViewModel.Host.Trim()}" : "未指定旧电脑";
+    /// <summary>
+    /// 源状态文案（ProductHeader）。
+    ///
+    /// ★ 2026-10-23（真机 P0-06 / 顶底不一致）★ 这里原来只读 <c>IsConnected</c> 这个布尔值：
+    /// <c>IsConnected</c> 一旦置真，除非 catch 分支 / NotifySourceLost / 验证失败，就再也不会回 false。
+    /// 于是现场出现「底栏已经黄了，顶栏还写着『已连接 192.0.2.10』」—— 同一块界面对同一件事给出两种答案，
+    /// 而顶栏那份是**没有任何证据支撑**的。现在顶栏与底栏共用同一个权威源 <see cref="ConnectionViewModel.SourceState"/>
+    /// （由 <c>SourceEvidenceLedger</c> 按实测证据派生），只是文字详略不同：
+    ///   · 绿（Connected / Transferring）⇒ 显示主机名，让用户一眼确认是哪台旧电脑；
+    ///   · 其余一律如实降级，并在非绿时把"为什么"交给底栏与 ToolTip，不在这里编造状态。
+    /// 没有证据时它不说话，比说一句错的"已连接"更安全。
+    /// </summary>
+    private void UpdateSourceStatus()
+    {
+        var host = ViewModel.Host?.Trim() ?? string.Empty;
+        // ★ 2026-10-24（用户冻结的四态灯定义）★ 顶栏与底栏**同源**：都读 ViewModel.LampState。
+        //   不再各自 switch 内部六态 —— 那正是"底栏黄、顶栏还写已连接"撕裂的来源。
+        SourceStatusText.Text = ViewModel.LampState switch
+        {
+            SourceLampState.Connected or SourceLampState.Transferring
+                => host.Length > 0 ? $"已连接 {host}" : "已连接",
+            SourceLampState.Connecting => "正在连接旧电脑…",
+            _ => host.Length > 0 ? $"未连接 {host}" : "未指定旧电脑",
+        };
+        // ★ 2026-10-24（多共享作用域）★ 顶栏也挂同一份"作用域 + X/Y"说明，避免"顶栏说已连接、
+        //   其实只有一条共享可读"这种含糊。文字不抢视觉，悬停即见。
+        Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(SourceStatusText, ViewModel.LampScopeSummary);
+    }
 
     // ★ 2026-10-08（真机问题 4）★ 底栏「源连接」指示器：三态真值投影。
     //
@@ -1444,29 +1618,46 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// 把 <see cref="SourceConnectionState"/> 投影到底栏「源连接」指示器（颜色 + 呼吸动画）。
     /// 幂等、可安全重复调用；画刷全部取自主题 Token，此处不写死颜色值。
+    ///
+    /// ★ Preview.6（2026-10-22）★ **幂等必须是真的**：本方法由 80 ms 呈现节拍（经
+    /// <c>SyncTransferActivity</c> → <c>SourceState</c> 通知）与每一次 <c>PushFooter</c> 反复调用，
+    /// 因此这里用 <c>_sourceIndicatorProjection</c> 记住"上次投影出的（状态, 详情）"，完全相同就
+    /// 直接返回 —— 不重设画刷、不进 MotionDirector。呼吸动画本身另有 MotionDirector 的幂等闸门兜底，
+    /// 两层都不会重置相位。旧注释写的"幂等"当时并不成立（每次都 StopAnimation + StartAnimation），
+    /// 正是真机上"绿灯定频闪灭"的直接原因。
     /// </summary>
     private void UpdateSourceConnectionIndicator()
     {
         if (SourceStateDot is null) return;
-        var state = ViewModel.SourceState;
+        // ★ 2026-10-24 ★ View 只投影用户可见四态；"为什么是红的"这类诊断细节仍然走 detail/ToolTip。
+        var state = ViewModel.LampState;
+        var detail = ViewModel.SourceStateDetail;
 
+        // ★ Preview.6 ★ 完全没变化 ⇒ 空操作（这是"重复事件不得重置动画"的第一道闸门）。
+        if (_sourceIndicatorProjection is { } previous
+            && previous.State == state
+            && string.Equals(previous.Detail, detail, StringComparison.Ordinal))
+            return;
+        _sourceIndicatorProjection = (state, detail);
+
+        // ★ 2026-10-24（四态灯定义）★ 只有三种画刷：绿（已连接/传输中）、黄（连接中）、红（未连接）。
+        //   内部 Partial / SuspectOrUnknown 不再参与灯色 —— 前者按作用域回到绿或红，
+        //   后者按保守原则走红并在文字上写明"证据已过期、正在重新确认"。
         var key = state switch
         {
-            SourceConnectionState.Connected => SourceStateConnectedBrushKey,
-            // ★ P0-05 ★ 未知绝不当绿：Partial（多共享里坏了一条）/ SuspectOrUnknown（只有历史连接事实、
-            //   没有任何"刚刚读到"的证据）/ Recovering（已确认失效、正在重探）一律走琥珀，不进绿灯分支。
-            SourceConnectionState.Connecting => SourceStateConnectingBrushKey,
-            SourceConnectionState.Partial => SourceStateConnectingBrushKey,
-            SourceConnectionState.SuspectOrUnknown => SourceStateConnectingBrushKey,
-            SourceConnectionState.Recovering => SourceStateConnectingBrushKey,
+            SourceLampState.Connected => SourceStateConnectedBrushKey,
+            SourceLampState.Transferring => SourceStateConnectedBrushKey,
+            SourceLampState.Connecting => SourceStateConnectingBrushKey,
             _ => SourceStateDisconnectedBrushKey,
         };
         if (Application.Current?.Resources is { } res && res.TryGetValue(key, out var raw) && raw is Brush brush)
             SourceStateDot.Fill = brush;
 
-        // 只有"正在连接"与"已确认失效、正在重探（Recovering）"才呼吸；Partial / SuspectOrUnknown 常亮
-        // （未知不是"在忙"，它是一个静止的结论）；Reduced Motion 开启时 MotionDirector 会吸附成常亮。
-        if (state is SourceConnectionState.Connecting or SourceConnectionState.Recovering)
+        // 只有"正在连接"、"已确认失效、正在重探（Recovering）"与"正在传输（Transferring）"才呼吸；
+        // Partial / SuspectOrUnknown 常亮（未知不是"在忙"，它是一个静止的结论）；
+        // Reduced Motion 开启时 MotionDirector 会吸附成常亮。
+        // ★ Preview.6 ★ 两个调用都是幂等的：已在呼吸同一套参数 ⇒ 空操作；本来常亮 ⇒ 空操作。
+        if (state is SourceLampState.Connecting or SourceLampState.Transferring)
             MotionDirector.PlaySourceBreathing(SourceStateDot);
         else MotionDirector.ResetSourceBreathing(SourceStateDot);
 
@@ -1474,21 +1665,29 @@ public sealed partial class MainWindow : Window
         // 且"未知/部分可用"必须与"已连接"在文字上也分得开——红灯绿灯光靠颜色对色觉障碍者无效）。
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SourceStateDot, state switch
         {
-            SourceConnectionState.Connected => "源连接：已连接（实测可读）",
-            SourceConnectionState.Connecting => "源连接：正在连接",
-            SourceConnectionState.Recovering => "源连接：已失效，正在重试",
-            SourceConnectionState.Partial => "源连接：部分共享不可用",
-            SourceConnectionState.SuspectOrUnknown => "源连接：状态未知（未被实测确认）",
+            SourceLampState.Connected => "源连接：已连接（实测可读）",
+            SourceLampState.Transferring => "源连接：已连接，正在传输",
+            SourceLampState.Connecting => "源连接：正在连接",
             _ => "源连接：未连接",
         });
-        // 同色不同义也补一条可读的"证据说明"，供屏幕阅读器与自动化断言取用。
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(SourceStateDot, ViewModel.SourceStateDetail);
+        // ★ 2026-10-24（多共享）★ 一个点说不清"这盏灯代表哪条共享"：
+        //   把"作用域 + X/Y 可访问"折进无障碍说明，颜色仍是四态，不新增视觉通道。
+        var lampScope = ViewModel.LampScopeSummary;
+        var lampHelp = string.IsNullOrWhiteSpace(ViewModel.SourceStateDetail)
+            ? lampScope
+            : lampScope + "；" + ViewModel.SourceStateDetail;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(SourceStateDot, lampHelp);
         // ★ P0-05 ★ 底栏那一个点在多共享场景下说不清"是哪一条坏了"：把状态详情（含失效目标与证据、
         //   如「\\SRC-PC\d（Win32 67：找不到网络名）」）挂到 ToolTip 上，用户悬停即可定位。
         //   空详情时不清空 ToolTip 服务（保持原有的可悬停语义）。
-        if (!string.IsNullOrWhiteSpace(ViewModel.SourceStateDetail))
-            Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(SourceStateDot, ViewModel.SourceStateDetail);
+        Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(SourceStateDot, lampHelp);
     }
+
+    /// <summary>
+    /// ★ Preview.6 ★ 上一次成功投影的（状态, 详情）。只用于抑制重复投影，不参与任何业务判定；
+    /// 状态与详情任一变化都会走到下面的重投影，因此不会漏掉真实的灯色/文案更新。
+    /// </summary>
+    private (SourceLampState State, string Detail)? _sourceIndicatorProjection;
 
     /// <summary>把当前有效客户区映射为集中管理的 Wide / Normal / Compact 视觉密度。</summary>
     private void ApplyResponsiveLayout(double width, double height)
@@ -1742,10 +1941,46 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void OnNavChanged(StepKind from, StepKind to)
     {
+        // ★ Issue 2 修复（2026-10-14）★ 页面级临时浮层**不跨 Step 存活**：
+        //   Step4 打开「验证完整性」后点 Step3，页面切成功但浮层仍挂在应用根上。
+        //   在页面过渡之前先收起所有工具浮层，避免"旧页面的面板悬在新页面上"。
+        //   「关闭面板 ≠ 取消验证」不变：ClosePanel 只收起观察窗，不向引擎发取消请求。
+        CloseToolPanelsForNavigation();
+
         // 跨级导航（例如 1→4）也只播这一遍 Forward，不分段。
         var direction = _navDirection == 0 ? ((int)to >= (int)from ? 1 : -1) : _navDirection;
         _pageTransition?.OnNavigated(from, to, direction, allowAnimation: true);
         _navDirection = 0;
+    }
+
+    /// <summary>
+    /// ★ Issue 2（2026-10-14）★ 收起所有"页面级临时 Overlay"，使其不跨 Step 存活。
+    ///
+    /// 语义边界（按任务令）：
+    ///   · 必须关闭：验证完整性面板、诊断中心、更新日志、材质调节 —— 都是页面工具窗口。
+    ///   · 允许跨页面：全局通知（提示卡 ShellHintCard 挂在侧栏，不是浮层，本方法不触碰）。
+    ///
+    /// 逐个判断可见性后再关，避免对未打开的面板触发无意义的状态机迁移；
+    /// 关闭复用既有的 <see cref="ClosePanel(FrameworkElement)"/>（与 × 号、互切同一条已验证路径），
+    /// 缩回动画与生命周期收口（StopPanelRefresh + 焦点归还）照常执行。
+    ///
+    /// **不做**的事：不取消任何正在进行的验证、不改变任何业务状态。
+    /// </summary>
+    private void CloseToolPanelsForNavigation()
+    {
+        foreach (var panel in new FrameworkElement?[]
+                 {
+                     VerificationProgressPanel,
+                     DiagnosticCenterPanel,
+                     ChangelogPanel,
+                     TuningPanel,
+                 })
+        {
+            if (panel is not null && panel.Visibility == Visibility.Visible)
+            {
+                ClosePanel(panel);
+            }
+        }
     }
 
     private FrameworkElement? PageForStep(StepKind kind) => kind switch
@@ -1758,17 +1993,86 @@ public sealed partial class MainWindow : Window
     };
 
     /// <summary>
-    /// 设定 Canonical 初始视口。进程已声明 PerMonitorV2（见 app.manifest），
-    /// AppWindow 尺寸单位是**物理像素**，因此必须按当前窗口 DPI 换算：
-    /// 直接写死 1440x900 会在 125% 缩放下把 XAML 可用空间压成 1139x713 DIP，破坏 Canonical 布局。
-    /// 这里固定 XAML 客户端空间为 1424x891 DIP，使 Canonical 比例在任何缩放率下都不变。
+    /// 首次启动的窗口布局（尺寸 + 位置）**唯一入口**。
+    ///
+    /// 【修复的真机缺陷（2026-10-17 用户截图）】
+    /// 原来这里只有 <c>ResizeClient(Canonical 1424×891 DIP × scale)</c>，且**从未设置过位置**：
+    ///   · 尺寸与显示器工作区无关 ⇒ 200% 缩放的 2880×1800 机器上客户区就是 2848×1782 px，
+    ///     加标题栏后高于工作区（1704 px），底部被裁；
+    ///   · 位置由系统默认级联摆放 ⇒ 右侧溢出屏幕。
+    /// 现在改为：工作区 × 92% / 91% 的**外框**尺寸 + 工作区内居中，见
+    /// <see cref="WindowLayoutPlanner"/>（纯函数，有独立单测）。
+    ///
+    /// 【为什么用 MoveAndResize（外框）而不是 ResizeClient（客户区）】
+    /// 用户给定的 92%/91% 是**窗口**在屏幕上的占比（截图口径），直接写外框才等价；
+    /// 且外框矩形不经 DIP 换算 ⇒ 不存在"某档 DPI 下比例漂移"的换算链。
+    /// 代价是对应的 XAML 客户区随窗口边框变化，由 <see cref="UniformScaleHost"/> 统一等比缩放，
+    /// 结构恒为 Canonical ⇒ 不会因此发生重排、折行或裁切。
     /// </summary>
-    private void ApplyCanonicalClientSize()
+    private void ApplyInitialWindowLayout()
     {
-        var scale = CurrentScale();
-        AppWindow.ResizeClient(new SizeInt32(
-            (int)Math.Round(CanonicalClientWidthDip * scale),
-            (int)Math.Round(CanonicalClientHeightDip * scale)));
+        try
+        {
+            var work = ResolveWorkArea();
+            var scale = CurrentScale();
+            var placement = WindowLayoutPlanner.Plan(
+                work.X,
+                work.Y,
+                work.Width,
+                work.Height,
+                // 最小尺寸与 WM_GETMINMAXINFO 用同一份 DIP 常量派生，避免两处数值漂移；
+                // 但 Plan() 内部会把它夹回工作区 —— 小屏上绝不为了满足最小尺寸而溢出屏幕。
+                (int)Math.Round(MinimumClientWidthDip * scale),
+                (int)Math.Round(MinimumClientHeightDip * scale));
+
+            // 首次启动必须是普通窗口状态：即便系统按上次会话把窗口记成最大化，也先还原再定位。
+            // （本应用没有窗口状态持久化；这里只是不让"系统级记忆"破坏居中默认布局。）
+            if (AppWindow.Presenter is OverlappedPresenter presenter)
+            {
+                if (presenter.State != OverlappedPresenterState.Restored)
+                {
+                    presenter.Restore();
+                }
+            }
+
+            // MoveAndResize 的单位就是**物理像素**，与 ResolveWorkArea() 的口径一致。
+            AppWindow.MoveAndResize(new RectInt32(
+                placement.X,
+                placement.Y,
+                placement.Width,
+                placement.Height));
+        }
+        catch
+        {
+            // 拿不到显示器/窗口信息时**绝不能让窗口起不来**：退回旧的 Canonical 客户区尺寸，
+            // 位置交回系统（宁可位置不理想，也不能启动失败）。
+            var scale = CurrentScale();
+            AppWindow.ResizeClient(new SizeInt32(
+                (int)Math.Round(CanonicalClientWidthDip * scale),
+                (int)Math.Round(CanonicalClientHeightDip * scale)));
+        }
+    }
+
+    /// <summary>
+    /// 取窗口**当前所在显示器**的工作区（物理像素，已排除任务栏与其它 AppBar）。
+    /// 多显示器：<c>GetFromWindowId</c> 返回窗口所在那台（副屏在主屏左侧时 X 为负），
+    /// 因此居中偏移必须相对该工作区计算，不能假设 (0,0) 起点；取不到时退回主显示器。
+    /// </summary>
+    private RectInt32 ResolveWorkArea()
+    {
+        try
+        {
+            var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary);
+            if (area is not null && area.WorkArea.Width > 0 && area.WorkArea.Height > 0)
+            {
+                return area.WorkArea;
+            }
+        }
+        catch
+        {
+            // 落到下面的主显示器兜底
+        }
+        return DisplayArea.Primary.WorkArea;
     }
 
     /// <summary>
@@ -1826,16 +2130,21 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 视口自校正（只做一次）。ResizeClient 保证的是"客户区"高度，而 ExtendsContentIntoTitleBar
-    /// 让 XAML 视口额外覆盖标题栏带，两者差值随 DPI / 系统主题变化（本机 125% 实测差约 30 DIP），
-    /// 会悄悄改掉 Canonical 比例。布局跑通后用实测视口回算一次，把视口锁到 1424x891 DIP。
+    /// 窗口尺寸变化时的布局跟随（**纯观察，不再改动窗口尺寸**）。
+    ///
+    /// 【历史与本次变更】这里曾有一段"视口自校正"：启动时用实测视口回算、再从请求值里扣掉
+    /// ExtendsContentIntoTitleBar 带来的标题栏带偏移，把 XAML 视口锁死在 Canonical 1424×891 DIP。
+    /// 那段逻辑存在的唯一前提是"初始尺寸由 ResizeClient 请求 Canonical 客户区"。
+    /// 2026-10-17 起初始布局改为 <see cref="ApplyInitialWindowLayout"/> 用**外框矩形**
+    /// （工作区 × 92%/91% 居中）设定，客户区大小由窗口边框自然决定，不存在"请求值与实测值
+    /// 相差一个常量带"这回事 —— 若保留原逻辑，它会把刚设好的窗口又拉回 1424×891 DIP
+    /// （在 200% 缩放下即 2848×1782 px，重新溢出屏幕）。故此处只保留**布局跟随**。
     /// </summary>
     private void OnRootSizeChanged(object sender, SizeChangedEventArgs e)
     {
         // ★ 观测值口径（UniformScaleHost 集成点 4 的窗口侧配套）：
-        //   Uniform 模式下原根被固定在 1424×892 的 DesignSurface 内，它的 SizeChanged **不再代表视口**
-        //   （恒等于设计面）⇒ 必须改读真实客户区 XamlRoot.Size，否则启动时那次一次性视口自校正会读到
-        //   "已等于 Canonical"而提前返回，窗口高度停在 ResizeClient 请求值上（实测多出约 30 DIP 空白带）。
+        //   Uniform 模式下原根被固定在 1424×891 的 DesignSurface 内，它的 SizeChanged **不再代表视口**
+        //   （恒等于设计面）⇒ 必须改读真实客户区 XamlRoot.Size，否则响应式布局读到的永远是设计面尺寸。
         //   非 Uniform 模式：观测值与原来逐位一致（e.NewSize）。
         var observedWidth = e.NewSize.Width;
         var observedHeight = e.NewSize.Height;
@@ -1846,19 +2155,6 @@ public sealed partial class MainWindow : Window
         }
         ApplyTitleBarInset(); // 窗口激活后 RightInset 才可靠，这里再校正一次（幂等）
         ApplyResponsiveLayout(observedWidth, observedHeight);
-        if (_viewportCalibrated) return;
-        if (observedWidth <= 0 || observedHeight <= 0) return; // 首帧尺寸未就绪时不消耗这次校正机会
-        _viewportCalibrated = true; // 只校正一次，避免窗口与布局互相触发的抖动循环
-        // 实测：ResizeClient 的"客户区"不含 ExtendsContentIntoTitleBar 覆盖的那条标题栏带，
-        // 系统会固定多给一段高度（本机 125% 实测 +38px / +29.8 DIP）。所以不能用"增量"补，
-        // 必须先量出这段常量偏移，再从请求值里扣掉，才能让 XAML 视口回到 1424x891 DIP。
-        var offsetWidthDip = observedWidth - CanonicalClientWidthDip;
-        var offsetHeightDip = observedHeight - CanonicalClientHeightDip;
-        if (Math.Abs(offsetWidthDip) < 1.5 && Math.Abs(offsetHeightDip) < 1.5) return; // 已经准确
-        var scale = CurrentScale();
-        AppWindow.ResizeClient(new SizeInt32(
-            (int)Math.Round((CanonicalClientWidthDip - offsetWidthDip) * scale),
-            (int)Math.Round((CanonicalClientHeightDip - offsetHeightDip) * scale)));
     }
 
 

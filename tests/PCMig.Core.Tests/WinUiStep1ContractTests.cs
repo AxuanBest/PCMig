@@ -141,6 +141,14 @@ public sealed class WinUiStep1ContractTests
     ///   · PreflightChecker            —— 连接/发现共享的唯一实现（Core 侧）；
     ///   · NetworkShare.ConnectForTransfer —— 手动共享探测的凭据会话。
     /// 它不得自己实现 SMB/扫描/规划/传输。
+    ///
+    /// ★ 2026-10-23（Preview.7 收口 P0）★ 断言形态随「可注入测试缝」而调整，**意图一字未变**：
+    ///   原来钉死 `checker.RunAsync(` 与 `benchmark: BenchmarkOnConnect` 这两段字面量；
+    ///   现在 `ConnectAsync` / `AddManualShareAsync` 改为经 `PreflightRunner` /
+    ///   `ShareSessionConnector` 两个**默认指向真实 Core 实现**的缝调用，于是断言改为
+    ///   "Business 路径确实经缝调用" + "缝的默认值确实是 Core 的 PreflightChecker /
+    ///   NetworkShare.ConnectForTransfer" + "BenchmarkOnConnect 仍然透传"。
+    ///   这样既守住"只能投影 Core"的原始护栏，又不再禁止可测试性改造。
     /// </summary>
     [Fact]
     public void ConnectionViewModel_ProjectsCorePreflightAndNetworkShare()
@@ -152,8 +160,15 @@ public sealed class WinUiStep1ContractTests
             "NetworkShare.ConnectForTransfer",
             "PCMig.Core.Preflight",
             "PCMig.Core.Native",
-            "checker.RunAsync(",
-            "benchmark: BenchmarkOnConnect");
+            // 业务路径经缝调用（不是内联 new，也不是自己实现 SMB）
+            "preflightRunner(",
+            "connector(",
+            // 缝的默认实现必须是 Core 的真实能力（这行就是"只投影、不自研"的锚点）
+            "new PreflightChecker(log).RunAsync(host, user, password, sources, targetRoot, estimatedBytes, benchmark)",
+            "ShareSessionConnector =",
+            "NetworkShare.ConnectForTransfer;",
+            // 测速开关仍然透传
+            "BenchmarkOnConnect));");
     }
 
     /// <summary>

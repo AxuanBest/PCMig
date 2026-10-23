@@ -38,6 +38,20 @@ public static class NavigationReasons
     /// <summary>环境变量驱动的 QA 探针自行切页（`PCMIG_STEP2_TREE_QA`；生产路径不设置该变量）。</summary>
     public const string QaProbe = "qa-probe";
 
+    /// <summary>
+    /// ★ v0.5.4 Preview.2（2026-10-16 真机修复）★ 用户点了「开始迁移」⇒ 流程自动进入 Step3。
+    /// 与 <see cref="FooterNext"/> / <see cref="KeyboardNext"/> 区分开：那两个是**用户在翻页**，
+    /// 这一条是**业务动作把用户带到该去的那一页**，取证时必须能分清是谁把他带过去的。
+    /// </summary>
+    public const string TransferStarted = "transfer-started";
+
+    /// <summary>
+    /// ★ v0.5.4 Preview.2（2026-10-16 真机修复）★ 迁移**可信完成**（六项判据全成立，
+    /// 判据唯一出口 = <c>TransferOrchestrator.IsTrustworthyCompletion</c>）⇒ 自动 Step3 → Step4。
+    /// 有失败对象 / 有缺失 / completedBytes &lt; totalBytes 时**不会**发布这一条。
+    /// </summary>
+    public const string TransferCompleted = "transfer-completed";
+
     /// <summary>触发来源未知（例如直接给 <c>Current</c> 赋值）。诚实地说"不知道"，而不是猜一个。</summary>
     public const string Unspecified = "unspecified";
 
@@ -45,7 +59,7 @@ public static class NavigationReasons
     public static readonly IReadOnlyList<string> All = new[]
     {
         Initial, RailClick, KeyboardStep, KeyboardNext, KeyboardPrev,
-        FooterNext, FooterPrev, QaProbe, Unspecified,
+        FooterNext, FooterPrev, QaProbe, TransferStarted, TransferCompleted, Unspecified,
     };
 
     public static bool IsKnown(string? reasonCode) =>

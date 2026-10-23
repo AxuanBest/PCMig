@@ -114,25 +114,102 @@ public sealed class A5BusinessWiringContractTests
     public void P1_3_OnlyTrueCompletedForcesHundredPercent()
     {
         var vm = ViewModel;
+        // ★ R2 接手重写（2026-10-17）★
+        //   原版是"找三句特定文本"的白名单式契约，逐条断言某个整句必须原样存在。
+        //   它有两类硬伤，本轮都被实测抓到：
+        //     ① 假绿 —— `Assert.Contains("if (completed) Percent = 100.0;", vm)` 当时**只被注释满足**：
+        //        源码里唯一的这行字出现在一句批判旧写法的说明注释里（"旧写法 `if (...) ...` 只认引擎
+        //        返回的 phase"）。于是一条禁止"用布尔量决定 100%"的断言，被一句反对该写法的注释喂饱了。
+        //     ② 脆断 —— 语义升级（缺陷 B/H：100% 的唯一放行条件收敛到 IsTrustworthyCompletion）
+        //        必然改写这些整句，于是契约与实现一起"过期"，每次都要人肉追。
+        //   改成的形态：不再钉具体句子，而是钉**结构不变量** ——
+        //     "源码里每一处把 Percent 写成 100.0 的地方，都必须同时存在可信完成闸门"。
+        //   它不关心闸门长什么样（if / 三元 / helper 都行），只关心"有没有闸"，
+        //   因此语义升级不会让它无意义地红，而"新增一条绕过闸门的 100% 通路"一定会被抓到。
 
-        // 坏写法必须彻底消失：一个"流程结束"的 done 布尔量不允许直接决定 100%。
-        Assert.DoesNotContain("if (done) Percent = 100.0;", vm, StringComparison.Ordinal);
-        Assert.DoesNotContain("Percent = done ? 100.0", vm, StringComparison.Ordinal);
-        Assert.DoesNotContain("Percent = finished ? 100.0", vm, StringComparison.Ordinal);
+        // ① 一律先去掉注释：注释里引用旧写法是正常且有益的，不构成行为。
+        var code = StripLineComments(vm);
 
-        // 三条强制 100% 的路径都必须以"真 Completed"为唯一条件。
-        Assert.Contains("if (completed) Percent = 100.0;", vm, StringComparison.Ordinal);
-        // ★ FIX BATCH 4（进度真值）★ 同一句现在优先取引擎真值（ProgressTruthSnapshot.Percent），
-        //   但"强制 100% 只认真 Completed"这一条语义**不变**：Truth 为 null 时依旧
-        //   `s.Phase == JobPhase.Completed ? 100.0 : s.Percent`，Truth 有值时 100% 也只在
-        //   收尾（settled）路径由 Core 判出（运行中真值上限 99.9）。这是口径升级，不是放宽。
-        // ★ Round-2 2026-10-05（§2 P0）★ 显示的 percent/bytes 唯一来源从 `s.Truth` 改为
-        //   `displayTruth`（= ContinuationDisplayState.Apply(rawTruth) 的结果）：它只是引擎 raw
-        //   真值的**包装**，仅在"暂停 / 停止 / 恢复"期间把**显示分子**托在用户已看到的水平
-        //   （raw 追平高水位即自动解除），CommittedBytes / 判定 / 收尾语义全部原样透传 ⇒ 本条语义不变。
-        Assert.Contains("Percent = displayTruth?.Percent ?? (s.Phase == JobPhase.Completed ? 100.0 : s.Percent);", vm, StringComparison.Ordinal);
-        Assert.Contains("var displayTruth = continuity.Effective;", vm, StringComparison.Ordinal);
-        Assert.Contains("Percent = completed\n                ? 100.0", vm.Replace("\r\n", "\n"), StringComparison.Ordinal);
+        // ② 任何"流程结束"型布尔量都不许直接决定 100%（保留原三条禁止，这对新实现同样成立）。
+        Assert.DoesNotContain("if (done) Percent = 100.0;", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Percent = done ? 100.0", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Percent = finished ? 100.0", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("JobPhase.Completed ? 100.0", code, StringComparison.Ordinal);
+
+        // ③ 核心不变量：逐处检查"写 100.0"的地方，其所在方法体内必须出现可信完成判据。
+        //   ★ R2 缺陷 J 后的锚点更新 ★
+        //   写 100% 的唯一出口从 `Percent = 100.0;` 收敛到了 `PublishPercent(100.0, ...)`：
+        //   后者会把呈现层的旧真值（PresentationTruth.Percent）与 80 ms 节拍的视觉值一起压正，
+        //   而只赋 `Percent` 会被界面 `truth?.Percent ?? Session.Percent` 的取值顺序盖掉。
+        //   因此这里的正则必须同时认两种形态 —— 只认旧形态会让本契约变成"零命中即通过"的空断言，
+        //   那正是它 ① 里批评过的假绿。两种形态都要被逐个检查，漏掉任何一种都等于放行一条旁路。
+        var hits = Regex.Matches(code, @"(?<![A-Za-z_])Percent\s*=\s*100(?:\.0+)?[dD]?\s*;|PublishPercent\(\s*100(?:\.0+)?[dD]?\s*[,)]");
+        Assert.True(hits.Count > 0,
+            "源码里既找不到 `Percent = 100.0;` 也找不到 `PublishPercent(100.0, ...)` —— " +
+            "若 100% 改由别的形态表达，本契约必须随实现更新（不要直接删掉本用例）。");
+
+        var offenders = new List<string>();
+        foreach (Match h in hits)
+        {
+            var body = EnclosingMethodBody(code, h.Index);
+            var guarded =
+                body.Contains("TrustworthyCompletion", StringComparison.Ordinal)
+                || body.Contains("IsTrustworthyCompletion", StringComparison.Ordinal)
+                || body.Contains("ApplySettledCompletion", StringComparison.Ordinal)
+                || body.Contains("ApplyTrustworthyCompletion", StringComparison.Ordinal);
+            if (!guarded)
+            {
+                var line = code.Substring(0, h.Index).Count(c => c == '\n') + 1;
+                offenders.Add($"L{line}");
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            "这些位置把进度写成 100.0，但所在方法里没有任何可信完成闸门（TrustworthyCompletion / " +
+            "IsTrustworthyCompletion / ApplySettledCompletion）：" + string.Join(", ", offenders) +
+            "。放行 100% 必须与 Core 的可信完成判据同源，不许各自拼条件。");
+
+        // ④ 唯一出口本身必须在：两条"按真实 JobState 判"的入口一条都不能少。
+        Assert.Contains("TransferOrchestrator.IsTrustworthyCompletion(", code, StringComparison.Ordinal);
+        Assert.Contains("TransferOrchestrator.SettledPercentCapPublic", code, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 取包含 <paramref name="index"/> 的最内层方法体（花括号配平）。
+    /// 用于"某一行必须在其所在方法里有配套闸门"这类结构断言 —— 只看整文件会跨方法串味。
+    /// </summary>
+    private static string EnclosingMethodBody(string code, int index)
+    {
+        // 先找 index 之前最近的、缩进恰为 4 空格的成员签名（本文件的成员都在 class 一层）。
+        var head = code.LastIndexOf("\n    ", index, StringComparison.Ordinal);
+        var guard = 0;
+        while (head > 0 && guard++ < 200)
+        {
+            var lineEnd = code.IndexOf('\n', head + 1);
+            if (lineEnd < 0) break;
+            var lineText = code.Substring(head + 1, lineEnd - head - 1);
+            // 4 空格缩进 + 形如 `... Foo(` 的成员签名（排除 8 空格以上的语句行）
+            if (!lineText.StartsWith("        ", StringComparison.Ordinal)
+                && Regex.IsMatch(lineText, @"^\s{4}\S.*\w\s*\("))
+            {
+                var open = code.IndexOf('{', lineEnd);
+                if (open < 0) break;
+                var depth = 0;
+                for (var j = open; j < code.Length; j++)
+                {
+                    if (code[j] == '{') depth++;
+                    else if (code[j] == '}')
+                    {
+                        depth--;
+                        if (depth == 0) return code.Substring(open, j - open + 1);
+                    }
+                }
+                break;
+            }
+            head = head > 0 ? code.LastIndexOf("\n    ", head - 1, StringComparison.Ordinal) : -1;
+        }
+        // 定位失败就退回整文件（宁可让断言更严格，也不要静默放过）
+        return code;
     }
 
     /// <summary>
@@ -332,9 +409,14 @@ public sealed class A5BusinessWiringContractTests
     {
         var xaml = ReadWinUi("Views", "Step2SelectDataPage.xaml");
 
-        // 只看**ToolTip 属性的真实取值**（注释里为了说明改了什么而引用旧文案，不算违规）。
+        // 只看**ToolTip 的真实取值**（注释里为了说明改了什么而引用旧文案，不算违规）。
+        // ★ 2026-10-18 二次修正：ⓘ 图标上的 ToolTip 已从「附加属性」改为「显式 ToolTip 元素」
+        //   （实测属性写法挂在 Grid 上鼠标悬停不弹），故两种写法都算作有效挂载。
         var tooltips = Regex.Matches(xaml, "ToolTipService\\.ToolTip=\"(?<v>[^\"]*)\"")
-            .Select(m => m.Groups["v"].Value).ToList();
+            .Select(m => m.Groups["v"].Value)
+            .Concat(Regex.Matches(xaml, "<ToolTip\\s+Content=\"(?<v>[^\"]*)\"")
+                .Select(m => m.Groups["v"].Value))
+            .ToList();
         Assert.DoesNotContain(tooltips, v => v.Contains("仅传输文件清单与增量", StringComparison.Ordinal));
         Assert.DoesNotContain(tooltips, v => v.Contains("超大数数据模式", StringComparison.Ordinal));
         Assert.Contains("超大数据模式：暂未启用，当前迁移范围以目录选择为准。", tooltips);

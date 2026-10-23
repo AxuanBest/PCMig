@@ -270,8 +270,27 @@ public sealed class DeveloperVisualTuning : ObservableObject
         return Color.FromArgb(255, 255, 255, 255);
     }
 
-    public static string SettingsPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PCMig", "DeveloperVisualSettings.json");
+    /// <summary>
+    /// 视觉标定文件路径。默认 <c>%LocalAppData%\PCMig\DeveloperVisualSettings.json</c>。
+    ///
+    /// ★ 2026-10-15（Preview.2 隔离整改）★ 预览产物改写到自身数据根的 Settings 子目录，
+    /// 避免预览调参覆盖正式版的视觉标定（两者键集可能不同，互相覆盖会让表现无法解释）。
+    /// 正式产物下取值与改动前逐位一致。
+    /// </summary>
+    public static string SettingsPath
+    {
+        get
+        {
+            // ★ 预览身份 + 隔离失败 ⇒ 抛异常，不得回退到 %LocalAppData%\PCMig（正式版视觉标定）★
+            var isolated = PCMig.Core.Util.PreviewIsolation
+                .TryResolveForPersistence("Settings", "DeveloperVisualTuning.SettingsPath");
+            return !string.IsNullOrWhiteSpace(isolated)
+                ? Path.Combine(isolated!, "DeveloperVisualSettings.json")
+                : Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "PCMig", "DeveloperVisualSettings.json");
+        }
+    }
 
     public string Save()
     {

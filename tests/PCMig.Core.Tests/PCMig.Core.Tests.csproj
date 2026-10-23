@@ -49,6 +49,8 @@
     <!-- ★ 2026-10-08（真机问题 4）★ 底栏「源连接」三态枚举：纯枚举、零 WinUI 依赖 ⇒ 与 VM 一并链入
          （ConnectionViewModel 的 SourceState / UpdateSourceState 用到它；不链入会 CS0246）。 -->
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\SourceConnectionState.cs" Link="LinkedPresentation\SourceConnectionState.cs" />
+    <!-- ★ 2026-10-24（四态灯冻结定义）★ 用户可见四态枚举；ConnectionViewModel 的投影与测试都要用它。 -->
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\SourceLampState.cs" Link="LinkedPresentation\SourceLampState.cs" />
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\ConnectionViewModel.cs" Link="LinkedPresentation\ConnectionViewModel.cs" />
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\PageReadiness.cs" Link="LinkedPresentation\PageReadiness.cs" />
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\MigrationSessionViewModel.cs" Link="LinkedPresentation\MigrationSessionViewModel.cs" />
@@ -65,6 +67,11 @@
          VM 持有并驱动它、UI 读它取视觉百分比 ⇒ 必须链入，否则 VM 编译失败（CS0246）。
          行为级断言见 ProgressPresentationCoordinatorTests。 -->
     <Compile Include="..\..\src\PCMig.WinUI\Presentation\ProgressPresentationCoordinator.cs" Link="LinkedPresentation\ProgressPresentationCoordinator.cs" />
+    <!-- ★ 2026-10-17（窗口默认布局缺陷）★ 首次启动窗口矩形规划器：**纯数学、零 WinUI 依赖**
+         （不用 RectInt32/DisplayArea，自己带一个 X/Y/W/H 值类型）⇒ 可链入并在测试里直接断言
+         "92%/91% + 居中 + 不越工作区 + 多屏负坐标 + DPI 无关"。若这里换成 WinUI 类型就链不进来了。
+         行为级断言见 R3WindowLayoutTests。 -->
+    <Compile Include="..\..\src\PCMig.WinUI\Presentation\WindowLayoutPlanner.cs" Link="LinkedPresentation\WindowLayoutPlanner.cs" />
   </ItemGroup>
 
   <!--

@@ -255,6 +255,15 @@ public sealed class A5PresentationRegressionTests : IDisposable
         /// <summary>假引擎返回的结束阶段。</summary>
         public JobPhase Result { get; init; } = JobPhase.Completed;
 
+        /// <summary>
+        /// 假引擎的"落盘终态"：非 null 时在返回前 <c>ctx.SaveState(LandState)</c>。
+        /// ★ R2 补齐（2026-10-17）★ 真实引擎一定会把终态写进 job-state.json，而收尾路径
+        /// （FinishRunAsync）读的是**落盘状态**而不是返回值。旧版假引擎只返回 Result 不落盘，
+        /// 于是"收尾后 Percent"读到的是开跑前那份旧状态，测出来的结论与真实运行不符。
+        /// 默认 null ⇒ 不落盘，既有用例行为逐位不变。
+        /// </summary>
+        public JobState? LandState { get; init; }
+
         // ── 采样 ──
         public List<int> ErrorLineCounts { get; } = new();
         public List<bool> StaleObjectFailVisible { get; } = new();
@@ -296,6 +305,9 @@ public sealed class A5PresentationRegressionTests : IDisposable
                 StatusRightAfterSnapshot.Add(_vm.StatusMessage);
                 FinishedRightAfterSnapshot.Add(_vm.IsFinished);
             }
+
+            if (LandState is not null)
+                ctx.SaveState(LandState);
 
             return Task.FromResult(Result);
         }
@@ -1034,12 +1046,32 @@ public sealed class A5PresentationRegressionTests : IDisposable
         {
             Snapshot = new ProgressSnapshot(JobPhase.Completed, 1, 1, 0, 1024, 1024, 100, 0, double.NaN, null, null, string.Empty),
             Result = JobPhase.Completed,
+            // ★ R2 补齐（2026-10-17）★ 真实引擎会把终态写进 job-state.json；收尾路径读的是落盘状态。
+            //   旧版这里不落盘，等于在测"引擎返回 Completed 但账本还停在 AwaitingReview"这种不存在的场景。
+            //   落盘的这份必须是**字节闭环、对象全完成**的 Completed —— 这是"可信完成"的唯一形态；
+            //   不闭环的形态已由 A5_5a/A5_5c 与 R2DefectB/H 系列反向覆盖。
+            LandState = new JobState
+            {
+                JobId = "JOB-A5-RUN-DONE",
+                Phase = JobPhase.Completed,
+                TotalObjects = 1,
+                CompletedObjects = 1,
+                FailedObjects = 0,
+                MissingObjects = 0,
+                TotalBytes = 1024,
+                CompletedBytes = 1024,
+                Percent = 100,
+            },
         };
         vm.TransferRunner = engine.Delegate;
 
         await WithInlineSyncContext(() => vm.RunAsync(password: null));
 
+        // 快照那一刻：ApplySnapshot 用**快照自身数据**就地判可信完成，不能等下一帧。
+        // （回归缺陷：只信上一帧落定的 TrustworthyCompletion 会让真 Completed 显示 99.9%。）
         Assert.Equal(new[] { 100.0 }, engine.PercentRightAfterSnapshot);
+
+        // 收尾之后：落盘状态可信 ⇒ 100% 且文案是"迁移完成"。
         Assert.Equal(100.0, vm.Percent);
         Assert.Contains("迁移完成！", vm.StatusMessage, StringComparison.Ordinal);
     }

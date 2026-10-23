@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using PCMig.WinUI.Presentation;
 using Xunit;
 
 namespace PCMig.Core.Tests;
@@ -11,15 +12,15 @@ namespace PCMig.Core.Tests;
 /// WinUI Step 1 视口 / DPI 契约回归（真源码静态扫描 + 换算公式复算）。
 ///
 /// 【为什么存在】
-/// 本机只实测过 **125%（120 DPI）** 一种缩放率（100% / 150% 均无实测条件）。
+/// 本机只实测过 **125%（120 DPI）** 与 **200%（192 DPI）** 两种缩放率。
 /// 而外壳的"Canonical 视口"依赖一条**容易静默走偏**的换算链：
 ///   1. app.manifest 声明 PerMonitorV2（声明丢失 → 进程不感知 DPI，XAML 被系统位图拉伸，字体发虚）；
-///   2. MainWindow.xaml.cs 用 AppWindow.ResizeClient 设初始客户区，而该 API 的单位是**物理像素**，
-///      必须按窗口 DPI 换算；直接写死 1440x900 会在 125% 下把 XAML 可用空间压成约 1139x713 DIP，
-///      整屏布局比例被破坏而**编译/单测都不会报**；
-///   3. 首次布局后用实测视口回算并再校正一次（extend content into title bar 会让 XAML 视口
-///      多覆盖一条标题栏带，偏差随 DPI / 系统主题变化）。
-/// 这三处只要有一处被改坏，表现是"某一档缩放下布局跑偏"，而开发机往往只用一个缩放率，察觉不到。
+///   2. 初始客户区必须按窗口 DPI 换算（API 单位是**物理像素**）；直接写死 1440x900 会在 125% 下
+///      把 XAML 可用空间压成约 1139x713 DIP，整屏布局比例被破坏而**编译/单测都不会报**；
+///   3. **【2026-10-17 变更】** 初始窗口矩形改为"工作区 × 92%/91% 居中"（见 WindowLayoutPlanner），
+///      不再锁 Canonical DIP；旧的首帧自校正已删除，并在
+///      <c>Startup_DoesNotLockViewportBackToCanonicalDips</c> 里反转成"必须不存在"的契约。
+/// 这几处只要有一处被改坏，表现是"某一档缩放下布局跑偏"，而开发机往往只用一个缩放率，察觉不到。
 ///
 /// 【运行级别：L0 静态契约扫描】
 /// 只读源码文本并复算公式，不加载 WinUI 运行时（与既有 WinUiStep1ContractTests 同款约束）。
@@ -57,70 +58,51 @@ public sealed class WinUiDpiContractTests
             code);
     }
 
+    /// <summary>
+    /// 【2026-10-17 变更 · 用户真机截图缺陷】默认窗口尺寸不再由 Canonical DIP 决定。
+    ///
+    /// 旧口径 `ResizeClient(round(1424×891 DIP × scale))` 与显示器工作区**无关**：在 2880×1800@200%
+    /// 的机器上客户区是 2848×1782 **物理像素**，连标题栏后高出工作区 1704 px（底部被裁），
+    /// 且从不设位置（右侧溢出）。这正是用户第二张截图。
+    ///
+    /// 新口径：默认尺寸 = 工作区 × 92% / 91%，居中，且必须完整落在工作区内（<c>WindowLayoutPlanner</c>）。
+    /// 本用例用两个正交断言钉住这次换轨：
+    ///   · 行为侧——同一工作区上新算法给出的矩形**不等于** Canonical 矩形（相等即说明又退回固定尺寸）；
+    ///   · 硬约束侧——结果必须不越界（旧实现的第一条硬伤）。
+    /// </summary>
     [Theory]
-    [InlineData(1.00)]
-    [InlineData(1.25)]
-    [InlineData(1.50)]
-    [InlineData(1.75)]
-    public void ClientSizeConversion_ScalesByWindowDpi(double scale)
+    [InlineData(1920, 1040)]
+    [InlineData(2880, 1704)]
+    [InlineData(2560, 1400)]
+    public void DefaultWindowSize_IsDerivedFromWorkArea_NotFromCanonicalDips(int workW, int workH)
     {
-        // 复算 ApplyCanonicalClientSize：ResizeClient(round(DIP * scale))
-        var w = (int)Math.Round(CanonicalWidthDip * scale);
-        var h = (int)Math.Round(CanonicalHeightDip * scale);
-        Assert.True(w > 0 && h > 0);
-        // 物理像素必须与 DIP*scale 一致（±1 取整）
-        Assert.InRange(w, CanonicalWidthDip * scale - 1, CanonicalWidthDip * scale + 1);
-        Assert.InRange(h, CanonicalHeightDip * scale - 1, CanonicalHeightDip * scale + 1);
-        // Canonical 16:10 比例在任意缩放率下不得漂移超过 1.5%
-        var aspect = (double)w / h;
-        Assert.InRange(aspect, 1.0 / 1.015 * ((double)CanonicalWidthDip / CanonicalHeightDip),
-            1.015 * ((double)CanonicalWidthDip / CanonicalHeightDip));
-    }
+        var p = WindowLayoutPlanner.Plan(0, 0, workW, workH);
 
-    [Fact]
-    public void Calibration_OnlyFiresWhenOffsetExceedsThreshold()
-    {
-        var code = ReadWinUi("MainWindow.xaml.cs");
-        // 自校正必须有"已经准确就不再校正"的阈值判断，否则会与布局互相触发抖动循环
-        Assert.Matches(new Regex(@"Math\.Abs\(offsetWidthDip\)\s*<\s*1\.5"), code);
-        Assert.Matches(new Regex(@"Math\.Abs\(offsetHeightDip\)\s*<\s*1\.5"), code);
-        // 只校正一次（幂等保护）
-        Assert.Contains("_viewportCalibrated", code);
+        Assert.True(p.Width != CanonicalWidthDip || p.Height != CanonicalHeightDip,
+            $"工作区 {workW}×{workH} 上算出 {p.Width}×{p.Height}，与 Canonical {CanonicalWidthDip}×{CanonicalHeightDip} 相同 —— 说明仍是固定尺寸");
+        Assert.True(p.IsInside(0, 0, workW, workH), $"{p} 超出 {workW}×{workH} 工作区");
     }
 
     /// <summary>
-    /// 复算 OnRootSizeChanged 的自校正：ExtendsContentIntoTitleBar 会让 XAML 视口额外覆盖一条
-    /// 标题栏带，实测视口 = 请求值 + band（本机 125% 实测约 +29.8 DIP），因此必须
-    /// "从请求值里扣掉这段常量偏移"，再乘窗口 DPI 换算回物理像素。
-    /// 这段逻辑没有任何真机 100% DPI 的实测覆盖，用复算把它钉住。
+    /// 【2026-10-17 契约反转】旧的"首帧视口自校正"已删除，现在断言它**必须不存在**。
+    ///
+    /// 那段逻辑的唯一前提是"初始尺寸由 <c>ResizeClient</c> 请求 Canonical 客户区，实测值会多出
+    /// 一条标题栏带"。初始布局改为 <c>MoveAndResize</c> 外框矩形后，客户区由边框自然决定，
+    /// 不再存在"请求值 vs 实测值差一个常量"这回事；若保留自校正，它会在启动后把窗口又拉回
+    /// 1424×891 DIP（200% 下 = 2848×1782 px），把本轮修复原地撤销。
     /// </summary>
-    [Theory]
-    [InlineData(1.00, 24.0)]
-    [InlineData(1.25, 29.8)]
-    [InlineData(1.50, 36.0)]
-    public void ViewportCalibration_RemovesTitleBarBandOffset(double scale, double bandDip)
+    [Fact]
+    public void Startup_DoesNotLockViewportBackToCanonicalDips()
     {
-        // 第一次请求：客户区不含标题栏带 → 实测视口比 Canonical 高一个 band
-        var requestedHeightDip = CanonicalHeightDip;
-        var actualViewportHeightDip = requestedHeightDip + bandDip;
-        var offsetHeightDip = actualViewportHeightDip - CanonicalHeightDip;
-        Assert.Equal(bandDip, offsetHeightDip, 3);
+        var code = ReadWinUi("MainWindow.xaml.cs");
 
-        // 阈值判断：偏移超过 1.5 DIP 才需要校正（否则与布局互相触发抖动循环）
-        Assert.True(Math.Abs(offsetHeightDip) >= 1.5, "该场景本应触发校正");
+        Assert.DoesNotContain("_viewportCalibrated", code);
+        Assert.DoesNotMatch(new Regex(@"Math\.Abs\(offsetWidthDip\)"), code);
+        Assert.DoesNotMatch(new Regex(@"Math\.Abs\(offsetHeightDip\)"), code);
 
-        // 校正：新请求 = Canonical - offset，再按 DPI 换算成物理像素
-        var correctedHeightDip = CanonicalHeightDip - offsetHeightDip;
-        var correctedPx = (int)Math.Round(correctedHeightDip * scale);
-        Assert.InRange(correctedPx, (CanonicalHeightDip - bandDip) * scale - 1, (CanonicalHeightDip - bandDip) * scale + 1);
-
-        // 校正后视口必须回到 Canonical（±1 DIP）
-        var finalViewportDip = correctedHeightDip + bandDip;
-        Assert.InRange(finalViewportDip, CanonicalHeightDip - 1, CanonicalHeightDip + 1);
-
-        // 宽度方向：Canonical 视口宽度是常量，带偏移只应出现在高度方向
-        var offsetWidthDip = 0.0;
-        Assert.True(Math.Abs(offsetWidthDip) < 1.5, "宽度方向不应有可感知偏移");
+        // 初始布局必须走规划器 + MoveAndResize（一个 API 同时定尺寸与位置）
+        Assert.Contains("WindowLayoutPlanner.Plan(", code);
+        Assert.Contains("AppWindow.MoveAndResize(", code);
     }
 
     [Fact]
@@ -216,13 +198,25 @@ public sealed class WinUiDpiContractTests
         Assert.Contains("PCMigTextFooterAction", typography);
     }
 
-    /// <summary>剥掉 XAML/C# 注释，只保留可执行内容（用于"禁止引用"类断言）。</summary>
-    private static string StripComments(string text)
-    {
-        var noXml = Regex.Replace(text, "<!--.*?-->", " ", RegexOptions.Singleline);
-        var noBlock = Regex.Replace(noXml, @"/\*.*?\*/", " ", RegexOptions.Singleline);
-        return Regex.Replace(noBlock, @"//[^\r\n]*", " ");
-    }
+    /// <summary>
+    /// 剥掉注释，只留代码 —— 供"不得出现某类型名"这类断言使用。
+    ///
+    /// 【实现已统一到 <see cref="SourceStripper"/> —— 不要在本文件里另写一份】
+    /// 这里曾经是每个测试文件各写一份的块注释正则，而块注释正则会**失控**：
+    /// 文档注释里出现字面量 `/*` 极其常见（例如「禁止定义任何 *Orchestrator/*Runner 类型」
+    /// 这句注释里就有 `/*Runner`），正则把它当成块注释开头后会一路吃到下一个 `*/`，
+    /// 把中间的**全部可执行代码**静默删掉。实测事故：`MigrationSessionViewModel.cs`
+    /// 原文 240,758 B 被吞到只剩 90,929 B（丢 62.2%），而本文件的禁词断言当时之所以"通过"，
+    /// 正是因为被吞掉的那 107 KB 里含有它要找的名字 —— 断言看着在守，其实全瞎。
+    /// 现在统一走状态机实现，并有 <see cref="R2SourceStripperTests"/> 直接盯着它。
+    /// </summary>
+    private static string StripComments(string text) => SourceStripper.StripComments(text);
+
+    /// <summary>
+    /// 单块注释允许的最大跨度（字符）。给人看的注释不会横跨几万字符；
+    /// 超过这条线就意味着匹配失控 —— 历史事故里一次"注释"吞掉了 107,081 字符的代码。
+    /// </summary>
+    private const int MaxBlockCommentChars = 4000;
 
     /// <summary>
     /// 冻结范围锚点：外壳不得引用 WPF GUI，也不得**自带第二套迁移引擎**（双引擎是最危险的静默退化）。

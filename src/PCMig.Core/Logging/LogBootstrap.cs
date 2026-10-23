@@ -22,11 +22,26 @@ public static class LogBootstrap
     /// ★ P1-10 ★ 环境变量 <c>PCMIG_LOG_DIR</c> 可覆盖它，**仅供测量/隔离复验**：
     /// 不设置时生产路径逐位不变（仍是 ProgramData）；设置后应用级日志全部落到指定目录，
     /// 这样"启动计时/安装计时"这类复验不会往真实用户的日志目录里写东西。
+    ///
+    /// ★ 2026-10-15（Preview.2 隔离整改）★ 预览产物的应用日志根改由随产物分发的
+    /// <c>preview-isolation.json</c> 指定（见 <see cref="PCMig.Core.Util.PreviewIsolation"/>），
+    /// 优先级**高于**环境变量 —— 否则账户级环境变量又能改写预览版行为，等于没隔离。
+    /// 正式产物下这一支完全不参与，语义与改动前逐位一致。
     /// </summary>
     public static string AppLogDir
     {
         get
         {
+            // ① 预览隔离：有效则用隔离根；★ 预览身份但隔离失败则**抛异常**，绝不回退到正式根 ★
+            //    第二道防线：即使某个入口漏了启动检查，应用日志也不可能落进 %ProgramData%\PCMig\Logs。
+            if (PCMig.Core.Util.PreviewIsolation
+                    .TryResolveForPersistence("Logs", "LogBootstrap.AppLogDir") is { } isolated)
+            {
+                return isolated;
+            }
+
+            // ② 显式环境变量覆盖（测量场景，语义保持不变）
+            // ③ 生产默认：%ProgramData%\PCMig\Logs —— 只有**正式身份**才会走到这里
             var overridden = Environment.GetEnvironmentVariable("PCMIG_LOG_DIR");
             return string.IsNullOrWhiteSpace(overridden)
                 ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), AppName, "Logs")

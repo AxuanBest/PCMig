@@ -98,9 +98,10 @@ internal sealed class ImmersiveTransferProgressRenderer : IDisposable
     private CanvasLinearGradientBrush? _fillLightBrush;   // 纵向极轻材质修饰
     private CanvasLinearGradientBrush? _bandOuterBrush;
     private CanvasLinearGradientBrush? _bandCoreBrush;
-    private CanvasRadialGradientBrush? _haloOuterBrush;   // Layer C: Cyan Support Glow
-    private CanvasRadialGradientBrush? _haloBloomBrush;   // Layer B: Soft Outer Bloom
-    private CanvasRadialGradientBrush? _haloInnerBrush;   // Layer A: Arc-attached Inner Glow
+    // ★ 真机问题 4（2026-10-21）★ 前沿光带（替换原三层同心椭圆径向光场）。
+    //   用**横向**渐变而不是径向：前沿亮度必须来自"被填充终点截断的渐变"，而不是"叠加的模糊圆"。
+    private CanvasLinearGradientBrush? _headEdgeBrush;      // 外层：22 DIP 拖尾
+    private CanvasLinearGradientBrush? _headEdgeCoreBrush;  // 内芯：9 DIP 拖尾（更短更集中）
 
     // ★ R31 胶囊几何缓存 ★ 只在宽度变化超过阈值时重建，绝不每帧 new Geometry
     private CanvasGeometry? _fillCapsuleGeometry;
@@ -152,12 +153,11 @@ internal sealed class ImmersiveTransferProgressRenderer : IDisposable
             GaussianStops(BandStops, (float)ImmersiveProgressParameters.BandCoreSigmaX, _palette.BandCore),
             CanvasEdgeBehavior.Clamp, CanvasAlphaMode.Straight);
 
-        // ★ R34 ★ Head 体积光场：两层**径向**渐变（中心透明→峰值→外缘 0），无任何硬边界。
-        _haloOuterBrush = new CanvasRadialGradientBrush(device, HaloRadialStops(_palette.HeadHalo),
+        // ★ 真机问题 4（2026-10-21）★ 前沿光带：横向非对称渐变，右端 = Head（被填充胶囊裁剪）。
+        //   形状（Stop）在创建时固化，帧内只改 StartPoint / EndPoint / Opacity，仍然零分配。
+        _headEdgeBrush = new CanvasLinearGradientBrush(device, HeadEdgeStops(_palette.HeadRim),
             CanvasEdgeBehavior.Clamp, CanvasAlphaMode.Straight);
-        _haloBloomBrush = new CanvasRadialGradientBrush(device, HaloRadialStops(_palette.HeadRim),
-            CanvasEdgeBehavior.Clamp, CanvasAlphaMode.Straight);
-        _haloInnerBrush = new CanvasRadialGradientBrush(device, HaloRadialStops(_palette.HeadRim),
+        _headEdgeCoreBrush = new CanvasLinearGradientBrush(device, HeadEdgeStops(_palette.HeadRim),
             CanvasEdgeBehavior.Clamp, CanvasAlphaMode.Straight);
 
         // 胶囊几何在第一次绘制时按真实宽度构建
@@ -207,17 +207,22 @@ internal sealed class ImmersiveTransferProgressRenderer : IDisposable
     }
 
     /// <summary>
-    /// ★ R34 ★ 体积光场的径向剖面：中心透明 → 峰值 → 外缘精确 0。
-    /// 中心留一点透明是为了让"最亮处"落在 Head **内部**而不是轮廓线上（避免读成一根白线）。
+    /// ★ 真机问题 4（2026-10-21）★ 前沿光带的横向剖面：**非对称**、左端精确 0、右端（= Head）达峰值。
+    ///
+    /// 为什么不是对称高斯：对称形状会让光带看起来"以某个点为中心的一团光"，
+    /// 而进度前沿的正确读法是"一条从已完成区域向右推进的亮边"——亮度必须随着接近 Head 单调上升，
+    /// 离开 Head 立刻消失。右端峰值随后被**填充胶囊裁剪**成圆角，因此不会出现"一圈白线"。
+    ///
+    /// 位置语义：0 = 拖尾起点（Head 后方 <c>TailLength</c> DIP），1 = Head。
     /// </summary>
-    private static CanvasGradientStop[] HaloRadialStops(Color color)
+    private static CanvasGradientStop[] HeadEdgeStops(Color color)
         => new[]
         {
             new CanvasGradientStop { Position = 0.00f, Color = WithAlpha(color, 0.00f) },
-            new CanvasGradientStop { Position = 0.28f, Color = WithAlpha(color, 0.55f) },
-            new CanvasGradientStop { Position = 0.52f, Color = WithAlpha(color, 1.00f) },
-            new CanvasGradientStop { Position = 0.78f, Color = WithAlpha(color, 0.28f) },
-            new CanvasGradientStop { Position = 1.00f, Color = WithAlpha(color, 0.00f) },
+            new CanvasGradientStop { Position = 0.30f, Color = WithAlpha(color, 0.10f) },
+            new CanvasGradientStop { Position = 0.62f, Color = WithAlpha(color, 0.34f) },
+            new CanvasGradientStop { Position = 0.86f, Color = WithAlpha(color, 0.72f) },
+            new CanvasGradientStop { Position = 1.00f, Color = WithAlpha(color, 1.00f) },
         };
 
     /// <summary>
@@ -260,12 +265,21 @@ internal sealed class ImmersiveTransferProgressRenderer : IDisposable
         {
             CopyStops(_bandCoreBrush, GaussianStops(BandStops, (float)ImmersiveProgressParameters.BandCoreSigmaX, palette.BandCore));
         }
+        // ★ 真机问题 4 ★ 前沿光带的渐变形状是**位置相关**的，颜色以 stop 的 alpha 参与 ⇒ 调色板变化时同步重建。
+        if (_headEdgeBrush is not null)
+        {
+            CopyStops(_headEdgeBrush, HeadEdgeStops(palette.HeadRim));
+        }
+        if (_headEdgeCoreBrush is not null)
+        {
+            CopyStops(_headEdgeCoreBrush, HeadEdgeStops(palette.HeadRim));
+        }
     }
 
     /// <summary>
     /// 画一帧。所有坐标均为 DIP，绘制会话已由 CanvasAnimatedControl 提供。
-    /// 层序（R31 之后不再有 Border 层）：
-    ///   ① Track ② Chroma Field ③ 纵向材质修饰 ④⑤ Push Band ⑥ Head 体积光场 ⑦⑧ Particles / Ripples
+    /// 层序（R31 之后不再有 Border 层，2026-10-21 之后不再有同心椭圆光场）：
+    ///   ① Track ② Chroma Field ③ 纵向材质修饰 ④⑤ Push Band ⑥ 前沿高光带 ⑦⑧ Particles / Ripples
     /// </summary>
     public void Draw(CanvasDrawingSession ds, ImmersiveProgressMetrics m, ImmersiveProgressAnimationState anim,
         ImmersiveProgressState state, ImmersiveEffectsQuality quality, bool reducedMotion)
@@ -284,8 +298,8 @@ internal sealed class ImmersiveTransferProgressRenderer : IDisposable
         // ── ④⑤ Push Band（外层光压 + 亮芯）：裁进**同一枚胶囊**───────────────
         var bandDrawn = DrawPushBand(ds, m, anim, quality, reducedMotion, capsule);
 
-        // ── ⑥ Head 体积光场（两层高斯衰减，中心在 Head 后方；不裁剪、无硬边）────
-        var haloDrawn = DrawHead(ds, m, anim, quality);
+        // ── ⑥ 前沿高光（贴在填充终点、被胶囊裁剪的非对称光带；见 DrawHead）────
+        var haloDrawn = DrawHead(ds, m, anim, quality, capsule);
 
         // ── ⑦⑧ Particles / Ripples：同一枚胶囊内 ────────────────────────────
         var particleDrawn = DrawParticles(ds, m, anim, quality, reducedMotion, capsule);
@@ -450,19 +464,31 @@ internal sealed class ImmersiveTransferProgressRenderer : IDisposable
     }
 
     /// <summary>
-    /// ★ R34 Volumetric Head Halo ★
-    /// 两层**无硬边界**的椭圆径向光场（Outer / Inner），中心位于 Head **后方** 3~6 DIP，
-    /// 让亮度从胶囊内部自然向外扩散。**不画任何 Rim / Stroke / Outline** ——
-    /// "Head 的亮"与"Head 的白边"是两件事，本实现只表达前者。
+    /// ★ 真机问题 4（2026-10-21）★ 前沿高光（Leading Edge Highlight）—— 替换原三层同心椭圆光场。
+    ///
+    /// 【改动理由（实机判词）】原实现在 Head 处叠了三个径向椭圆（24×8 / 15×6 / 7×4.5），
+    /// 在 12 DIP 厚的条上表现为一个"直径约 48 DIP 的圆形模糊光斑"，大部分溢出轨道外，
+    /// 且以 Head 为中心**对称**展开 —— 既不属于填充条的形态，也不表达方向，
+    /// 用户判词是"孤立的模糊圆形光晕、视觉效果粗糙"。
+    ///
+    /// 【新形态】一条**贴在填充终点**的非对称光带：
+    ///   · 右端精确止于 <c>HeadX</c>，并被**填充胶囊**裁剪 ⇒ 只能存在于已完成区域，低进度自动收窄；
+    ///   · 左端在 <see cref="ImmersiveProgressParameters.HeadEdgeTailLength"/> 内渐隐 ⇒ 方向明确；
+    ///   · 纵向**不越出条厚** ⇒ 不再有"飘在条外的圆斑"；
+    ///   · 分两层（外层 22 DIP 拖尾 + 内芯 9 DIP），亮度峰值内缩，最亮处在材质内部而不是轮廓线上。
+    ///
+    /// 与状态机的关系：本方法只读 <c>anim.HaloStrength</c>（由动画状态按 Running/Paused/... 给定目标值），
+    /// 不自行判断业务阶段 —— Paused/Stopped/Error 时强度→0，光带整体淡出，不做任何"仍在流动"的暗示。
     /// </summary>
     private bool DrawHead(CanvasDrawingSession ds, ImmersiveProgressMetrics m, ImmersiveProgressAnimationState anim,
-        ImmersiveEffectsQuality quality)
+        ImmersiveEffectsQuality quality, CanvasGeometry? capsule)
     {
         var halo = anim.HaloStrength;
         if (halo <= 0.01f || m.ProgressWidth <= 0.5d) return false;
-        if (_haloOuterBrush is null || _haloBloomBrush is null || _haloInnerBrush is null) return false;
+        if (_headEdgeBrush is null || _headEdgeCoreBrush is null) return false;
+        // 没有胶囊几何就不画：光带必须被"已完成区域"约束，宁可不画也不能让它溢出到未完成轨道上。
+        if (capsule is null) return false;
 
-        var centerY = (float)m.CenterY;
         var qualityScale = quality switch
         {
             ImmersiveEffectsQuality.High => 1.0f,
@@ -470,49 +496,55 @@ internal sealed class ImmersiveTransferProgressRenderer : IDisposable
             _ => 0.65f,
         };
 
-        // ★ 执行书 §9.2（2026-10-05 视觉第二轮）★ 三层，中心逐层前移（越靠内越贴近 Head 圆弧）：
-        //   Layer C Cyan Support（最外、最淡、青）→ Layer B Soft Bloom（白青柔光团）
-        //   → Layer A Arc-attached Inner Glow（纯白、最亮、最小、最贴弧）。
-        //   三层都是径向渐变且外缘精确为 0 ⇒ 光学边界模糊、没有可追踪的轮廓线；
-        //   它们**不被胶囊裁剪**（允许极轻 bloom 越出），但形状是椭圆 ⇒ 不会形成矩形块。
+        using var layer = ds.CreateLayer(1f, capsule);
 
-        // Layer C：Cyan Support Glow
-        var cx = (float)(m.HeadX - ImmersiveProgressParameters.HeadHaloCenterBackOffset);
-        var rx = (float)ImmersiveProgressParameters.HeadHaloOuterRadiusX;
-        var ry = (float)ImmersiveProgressParameters.HeadHaloOuterRadiusY;
-        _haloOuterBrush.Center = new Vector2(cx, centerY);
-        _haloOuterBrush.RadiusX = rx;
-        _haloOuterBrush.RadiusY = ry;
-        _haloOuterBrush.Opacity = Math.Clamp(
-            (float)ImmersiveProgressParameters.HeadHaloOuterOpacity * halo * qualityScale, 0f, 1f);
-        ds.FillEllipse(new Vector2(cx, centerY), rx, ry, _haloOuterBrush);
+        DrawHeadEdge(ds, m, _headEdgeBrush,
+            (float)ImmersiveProgressParameters.HeadEdgeTailLength,
+            (float)ImmersiveProgressParameters.HeadEdgeOpacity * halo * qualityScale);
 
-        // Layer B：Soft Outer Bloom（白青柔光团，范围中等）
-        var bx = (float)(m.HeadX - ImmersiveProgressParameters.HeadHaloBloomBackOffset);
-        var brx = (float)ImmersiveProgressParameters.HeadHaloBloomRadiusX;
-        var bry = (float)ImmersiveProgressParameters.HeadHaloBloomRadiusY;
-        _haloBloomBrush.Center = new Vector2(bx, centerY);
-        _haloBloomBrush.RadiusX = brx;
-        _haloBloomBrush.RadiusY = bry;
-        _haloBloomBrush.Opacity = Math.Clamp(
-            (float)ImmersiveProgressParameters.HeadHaloBloomOpacity * halo * qualityScale, 0f, 1f);
-        ds.FillEllipse(new Vector2(bx, centerY), brx, bry, _haloBloomBrush);
+        DrawHeadEdge(ds, m, _headEdgeCoreBrush,
+            (float)ImmersiveProgressParameters.HeadEdgeCoreTailLength,
+            (float)ImmersiveProgressParameters.HeadEdgeCoreOpacity * halo * qualityScale);
 
-        // Layer A：Arc-attached Inner Glow（纯白、最亮、最小、最贴近右端圆弧）
-        var ax = (float)(m.HeadX - ImmersiveProgressParameters.HeadHaloArcBackOffset);
-        var arx = (float)ImmersiveProgressParameters.HeadHaloArcRadiusX;
-        var ary = (float)ImmersiveProgressParameters.HeadHaloArcRadiusY;
-        _haloInnerBrush.Center = new Vector2(ax, centerY);
-        _haloInnerBrush.RadiusX = arx;
-        _haloInnerBrush.RadiusY = ary;
-        _haloInnerBrush.Opacity = Math.Clamp(
-            (float)ImmersiveProgressParameters.HeadHaloArcOpacity * halo * qualityScale, 0f, 1f);
-        ds.FillEllipse(new Vector2(ax, centerY), arx, ary, _haloInnerBrush);
-
-        _haloOuterBrush.Opacity = 1f;
-        _haloBloomBrush.Opacity = 1f;
-        _haloInnerBrush.Opacity = 1f;
         return true;
+    }
+
+    /// <summary>
+    /// 画一条前沿光带：横向渐变（0 → 1 由调用方给定区间）+ 纵向 5 条互不重叠条纹近似高斯。
+    /// 与 <see cref="DrawGaussianBand"/> 同一套"零分配"做法：帧内只写 StartPoint/EndPoint/Opacity，
+    /// 绝不 new Brush、绝不写 Stop。
+    /// </summary>
+    private static void DrawHeadEdge(CanvasDrawingSession ds, ImmersiveProgressMetrics m,
+        CanvasLinearGradientBrush brush, float tailLength, float peakOpacity)
+    {
+        if (peakOpacity <= 0.002f) return;
+
+        var head = (float)m.HeadX;
+        // 峰值内缩：把渐变右端画到 Head 后方一点，最亮处因此落在材质内部而不是轮廓线上。
+        var right = Math.Max(0.5f, head - (float)ImmersiveProgressParameters.HeadEdgePeakInset);
+        var left = Math.Max(0f, right - Math.Max(1f, tailLength));
+        if (right - left < 0.75f) return;
+
+        brush.StartPoint = new Vector2(left, 0f);
+        brush.EndPoint = new Vector2(right, 0f);
+
+        var stripes = ImmersiveProgressParameters.HeadEdgeVerticalStripes;
+        var stripeHeight = (float)m.Thickness / stripes;
+        var sigmaY = Math.Max(0.5f, (float)m.Thickness / 3.4f);
+
+        for (var s = 0; s < stripes; s++)
+        {
+            var yLocal = stripeHeight * (s + 0.5f) - (float)m.Thickness / 2f;
+            var vg = MathF.Exp(-(yLocal * yLocal) / (2f * sigmaY * sigmaY));
+            var alpha = Math.Clamp(peakOpacity * vg, 0f, 1f);
+            if (alpha <= 0.002f) continue;
+
+            brush.Opacity = alpha;
+            ds.FillRectangle(new Windows.Foundation.Rect(left, m.Top + stripeHeight * s,
+                right - left, stripeHeight + 0.6f), brush);
+        }
+
+        brush.Opacity = 1f;
     }
 
     private bool DrawParticles(CanvasDrawingSession ds, ImmersiveProgressMetrics m,
@@ -584,18 +616,16 @@ internal sealed class ImmersiveTransferProgressRenderer : IDisposable
         _fillLightBrush?.Dispose();
         _bandOuterBrush?.Dispose();
         _bandCoreBrush?.Dispose();
-        _haloOuterBrush?.Dispose();
-        _haloBloomBrush?.Dispose();
-        _haloInnerBrush?.Dispose();
+        _headEdgeBrush?.Dispose();
+        _headEdgeCoreBrush?.Dispose();
         DisposeCapsuleGeometry();
         _trackBrush = null;
         _chromaBrush = null;
         _fillLightBrush = null;
         _bandOuterBrush = null;
         _bandCoreBrush = null;
-        _haloOuterBrush = null;
-        _haloBloomBrush = null;
-        _haloInnerBrush = null;
+        _headEdgeBrush = null;
+        _headEdgeCoreBrush = null;
     }
 
     public void Dispose()

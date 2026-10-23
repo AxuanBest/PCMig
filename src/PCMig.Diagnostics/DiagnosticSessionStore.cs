@@ -143,7 +143,27 @@ public sealed class DiagnosticSessionStore
     public string CatalogFilePath { get; }
     public string CleanShutdownMarkerPath { get; }
 
-    public static string DefaultRoot => Path.Combine(
+    /// <summary>
+    /// 诊断会话根的**进程级覆盖**（null = 用 <see cref="DefaultRoot"/>）。
+    ///
+    /// ★ 2026-10-15（Preview.2 隔离整改）★ 为什么是注入而不是直接读预览隔离：
+    /// <c>PCMig.Diagnostics</c> 只引用 <c>PCMig.Diagnostics.Abstractions</c>（契约层），
+    /// **不引用** <c>PCMig.Core</c> —— 两者平级。要让预览数据根生效又不破坏分层，
+    /// 只能由**同时引用两者的宿主**（WinUI / CLI）在启动早期调用 <see cref="UseRoot"/> 注入，
+    /// 而不是让 Diagnostics 反向依赖 Core。
+    /// 未注入时**行为与改动前逐位一致**（仍是 %LocalAppData%\PCMig\Diagnostics）。
+    /// </summary>
+    public static string? RootOverride { get; private set; }
+
+    /// <summary>宿主注入诊断会话根。传 null 清除覆盖（恢复默认）。</summary>
+    public static void UseRoot(string? root)
+        => RootOverride = string.IsNullOrWhiteSpace(root) ? null : root;
+
+    /// <summary>
+    /// 诊断会话根。默认 <c>%LocalAppData%\PCMig\Diagnostics</c>；
+    /// 被宿主注入覆盖时用覆盖值（预览隔离走这条）。
+    /// </summary>
+    public static string DefaultRoot => RootOverride ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PCMig", "Diagnostics");
 
     /// <summary>创建目录结构（可能抛 IOException/UnauthorizedAccess ⇒ 由调用方 fail-open）。</summary>

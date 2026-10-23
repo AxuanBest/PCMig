@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.Foundation;
 using PCMig.Core.Jobs;
+using PCMig.Core.Diagnostics;
 using PCMig.Core.Models;
 using PCMig.WinUI.Presentation;
 using PCMig.WinUI.Presentation.Converters;
@@ -41,6 +42,12 @@ public sealed partial class Step2SelectDataPage : UserControl
 
     /// <summary>用户在某次预检里已确认「扫描不完整仍继续」——同一次点击的重跑用它，避免二次弹窗。</summary>
     private bool _incompleteScanConfirmed;
+
+    /// <summary>
+    /// 「不预检开始迁移」正在进行（准备 + 启动是一段长动作，跨多个 await）。
+    /// 它跨越二次确认对话框与扫描，连点时若不拦，会产生**两条 Job** 往同一目标目录写。
+    /// </summary>
+    private bool _skipPreflightInFlight;
 
     /// <summary>
     /// A.5 取证展开（**只在 PCMIG_STEP2_TREE_QA_EXPAND 环境变量存在时被调用**，生产路径不可达）。
@@ -442,8 +449,13 @@ public sealed partial class Step2SelectDataPage : UserControl
                 : session.StatusMessage);
         }
 
-        // ---- 连接与安全提示卡：只有 SecurityHint 通道的内容进这里（§9 映射）----
-        if (!string.IsNullOrWhiteSpace(session.SecurityHint)) SecurityHintText.Text = session.SecurityHint;
+        // ---- ★ Issue 6（2026-10-14，真机验收）★ 原「连接与安全提示」卡已按用户指示移除：
+        //      它是 SecurityHint 通道在本页的唯一落点，但造成右栏溢出 62.5 DIP（真机 200% DPI），
+        //      导致卡片被 Shell 的页面导航 Footer 覆盖。本页**不再恢复**该卡。
+        //      ★ R2 接手修复 · 缺陷 G（2026-10-17）★ 这条通道此后并非无家可归：
+        //      落点已收到左侧四页共用的提示卡（ShellHintCard 的 HintSecurityText）。
+        //      移卡时漏了重新落点，于是「未提供密码」这类提示有值但用户永远看不到 —— 现在补上了。
+        //      若日后要恢复本页的卡，必须同时重算右栏高度预算（勿直接加回）。----
     }
 
     // ────────────────────────── 目标路径 ──────────────────────────
@@ -1117,6 +1129,168 @@ public sealed partial class Step2SelectDataPage : UserControl
         return _incompleteScanConfirmed;
     }
 
+    /// <summary>
+    /// 跳过预检的二次确认（v0.5.4-preview.3，用户任务令 §三 指定的标题与正文）。
+    /// 默认按钮 = 「取消」：误触 Enter 不启动迁移。只有 Primary（确认开始迁移）才返回 true。
+    /// </summary>
+    private async Task<bool> ConfirmSkipPreflightAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "确认跳过预检",
+            Content = "本次将跳过常规预检。部分源文件可能无法读取，目标路径或权限问题也可能导致文件传输失败或文件遗漏。是否仍要开始迁移？",
+            PrimaryButtonText = "确认开始迁移",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        var r = await dialog.ShowAsync();
+        return r == ContentDialogResult.Primary;
+    }
+
+    /// <summary>
+    /// 「不预检开始迁移」（v0.5.4-preview.3）。
+    /// <para>
+    /// 与「预检并生成计划」的唯一差别是 <c>PrepareAsync(skipPreflight: true)</c>：
+    /// 被跳过的**只有 PreflightChecker 那一段检查**（源可达性 / 凭据 / 共享枚举 / 目标空间 /
+    /// 权限 / 同名冲突）。Job 创建、源扫描、扫描残缺闸门、Planner 生成计划、回执、失败统计、
+    /// Step4 验证全部照旧走同一条引擎——不存在第二条复制路径。
+    /// </para>
+    /// <para>
+    /// 顺序：输入校验 → **二次确认** → 未完成任务检测 → 准备（跳过预检）→ 立即真实启动。
+    /// 确认框点「取消」时**不创建任何 Job**、不改变现有迁移状态（确认发生在任何写盘动作之前）。
+    /// </para>
+    /// </summary>
+    private async void SkipPreflight_Click(object sender, RoutedEventArgs e)
+    {
+        // 防连点：本方法跨二次确认与扫描多个 await，重入会产生两条 Job 往同一目标目录写。
+        if (_skipPreflightInFlight) return;
+        _skipPreflightInFlight = true;
+
+        try
+        {
+            var session = _session;
+            if (session is null)
+            {
+                StateMessageText.Text = "会话尚未就绪：请先在第 1 步完成连接。";
+                return;
+            }
+
+            using var prepareTrace = ActionTrace.Begin(ActionKinds.Prepare, ControlIds.Step2SkipPreflight, "click", "Step2SelectDataPage");
+            prepareTrace.Eligibility(true, "skip-preflight");
+
+            session.TargetRoot = TargetRootBox.Text.Trim();
+            var shares = CollectSelectedShares();
+            var customs = session.Tree.CollectCustomSelections();
+
+            // 缺必要输入 ⇒ 明确告知原因，不静默失败，也不创建 Job。
+            if (shares.Count == 0 && customs.Count == 0)
+            {
+                StateMessageText.Text = "请先在 Step 1 勾选要迁移的共享，或在目录树里勾选要迁移的内容。";
+                prepareTrace.Reject("no-selection");
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(session.TargetRoot))
+            {
+                StateMessageText.Text = "请先填写目标路径（新电脑接收数据的位置）。";
+                prepareTrace.Reject("no-target");
+                return;
+            }
+
+            // ★ 二次确认必须在任何写盘动作之前：取消 ⇒ 什么都不做（无 Job、状态不变）。
+            var confirmed = await ConfirmSkipPreflightAsync();
+            if (!confirmed)
+            {
+                prepareTrace.Reject("user-cancelled");
+                StateMessageText.Text = "已取消：未创建任务，迁移状态未改变。";
+                return;
+            }
+
+            // 同源+同目标已有未完成任务 ⇒ 与「预检并生成计划」同口径询问，
+            // 避免两条任务在目标目录里互相打架（这是**必要保护**，不是预检项，跳过预检不跳它）。
+            var decision = MigrationSessionViewModel.ResumeDecision.CreateNew;
+            var dup = await session.FindUnfinishedForPrepareAsync(session.Host, session.TargetRoot);
+            if (dup is not null)
+            {
+                var resume = await AskResumeAsync(dup);
+                if (resume is null) { prepareTrace.Reject("resume-cancelled"); return; }
+                if (resume == true)
+                {
+                    // 既有任务：载入后不自动启动（它可能缺计划，自动启动会绕过原有语义），交给「恢复任务」。
+                    await session.AdoptExistingJobAsync(dup.JobDir);
+                    PushState();
+                    StateMessageText.Text = $"已载入未完成任务 {dup.JobId}：点「恢复任务」从断点继续（不预检不会重新生成计划）。";
+                    prepareTrace.Complete(DiagnosticOutcome.Succeeded, "adopted-existing");
+                    return;
+                }
+                decision = MigrationSessionViewModel.ResumeDecision.CreateNew;
+            }
+
+            var definition = new JobDefinition
+            {
+                SourceHost = session.Host,
+                SourceUser = string.IsNullOrWhiteSpace(session.Username) ? null : session.Username,
+                TargetRoot = session.TargetRoot,
+                Sources = BuildSources(shares, customs),
+                CustomSelections = customs,
+                CreatedBy = $"{Environment.UserDomainName}\\{Environment.UserName}",
+                // 审计事实：PrepareAsync 会按 skipPreflight 再赋一次，这里写出来是为了让调用点意图自明。
+                PreflightSkipped = true,
+            };
+
+            _incompleteScanConfirmed = false;
+            var ok = await session.PrepareAsync(
+                definition,
+                _passwordProvider?.Invoke(),
+                progress: new Progress<string>(m => StateMessageText.Text = m),
+                ct: default,
+                confirmIncompleteScan: ConfirmIncompleteScanAsync,
+                resumeDecision: decision,
+                skipPreflight: true);
+
+            if (!ok)
+            {
+                // 原因已由 PrepareAsync 写进状态行 / 失败清单（扫描残缺闸门被拦、目标路径无效、扫描异常等）。
+                prepareTrace.Complete(DiagnosticOutcome.Failed, "prepare-rejected");
+                PushState();
+                return;
+            }
+            prepareTrace.Complete(DiagnosticOutcome.Succeeded, "prepare-completed");
+
+            // ★ 计划已生成 ⇒ 立即真实启动迁移，与 Start_Click 完全同一条路径：
+            //   先导航 Step3（进度立刻可见），再 await RunAsync；完成判定只归 Step3→Step4
+            //   （TransferOrchestrator.IsTrustworthyCompletion），这里绝不判"是否完成"。
+            using var startTrace = ActionTrace.Begin(ActionKinds.Start, ControlIds.Step2Start, "click", "Step2SelectDataPage");
+            startTrace.Eligibility(session.CanStart, session.CanStart ? "allowed" : "cannot-start");
+            if (!session.CanStart)
+            {
+                StateMessageText.Text = session.HasPlan
+                    ? "还不能开始迁移：请先指定目标路径。"
+                    : "计划里没有任何对象：不能开始迁移（请在目录树里多勾一些内容后重试）。";
+                startTrace.Reject("cannot-start");
+                return;
+            }
+            startTrace.Started();
+            startTrace.Expect("transfer.v1", "start.external");
+
+            try { _nav?.GoTo(StepKind.Progress, NavigationReasons.TransferStarted); }
+            catch (Exception navEx) { UiFaultGuard.Report("Step2SelectDataPage.SkipPreflight_Click.Navigate", navEx); }
+
+            await session.RunAsync(_passwordProvider?.Invoke(), new Progress<string>(m => StateMessageText.Text = m));
+            startTrace.Confirm("transfer.v1", "start.external");
+            startTrace.Finish(session.LastRunOutcome, "Step2SelectDataPage");
+            PushState();
+        }
+        catch (Exception ex)
+        {
+            UiFaultGuard.Report("Step2SelectDataPage.SkipPreflight_Click", ex, m => StateMessageText.Text = m);
+        }
+        finally
+        {
+            _skipPreflightInFlight = false;
+        }
+    }
+
     // ────────────────────────── 开始 / 暂停 / 停止 / 恢复 ──────────────────────────
     //
     // ★ P0-06(4) ★ 这四个处理器是 `async void`：异常没有调用者能接住，直接落到 XAML
@@ -1142,6 +1316,16 @@ public sealed partial class Step2SelectDataPage : UserControl
         }
         trace.Started();
         trace.Expect("transfer.v1", "start.external");
+        // ★ v0.5.4 Preview.2 真机修复（2026-10-16，用户任务令 §五）★
+        //   "开始迁移"的**第一动作必须是立即进入 Step3**，迁移在后台继续。
+        //   旧实现一直 await 到 RunAsync 返回才由别的机制决定去哪一页 ⇒ 真机上用户点完
+        //   「开始迁移」后仍停在 Step2，进度条与对象状态都看不到，只能自己找左侧导航。
+        //   纪律：①导航只发生一次、且在真正发起迁移之前；
+        //        ②**绝不**在这里判断"是否完成"——完成判定只归 Step3→Step4 的自动推进
+        //          （唯一判据 TransferOrchestrator.IsTrustworthyCompletion，见 MainWindow）；
+        //        ③导航失败绝不影响迁移本身（RunAsync 照常执行）。
+        try { _nav?.GoTo(StepKind.Progress, NavigationReasons.TransferStarted); }
+        catch (Exception navEx) { UiFaultGuard.Report("Step2SelectDataPage.Start_Click.Navigate", navEx); }
         await _session.RunAsync(_passwordProvider?.Invoke(), new Progress<string>(m => StateMessageText.Text = m));
         trace.Confirm("transfer.v1", "start.external");
         // D6.3 §11：真实业务结果 = 既有 JobPhase，不是"RunAsync 返回了"（审计 P1-4）。

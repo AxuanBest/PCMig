@@ -270,10 +270,25 @@ public static class ShellResponsiveLayout
         }
     }
 
+    /// <summary>FormGrid 里那些「不参与重排、但必须有自己一行」的元素（当前只有状态行容器）。</summary>
+    private static readonly string[] Step1StatusRowMembers = { "StatusScroll", "StatusLineText", "StatusAdviceText" };
+
     /// <summary>
     /// §38 核心：Compact 时把「IP / 用户名 / 密码 / 连接按钮」从硬挤的横向排布改为**局部两行**
     /// （用户名、密码各自整行，连接按钮整行右对齐区），仍不够时才允许；Wide / Normal 恢复原样。
     /// 重排只动 Row/Column/对齐与行定义数量，不改任何绑定或事件。
+    /// <para>
+    /// ★ 缺陷修复（2026-10-18，用户实测「Step1 连接时测速开关点不动」）：
+    /// 本方法原先只认识「3 行」的旧结构，Wide/Normal 分支无条件
+    /// <c>while (Count &gt; 3) RemoveAt(...)</c>，会把 XAML 里为状态行声明的第 4 行也删掉；
+    /// 而 <c>StatusScroll</c> / <c>StatusLineText</c> / <c>StatusAdviceText</c> 仍写着 <c>Grid.Row="3"</c>。
+    /// 行不足时 Grid 会把越界行号 **clamp 到最后一行**，于是状态区与 <c>BenchmarkPanel</c>（测速开关）
+    /// 落到同一格、同一纵向区间，且状态区在可视树中后声明、Z 序在上层 —— 实测把测速开关的整块
+    /// 命中区盖住（Benchmark 108–148 / Status 108–156），点开关实际命中状态区，开关永远不翻转。
+    /// Compact 档更糟：测速面板被重排到 Row3，状态行仍写着 Row3，整块被盖。
+    /// 因此这里改为：表单区（IP/用户名/密码/测速/连接按钮）只在前 N 行内重排，
+    /// 状态行**始终独占最后一行**，且保证该行存在。
+    /// </para>
     /// </summary>
     private static void ApplyFormReflow(FrameworkElement page, Grid formGrid, ResponsiveLayout layout)
     {
@@ -288,8 +303,9 @@ public static class ShellResponsiveLayout
 
         if (layout.IsCompact)
         {
-            // 5 行：IP / 用户名 / 密码 / 测速说明 / 连接按钮（后两行是本次重排新增的 Auto 行）。
-            while (formGrid.RowDefinitions.Count < 5) formGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            // 5 个表单行：IP / 用户名 / 密码 / 测速说明 / 连接按钮（后两行是本次重排新增的 Auto 行），
+            // 再 +1 行给状态行 —— 状态行必须独占一行，否则测速开关会被状态区覆盖（缺陷修复：见方法注释）。
+            while (formGrid.RowDefinitions.Count < 6) formGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             if (hostLabel is not null) { Grid.SetRow(hostLabel, 0); Grid.SetColumn(hostLabel, 0); Grid.SetColumnSpan(hostLabel, 1); }
             if (hostInput is not null) { Grid.SetRow(hostInput, 0); Grid.SetColumn(hostInput, 1); Grid.SetColumnSpan(hostInput, 3); }
@@ -310,10 +326,13 @@ public static class ShellResponsiveLayout
                 connect.MinWidth = layout.ConnectButtonMinWidth;           // Compact = 0
             }
 
+            // 状态行独占第 5 行（表单区占 0–4）。
+            PlaceStatusRow(page, formGrid, 5);
+            TrimFormRows(formGrid, required: 6);
             return;
         }
 
-        // Wide / Normal：恢复原 3 行结构与原始站位（先复位站位，再删掉多余行）。
+        // Wide / Normal：恢复原 3 行**表单**结构（0=IP / 1=用户名密码 / 2=测速），状态行固定在第 3 行。
         if (hostLabel is not null) { Grid.SetRow(hostLabel, 0); Grid.SetColumn(hostLabel, 0); Grid.SetColumnSpan(hostLabel, 1); }
         if (hostInput is not null) { Grid.SetRow(hostInput, 0); Grid.SetColumn(hostInput, 1); Grid.SetColumnSpan(hostInput, 3); }
         if (userLabel is not null) { Grid.SetRow(userLabel, 1); Grid.SetColumn(userLabel, 0); Grid.SetColumnSpan(userLabel, 1); }
@@ -336,7 +355,31 @@ public static class ShellResponsiveLayout
             connect.MinWidth = layout.ConnectButtonMinWidth; // Wide = 196（与现状一致）
         }
 
-        while (formGrid.RowDefinitions.Count > 3) formGrid.RowDefinitions.RemoveAt(formGrid.RowDefinitions.Count - 1);
+        // ★ 缺陷修复：先复位站位再删行，但**第 3 行（状态行）必须保留**。
+        //   改前是 while (Count > 3) RemoveAt(...) —— 把 XAML 为状态行声明的第 4 行删掉，
+        //   导致 Grid.Row="3" 的元素被 clamp 到第 2 行、与测速面板重叠并把开关盖死。
+        PlaceStatusRow(page, formGrid, 3);
+        TrimFormRows(formGrid, required: 4);
+    }
+
+    /// <summary>把状态行成员（ScrollViewer 与其内层两个 TextBlock）统一放到 <paramref name="row"/> 行。</summary>
+    private static void PlaceStatusRow(FrameworkElement page, Grid formGrid, int row)
+    {
+        // 行不够就先补（紧凑/宽档各自的目标行数不同，这里只保证 row 存在）。
+        while (formGrid.RowDefinitions.Count <= row) formGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        foreach (var name in Step1StatusRowMembers)
+        {
+            if (page.FindName(name) is not FrameworkElement el) continue;
+            Grid.SetRow(el, row);
+        }
+    }
+
+    /// <summary>把行数裁到刚好 <paramref name="required"/> 行（只删多余的尾部行，绝不删到不足）。</summary>
+    private static void TrimFormRows(Grid formGrid, int required)
+    {
+        while (formGrid.RowDefinitions.Count < required) formGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        while (formGrid.RowDefinitions.Count > required) formGrid.RowDefinitions.RemoveAt(formGrid.RowDefinitions.Count - 1);
     }
 
     /// <summary>
