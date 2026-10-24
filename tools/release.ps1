@@ -88,6 +88,16 @@ function Patch($rel, $pattern, $del) {
   Write-Output ('   已改 ' + $rel)
 }
 
+# ── 路径安全（AUD-03 / v0.5.5）────────────────────────────────────────────
+# 交付目录、工作副本、镜像目录都会被**递归删除**。判断逻辑统一放在
+# tools\release-path-safety.ps1，与 tools\release-path-safety-tests.ps1 共用同一份实现
+# （避免"测的逻辑"与"跑的逻辑"是两套代码）。
+$pathSafetyModule = Join-Path $PSScriptRoot 'release-path-safety.ps1'
+if (-not (Test-Path -LiteralPath $pathSafetyModule)) {
+  Abort ('路径安全模块缺失：' + $pathSafetyModule + '（缺了它不允许发版：Portable 递归清理会失去归属校验）')
+}
+. $pathSafetyModule
+
 # ============================================================================
 # 闸门 −4/−3：发布输入（路径 / 源码完整性 / 工具链 / Git 状态 / 版本形态）
 #
@@ -113,6 +123,32 @@ Write-Output ('   仓库=' + $repo)
 Write-Output ('   交付=' + $delivery)
 Write-Output ('   工作副本=' + $workCopy)
 Write-Output ('   镜像=' + $(if ($mirror) { $mirror } else { '(未配置，跳过镜像)' }))
+
+# ── 闸门 −4b/5：路径归一化与重叠拒绝（AUD-03 / v0.5.5）────────────────────
+# 交付/工作副本/镜像都会被递归清理。任何两者互相包含，清理一个就会打到另一个里面去：
+# 例如 -Delivery 误配成仓库根，Portable 清理就会删掉仓库里的同名目录。
+$repoFull = Get-FullPath $repo
+$deliveryFull = Get-FullPath $delivery
+$workCopyFull = Get-FullPath $workCopy
+$mirrorFull = if ($mirror) { Get-FullPath $mirror } else { '' }
+
+$pathProblems = @(Test-ReleasePathSet -RepoFull $repoFull -DeliveryFull $deliveryFull -WorkCopyFull $workCopyFull -MirrorFull $mirrorFull)
+if ($pathProblems.Count -gt 0) {
+  Abort ('发布路径不安全：' + [char]10 + '  - ' + ($pathProblems -join ([char]10 + '  - ')))
+}
+Write-Output '   [gate] 路径归一化通过，四者互不包含'
+Write-Output ('     仓库=' + $repoFull)
+Write-Output ('     交付=' + $deliveryFull)
+Write-Output ('     工作副本=' + $workCopyFull)
+Write-Output ('     镜像=' + $(if ($mirrorFull) { $mirrorFull } else { '(未配置)' }))
+
+# ── 闸门 −4c/5：Portable 递归清理的归属校验（AUD-03 / v0.5.5）──────────────
+# 放在这里而不是等构建到一半再查：路径配错应该在**几秒内**失败，而不是构建 5 分钟后才中止。
+# 构建期真正删除前还会再跑一次同一函数（防御性重复，口径唯一）。
+$portableFull = Get-FullPath (Join-Path $deliveryFull 'Portable')
+$portableVerdict = Test-PortableCleanupAllowed -DeliveryFull $deliveryFull -PortableFull $portableFull
+if (-not $portableVerdict.Ok) { Abort $portableVerdict.Why }
+Write-Output ('   [gate] Portable 清理前置校验通过（' + $portableVerdict.Detail + '）：' + $portableVerdict.Why)
 
 Log '闸门 -3/5：源码完整性'
 # 发布需要的**输入文件**清单。缺任何一个都不该"跑到一半再说"：
@@ -481,7 +517,7 @@ if (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) {
 if (([IO.File]::ReadAllText($txtPath, [Text.Encoding]::UTF8)) -notmatch [regex]::Escape($Version)) { Abort ('更新日志.txt 里没有 v' + $Version) }
 
 Log 'publish（WinUI 主界面 + CLI，自包含）'
-Remove-Item (Join-Path $repo 'dist\cli'), (Join-Path $repo 'dist\gui'), (Join-Path $repo 'dist\winui'), (Join-Path $repo 'dist\app') -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath @((Join-Path $repo 'dist\cli'), (Join-Path $repo 'dist\gui'), (Join-Path $repo 'dist\winui'), (Join-Path $repo 'dist\app')) -Recurse -Force -ErrorAction SilentlyContinue
 & $dotnetExe publish (Join-Path $repo 'src\PCMig.Cli\PCMig.Cli.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:Version=$Version -p:FileVersion=$NumericVersion -p:InformationalVersion=$Version -o (Join-Path $repo 'dist\cli') 2>&1 | Select-String -Pattern 'error|-> ' | Select-Object -First 6
 # ★ v0.5.0（2026-10-06）★ 主界面换成 WinUI 3。
 #   为什么 WinUI 不能像旧 WPF 那样压成单文件：它是 unpackaged + WindowsAppSDK/Win2D 自包含应用，
@@ -541,7 +577,7 @@ Write-Output ('   运行时版本真值一致（published 阶段）：dist\app �
 
 Log 'Inno Setup 编译'
 $setup = Join-Path $repo ('dist\PCMigSetup-' + $Version + '.exe')
-Remove-Item $setup -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $setup -Force -ErrorAction SilentlyContinue
 & $isccExe (Join-Path $repo 'installer\pcmig.iss') 2>&1 | Select-Object -Last 2
 if (-not (Test-Path $setup)) { Abort '安装包未生成' }
 
@@ -589,32 +625,20 @@ Log '交付 + 逐文件哈希比对'
 New-Item $delivery -ItemType Directory -Force | Out-Null
 # Portable 是发版脚本自己的产物目录：先清空再铺，避免上一版的旧 exe 与新版混在一起。
 # （交付区根目录并列的历史安装包 PCMigSetup-*.exe **不动**，用户要求全量保留。）
-$portable = Join-Path $delivery 'Portable'
-# ★ v0.5.4（2026-10-24）★ Portable 是**递归删除**目标：删之前必须证明它就是发版脚本自己的产物目录。
-#   否则一次参数错配（例如 -Delivery 指到用户资料目录）就会把非 PCMig 的文件一起删掉。
-#   四道前置检查：
-#     ①交付根不得为空，也不得是盘符根；
-#     ②Portable 的绝对路径必须严格等于 <交付根>\Portable；
-#     ③Portable 不得是重解析点 / 链接（对链接做 -Recurse 会打到链接背后去）;
-#     ④若非空，必须含至少一个 PCMig 产物标记，否则视为用户文件，拒绝删除。
-if ([string]::IsNullOrWhiteSpace($delivery)) { Abort '交付目录为空，拒绝执行 Portable 递归清理（可能误删用户文件）' }
-$deliveryFull = [IO.Path]::GetFullPath($delivery).TrimEnd('\')
-if ($deliveryFull -match '^[A-Za-z]:$') { Abort ('交付目录是盘符根 ' + $deliveryFull + '，拒绝执行 Portable 递归清理') }
-$portableExpected = [IO.Path]::GetFullPath((Join-Path $deliveryFull 'Portable')).TrimEnd('\')
-if ([IO.Path]::GetFullPath($portable).TrimEnd('\') -ne $portableExpected) { Abort ('Portable 路径与预期不符，拒绝清理：' + $portable) }
-if (Test-Path $portable) {
-  $portableItem = Get-Item $portable -Force
-  if (($portableItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { Abort ('Portable 是重解析点 / 链接，拒绝递归删除：' + $portable) }
-  if (-not $portableItem.PSIsContainer) { Abort ('Portable 是文件而不是目录，拒绝递归删除：' + $portable) }
-  $portableEntries = @(Get-ChildItem $portable -Force)
-  if ($portableEntries.Count -gt 0) {
-    $portableMarkers = @($portableEntries | Where-Object { @('PCMig.WinUI.exe','pcmig-cli.exe','更新日志.txt','使用说明.txt') -contains $_.Name })
-    if ($portableMarkers.Count -eq 0) { Abort ('Portable 目录里没有任何 PCMig 产物标记，疑似用户文件，拒绝递归删除：' + $portable) }
-  }
-  Write-Output ('   Portable 清理前置检查通过（标记 ' + @($portableEntries | Where-Object { @('PCMig.WinUI.exe','pcmig-cli.exe','更新日志.txt','使用说明.txt') -contains $_.Name }).Count + ' 个）')
-  Remove-Item $portable -Recurse -Force
+$portable = Join-Path $deliveryFull 'Portable'
+$portableFull = Get-FullPath $portable
+# ★ v0.5.5（AUD-03）★ Portable 是**递归删除**目标。v0.5.4 的四道检查里有两条是无效的：
+#   ② 是恒真断言（$portableExpected 与 $portable 都由 $deliveryFull 推出，比较永远成立）；
+#   ④ 只看"有没有 PCMig.WinUI.exe 这类通用文件名"，用户把资料丢进 Portable 仍会被一起删掉。
+#   现在改为**真正会失败的断言** + **可审核的管理清单**，判断逻辑在 release-path-safety.ps1。
+#   闸门 −4c 已经查过一遍；这里是**删除前的最后一次复核**（防御性重复，口径同一函数）。
+$portableVerdict2 = Test-PortableCleanupAllowed -DeliveryFull $deliveryFull -PortableFull $portableFull
+if (-not $portableVerdict2.Ok) { Abort $portableVerdict2.Why }
+Write-Output ('   Portable 删除前复核通过（' + $portableVerdict2.Detail + '）：' + $portableVerdict2.Why)
+if (Test-Path -LiteralPath $portableFull) {
+  Remove-Item -LiteralPath $portableFull -Recurse -Force
 }
-New-Item $portable -ItemType Directory -Force | Out-Null
+New-Item -ItemType Directory -Force -Path $portableFull | Out-Null
 # Portable 与工作副本都收**整棵 app 树**（WinUI 必须与其原生组件同目录才能启动）
 # ★ v0.5.1（2026-10-06）★ 工作副本是**跨版本复用**的目录：上一版（v0.5.0）铺进去的
 #   PCMig-classic.exe 会一直躺在工作副本目录（-WorkCopy / $env:PCMIG_WORKCOPY）里。下面那道"不得含旧 WPF 前端"的门禁如果只看
@@ -622,7 +646,7 @@ New-Item $portable -ItemType Directory -Force | Out-Null
 #   ⇒ 先清掉工作副本里的旧 WPF 残留，再整树铺新的；拷贝之后的门禁才真正校验"本次产出是否干净"。
 foreach ($legacy in @('PCMig-classic.exe', 'PCMig.exe')) {
   $stale = Join-Path $workCopy $legacy
-  if (Test-Path $stale) { Remove-Item $stale -Force; Write-Output ('   已从工作副本移除上一版残留的旧 WPF 前端 ' + $legacy) }
+  if (Test-Path -LiteralPath $stale) { Remove-Item -LiteralPath $stale -Force; Write-Output ('   已从工作副本移除上一版残留的旧 WPF 前端 ' + $legacy) }
 }
 Get-ChildItem $app -Force | ForEach-Object {
   Copy-Item $_.FullName $portable -Recurse -Force
@@ -649,6 +673,10 @@ foreach ($p in $pairs) {
   if ((Get-FileHash $p.Src).Hash -ne (Get-FileHash $p.Dst).Hash) { Abort ('哈希不一致：' + $p.Dst) }
   Write-Output ('   MATCH ' + (Split-Path $p.Dst -Leaf) + '  ' + $p.Dst)
 }
+# ★ v0.5.5（AUD-03）★ 本次铺装完成后立刻写管理清单，作为下一次清理的**归属证据**。
+#   清单落在 <交付根>\Portable.manifest.txt（Portable 的**同级**，不在目录内），
+#   这样它既不会被 Portable 的递归清理删掉，也不会被误当成 Portable 的内容。
+Write-PortableManifest $portableFull
 # 历史安装包一律保留：交付区按「各版本并列存放」使用（用户明确要求），全量存档在 dist\。
 # 此处只列出并列版本，绝不删除。曾因自动清理删掉交付区 4 个历史包，已逐文件 SHA256 校验后恢复。
 Get-ChildItem (Join-Path $delivery 'PCMigSetup-*.exe') | Sort-Object Name | ForEach-Object { Write-Output ('   并列版本 ' + $_.Name) }
