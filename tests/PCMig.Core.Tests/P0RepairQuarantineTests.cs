@@ -15,7 +15,9 @@ namespace PCMig.Core.Tests;
 /// 旧实现是 `File.Delete(dst)` 再让 robocopy 重拷：删掉之后如果源共享断网、用户点了停止、
 /// 目标盘写满、或者文件被别的进程锁住，旧数据就已经**不可恢复地**消失了。
 /// 新实现改为同目录改名隔离：触发 robocopy 重拷的效果与删除等价，但旧副本始终留在磁盘上，
-/// 只有"新副本被确认可信"（目标重新出现且长度等于源长度，小文件再比 SHA256）才丢弃。
+/// 只有"新副本被确认可信"（目标重新出现、长度等于源长度**且**与源 SHA256 一致）才丢弃。
+/// ★ v0.5.5 ★ 长度相等不再是充分证据（/Z 预分配会让中断后的目标长度恰好等于源长度）；
+/// 拿不到内容证据时一律保留旧副本并计入「待确认」，收尾闸门不通过时一个都不丢弃。
 ///
 /// 本文件用**真实文件/真实句柄**证明下列性质，而不是只做字符串检查：
 ///   ① 可信新副本落地 ⇒ 才丢弃旧副本；
@@ -90,7 +92,7 @@ public sealed class P0RepairQuarantineTests : IDisposable
         // 模拟 robocopy 重新拉取成功：目标侧重新出现，且长度等于源长度
         File.Copy(Path.Combine(src, "a.bin"), Path.Combine(dst, "a.bin"));
 
-        var settle = RepairQuarantine.Settle(Ledger, Silent);
+        var settle = RepairQuarantine.Settle(Ledger, Silent, RepairQuarantine.SettleGate.TrustedCompletion());
         Assert.Equal(1, settle.Dropped);
         Assert.Equal(0, settle.Held);
         Assert.False(File.Exists(old), "新副本已被确认可信 ⇒ 旧副本这时才允许丢弃");
@@ -111,7 +113,7 @@ public sealed class P0RepairQuarantineTests : IDisposable
         Assert.Equal(2, purge.Files);
 
         // 源共享断网 / 用户点击停止：目标侧什么都没落地
-        var settle = RepairQuarantine.Settle(Ledger, Silent);
+        var settle = RepairQuarantine.Settle(Ledger, Silent, RepairQuarantine.SettleGate.TrustedCompletion());
         Assert.Equal(0, settle.Dropped);
         Assert.Equal(2, settle.Held);
         Assert.True(settle.HeldBytes > 0);
@@ -141,7 +143,7 @@ public sealed class P0RepairQuarantineTests : IDisposable
         // robocopy 只写了一部分就失败（例如目标盘满）：长度不等于源长度
         File.WriteAllText(Path.Combine(dst, "a.bin"), "PART");
 
-        var settle = RepairQuarantine.Settle(Ledger, Silent);
+        var settle = RepairQuarantine.Settle(Ledger, Silent, RepairQuarantine.SettleGate.TrustedCompletion());
         Assert.Equal(0, settle.Dropped);
         Assert.Equal(1, settle.Held);
         Assert.True(File.Exists(old), "新副本长度不符 ⇒ 旧副本必须留在磁盘上");
@@ -161,7 +163,7 @@ public sealed class P0RepairQuarantineTests : IDisposable
         // 目标侧出现同长度的**其它内容**文件（例如别的东西占了坑 / 写错了源）
         File.WriteAllText(Path.Combine(dst, "a.bin"), "XXX-a.bin");
 
-        var settle = RepairQuarantine.Settle(Ledger, Silent);
+        var settle = RepairQuarantine.Settle(Ledger, Silent, RepairQuarantine.SettleGate.TrustedCompletion());
         Assert.Equal(0, settle.Dropped);
         Assert.Equal(1, settle.Held);
         Assert.NotNull(OldCopy(dst, "a.bin"));

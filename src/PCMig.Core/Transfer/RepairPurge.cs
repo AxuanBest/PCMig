@@ -37,8 +37,11 @@ public static class RepairPurge
     /// ★ D6.1 §16 ★ <see cref="Failed"/>：改名失败原先只写 Debug 日志 ⇒ "修复后仍不一致"变得无法解释，
     /// 这里**只加计数**，隔离决策与业务口径一字未改。
     /// ★ P0-03 ★ <see cref="BlockedNoSpace"/>：空间不足时本轮不隔离（旧数据原样保留），由调用方如实上报。
+    /// ★ v0.5.5 ★ <see cref="BlockedLedgerUnwritable"/>：账本不可写时本轮**完全不隔离**（旧数据原样保留），
+    /// 杜绝"文件已改名、账本却没记上"的不可追踪孤儿。
     /// </summary>
-    public readonly record struct PurgeResult(long Files, long Bytes, long SkippedLarge, long Failed, bool BlockedNoSpace);
+    public readonly record struct PurgeResult(long Files, long Bytes, long SkippedLarge, long Failed,
+        bool BlockedNoSpace, bool BlockedLedgerUnwritable);
 
     /// <summary>用于空间预检的可用字节探测；默认按目标卷的实际可用空间，读不到时返回 <see cref="long.MaxValue"/>（不因探测失败阻断修复）。测试可覆写。</summary>
     internal static Func<string, long> FreeSpaceProbe = AvailableFreeBytes;
@@ -55,9 +58,10 @@ public static class RepairPurge
     }
 
     /// <param name="quarantineLedgerPath">旧副本账本路径（Job 目录下的 quarantine.jsonl）；为 null 时只隔离、不记账。</param>
+    /// <param name="runId">★ v0.5.5 ★ 本次运行标识，写入每条账本记录以便追溯"本次运行 / 历史账本"。</param>
     public static PurgeResult PurgeTargetCopies(
         PlannedObject obj, MigrationOptions opt, MigrationMatrix matrix, ILogger log,
-        string? quarantineLedgerPath = null)
+        string? quarantineLedgerPath = null, string? runId = null)
     {
         var exclDirs = new HashSet<string>(matrix.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
         var exclFileMatch = FilePatternMatcher.Build(
@@ -89,7 +93,7 @@ public static class RepairPurge
             totalOldBytes += oldLen;
         }
 
-        if (candidates.Count == 0) return new PurgeResult(0, 0, skippedLarge, 0, false);
+        if (candidates.Count == 0) return new PurgeResult(0, 0, skippedLarge, 0, false, false);
 
         // ── 2) 空间预检：隔离期间旧副本**不释放**空间，必须确认目标卷放得下"旧副本 + 新副本" ──
         var free = FreeSpaceProbe(obj.TargetPath);
@@ -97,32 +101,66 @@ public static class RepairPurge
         {
             log.Warning("强制覆盖：对象 {Id} 放弃隔离 —— 目标卷可用 {Free}，安全替换需要额外保留 {Need}（旧副本在确认新副本落地前不释放空间）",
                 obj.ObjectId, Format.Bytes(free), Format.Bytes(totalOldBytes));
-            return new PurgeResult(0, 0, skippedLarge, 0, true);
+            return new PurgeResult(0, 0, skippedLarge, 0, true, false);
         }
 
-        // ── 3) 逐个**改名隔离**（不是删除）──
-        var entries = new List<RepairQuarantine.Entry>();
+        // ── 3) 记账前置：账本不可写就**不开始任何改名**（否则改名成功、记账失败 = 不可追踪孤儿）──
+        if (quarantineLedgerPath != null && !RepairQuarantine.EnsureLedgerWritable(quarantineLedgerPath, log))
+            return new PurgeResult(0, 0, skippedLarge, 0, false, true);
+
+        // ── 4) 逐个「改名隔离 + 立即记账」：改名成功但记账失败必须回滚 ──
         var now = DateTime.UtcNow;
         foreach (var c in candidates)
         {
-            if (RepairQuarantine.TryQuarantine(c.Dst, c.Src, c.SrcLen, c.OldLen, obj.ObjectId, now, log, out var entry))
-            {
-                files++;
-                bytes += c.OldLen;
-                entries.Add(entry);
-            }
-            else
+            if (!RepairQuarantine.TryQuarantine(c.Dst, c.Src, c.SrcLen, c.OldLen, obj.ObjectId, now, log, out var entry))
             {
                 // 改不掉（被占用/权限等）不致命：该文件仍由后续 robocopy 按大小/时间差异决定是否重拷，
                 // 且**旧数据原样留在原地**——但必须计数（否则"隔离失败"在诊断里完全不可见）。
                 failed++;
+                continue;
             }
+
+            entry = entry with { RunId = runId };
+
+            if (quarantineLedgerPath != null && !RepairQuarantine.Append(quarantineLedgerPath, new[] { entry }, log))
+            {
+                // 记账失败 ⇒ 立刻把旧副本改回原位，绝不留"已移动但无记录"的文件
+                if (!TryRollbackQuarantine(entry, log))
+                {
+                    log.Error("强制覆盖：记账失败且回滚失败，旧副本仍在 {Q}（原名 {T}），需人工恢复",
+                        entry.QuarantinePath, entry.TargetPath);
+                }
+                failed++;
+                continue;
+            }
+
+            files++;
+            bytes += c.OldLen;
         }
 
-        if (entries.Count > 0 && quarantineLedgerPath != null)
-            RepairQuarantine.Append(quarantineLedgerPath, entries, log);
+        return new PurgeResult(files, bytes, skippedLarge, failed, false, false);
+    }
 
-        return new PurgeResult(files, bytes, skippedLarge, failed, false);
+    /// <summary>★ v0.5.5 ★ 记账失败后把旧副本改回原路径。目标已被占用时**不覆盖**，只报告。</summary>
+    private static bool TryRollbackQuarantine(RepairQuarantine.Entry entry, ILogger log)
+    {
+        try
+        {
+            if (File.Exists(entry.TargetPath))
+            {
+                log.Error("强制覆盖：记账失败后无法回滚 —— 目标路径已被占用 {Path}，旧副本保留在 {Q}",
+                    entry.TargetPath, entry.QuarantinePath);
+                return false;
+            }
+            File.Move(entry.QuarantinePath, entry.TargetPath);
+            log.Information("强制覆盖：记账失败，已把旧副本改回原路径 {Path}", entry.TargetPath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            log.Error(ex, "强制覆盖：记账失败后回滚改名也失败 {Q}", entry.QuarantinePath);
+            return false;
+        }
     }
 
     /// <summary>枚举"本次传输会拷贝"的源文件（相对路径 + 字节数），与 robocopy 的排除口径一致。</summary>

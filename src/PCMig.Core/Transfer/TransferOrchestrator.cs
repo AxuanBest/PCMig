@@ -85,6 +85,12 @@ public sealed class TransferOrchestrator
     private readonly ILogger _log;
     private readonly ITransferWorker _runner;
 
+    /// <summary>
+    /// ★ v0.5.5 ★ 本次运行的隔离账本标识。写入每条 quarantine.jsonl 记录，用于区分"本次运行的隔离"
+    /// 与"历史账本条目"并可追溯；null 表示尚未进入传输（此时不会产生任何隔离）。
+    /// </summary>
+    private string? _quarantineRunId;
+
     /// <summary>robocopy 行级输出转发（UI 报错区用）。</summary>
     public event Action<string>? OutputLine;
 
@@ -592,6 +598,10 @@ public sealed class TransferOrchestrator
         var job = _ctx.Definition;
         var state = _ctx.LoadStateOrNew();
 
+        // ★ v0.5.5 ★ 本次运行的隔离账本标识（每次 RunAsync 调用 = 一次运行；续传是新的运行标识，
+        //   但旧条目同样必须拿到内容证据才允许清理，见 RepairQuarantine.Settle）。
+        _quarantineRunId = $"{DateTime.UtcNow:yyyyMMddTHHmmss}-{Guid.NewGuid().ToString("N")[..8]}";
+
         // ---- ★ 缺陷 B12b4（数据完整性 / 假成功）★ 源身份守卫：开跑前校验，早于任何状态写入与复制 ----
         // 计划里固化了每个对象源根的文件系统身份指纹（卷序列号 + 目录文件 ID）。
         // 同名共享换底（共享名不变、背后目录/磁盘被换）会让指纹变化 ⇒ 立刻拒绝继续传输。
@@ -925,16 +935,23 @@ public sealed class TransferOrchestrator
         }
         TargetRootGuard.EnsureVisible(job.TargetRoot, _log);   // 收尾再兜一次，杜绝"数据在但看不见"
 
-        // ★ P0-03 ★ 强制覆盖旧副本收尾：**只有**"新副本被确认可信"（目标重新出现且长度等于源长度，
-        //   小文件再比内容哈希）才丢弃旧副本；判定不了就保留并如实报告。放在收尾而不是每个对象之后：
+        // ★ P0-03 ★ 强制覆盖旧副本收尾：**只有**"新副本被确认可信"（目标重新出现、长度等于源长度
+        //   **且**与源文件 SHA256 一致）才丢弃旧副本；判定不了就保留并如实报告。放在收尾而不是每个对象之后：
         //   一次运行可能隔离同一对象的多个文件，统一判定更省 IO；且崩溃/断电时账本仍在 Job 目录里，
         //   下次运行或恢复通道（RepairQuarantine.RestoreHeld）仍可处理。
+        // ★ v0.5.5 ★ 收尾闸门：本次运行**未完整成功**（失败/暂停/计划为空/有失败对象/校验期确证缺失）时，
+        //   Settle 一律不丢弃任何旧副本——复制中断、失败、取消、断链的情况下旧副本必须全部保留。
         try
         {
-            var settle = RepairQuarantine.Settle(RepairQuarantine.LedgerPath(_ctx.JobDir), _log);
-            if (settle.Dropped > 0 || settle.Held > 0 || settle.Missing > 0)
-                _log.Information("强制覆盖旧副本收尾: 丢弃 {Dropped} 个（新副本可信）、保留 {Held} 个（{Bytes}）、账本中已找不到 {Missing}",
-                    settle.Dropped, settle.Held, Format.Bytes(settle.HeldBytes), settle.Missing);
+            var gate = new RepairQuarantine.SettleGate(
+                CompletionTrustworthy: state.Phase == JobPhase.Completed,
+                FailedObjects: state.FailedObjects,
+                MissingObjects: state.MissingObjects,
+                RunId: _quarantineRunId);
+            var settle = RepairQuarantine.Settle(RepairQuarantine.LedgerPath(_ctx.JobDir), _log, gate);
+            if (settle.Dropped > 0 || settle.Held > 0 || settle.Missing > 0 || settle.PendingUnverified > 0)
+                _log.Information("强制覆盖旧副本收尾: 丢弃 {Dropped} 个（新副本可信）、保留 {Held} 个（{Bytes}，其中待确认 {Pending}）、账本中已找不到 {Missing}",
+                    settle.Dropped, settle.Held, Format.Bytes(settle.HeldBytes), settle.PendingUnverified, settle.Missing);
         }
         catch (Exception ex)
         {
@@ -1096,7 +1113,7 @@ public sealed class TransferOrchestrator
         else if (ForceOverwriteFromSource)
         {
             var purge = RepairPurge.PurgeTargetCopies(
-                obj, job.Options, _matrix, _log, RepairQuarantine.LedgerPath(_ctx.JobDir));
+                obj, job.Options, _matrix, _log, RepairQuarantine.LedgerPath(_ctx.JobDir), _quarantineRunId);
 
             if (purge.BlockedNoSpace)
             {
