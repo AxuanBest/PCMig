@@ -4,8 +4,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>0.5.4</Version>
-    <InformationalVersion>0.5.4</InformationalVersion>
+    <Version>0.5.5</Version>
+    <InformationalVersion>0.5.5</InformationalVersion>
     <Description>PCMig 核心引擎：Preflight / Scan / Plan / Transfer / Verify / Report</Description>
   </PropertyGroup>
 

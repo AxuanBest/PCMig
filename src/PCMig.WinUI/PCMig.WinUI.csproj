@@ -22,8 +22,8 @@
          原因：release.ps1（L114-115 / L132-135）会读这两个节点做正式发版自查；若这里常驻
          Preview 号，正式版的版本身份会被带偏。Preview 构建脚本见
          tools\preview-build.ps1（隔离参数，不写仓库默认配置）。 -->
-    <Version>0.5.4</Version>
-    <InformationalVersion>0.5.4</InformationalVersion>
+    <Version>0.5.5</Version>
+    <InformationalVersion>0.5.5</InformationalVersion>
     <!-- ★ v0.5.0 修复 ★ 应用图标：WinUI 工程此前**没有** <ApplicationIcon>，
          编译出的 exe 不带图标资源 ⇒ 任务栏 / 资源管理器显示 Windows 的"找不到图标"默认占位。
          图标与经典桌面工程**同源**（从其 Assets 复制到本工程 Assets\，不改动源文件）。

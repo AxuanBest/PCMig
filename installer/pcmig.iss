@@ -12,7 +12,7 @@
 #endif
 
 #define MyAppName "PCMig 迁移工具"
-#define MyAppVersion "0.5.4"
+#define MyAppVersion "0.5.5"
 #define MyAuthor "郑子轩（Axuanbest）"
 #define MyCopyright "郑子轩 个人制作"
 
@@ -40,7 +40,7 @@ SetupLogging=yes
 #endif
 SetupIconFile=pcmig.ico
 UninstallDisplayIcon={app}\PCMig.WinUI.exe
-VersionInfoVersion=0.5.4.0
+VersionInfoVersion=0.5.5.0
 VersionInfoCompany=Axuanbest
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
